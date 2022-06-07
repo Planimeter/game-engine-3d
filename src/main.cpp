@@ -28,8 +28,20 @@ int main(int argc, char* argv[]) {
     }
 
     // The window is open: could enter program loop here (see SDL_PollEvent())
+    bool game_is_still_running = true;
+    while (game_is_still_running) {
+        SDL_Event event;
+        while (SDL_PollEvent(&event)) {  // poll until all events are handled!
+            // decide what to do with this event.
+            if (event.type == SDL_QUIT || event.type == SDL_APP_TERMINATING) {
+                game_is_still_running = false;
+            }
+        }
 
-    SDL_Delay(3000);  // Pause execution for 3000 milliseconds, for example
+        // update game state, draw the current frame
+    }
+
+    // SDL_Delay(3000);  // Pause execution for 3000 milliseconds, for example
 
     // Close and destroy the window
     SDL_DestroyWindow(window);
