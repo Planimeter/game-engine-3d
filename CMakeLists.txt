@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.10)
 project(game)
 
 # add the executable
-add_executable(game src/main.cpp)
+add_executable(game WIN32 src/main.cpp)
 
 # add the SDL2 library
 # add_subdirectory(lib/SDL2-2.0.22)
