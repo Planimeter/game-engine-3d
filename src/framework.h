@@ -3,11 +3,13 @@
 #ifndef FRAMEWORK_H
 #define FRAMEWORK_H
 
+#include "SDL.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-void framework_init(const char *argv0);
+SDL_Window *framework_init(const char *argv0);
 void framework_load(int argc, char *argv[]);
 void framework_quit();
 void framework_lowmemory();
