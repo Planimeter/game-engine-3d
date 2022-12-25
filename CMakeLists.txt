@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 98)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # add the executable
-add_executable(game src/main.cpp)
+add_executable(game src/framework.c src/main.cpp)
 
 # add the SDL2 library
 # add_subdirectory(lib/SDL2-2.26.1)
