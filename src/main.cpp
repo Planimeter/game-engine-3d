@@ -1,3 +1,5 @@
+/* Copyright Planimeter. All Rights Reserved. */
+
 // Example program:
 // Using SDL2 to create an application window
 
