@@ -1,6 +1,9 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-void framework_init() {
+#include "filesystem.h"
+
+void framework_init(const char *argv0) {
+    filesystem_init(argv0);
 }
 
 void framework_load(int argc, char *argv[]) {

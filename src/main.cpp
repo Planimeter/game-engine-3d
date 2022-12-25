@@ -3,10 +3,12 @@
 // Example program:
 // Using SDL2 to create an application window
 
+#include "framework.h"
 #include "SDL.h"
 #include <stdio.h>
 
 int main(int argc, char* argv[]) {
+    framework_init(argv[0]);
 
     SDL_Window *window;                    // Declare a pointer
 
