@@ -3,6 +3,10 @@
 #ifndef FRAMEWORK_H
 #define FRAMEWORK_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void framework_init();
 void framework_load(int argc, char *argv[]);
 void framework_quit();
@@ -25,5 +29,9 @@ void framework_mousereleased(int x, int y, const char *button, int istouch);
 void framework_wheelmoved(int x, int y);
 void framework_update(double dt);
 void framework_draw();
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* FRAMEWORK_H */
