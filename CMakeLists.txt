@@ -10,6 +10,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # add the executable
 add_executable(game src/framework.c src/main.cpp)
 
+# add the PhysicsFS library
+add_subdirectory(lib/physfs-release-3.2.0)
+
 # add the SDL2 library
 # add_subdirectory(lib/SDL2-2.26.1)
 
