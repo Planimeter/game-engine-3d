@@ -9,10 +9,10 @@ int main(int argc, char *argv[]) {
     framework_load(argc, argv);
 
     while (event_poll()) {
-        double dt = 0.0;
+        uint64_t dt = timer_step();
         framework_update(dt);
         framework_draw();
-        timer_sleep(0.001);
+        timer_sleep(1);
     }
 
     return 0;

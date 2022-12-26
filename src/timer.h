@@ -7,7 +7,8 @@
 extern "C" {
 #endif
 
-void timer_sleep(double seconds);
+uint64_t timer_step();
+void     timer_sleep(uint32_t ms);
 
 #ifdef __cplusplus
 }

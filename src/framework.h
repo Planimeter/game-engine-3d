@@ -29,7 +29,7 @@ void framework_mousemoved(int x, int y, int dx, int dy, int istouch);
 void framework_mousepressed(int x, int y, const char *button, int istouch);
 void framework_mousereleased(int x, int y, const char *button, int istouch);
 void framework_wheelmoved(int x, int y);
-void framework_update(double dt);
+void framework_update(uint64_t dt);
 void framework_draw();
 
 #ifdef __cplusplus
