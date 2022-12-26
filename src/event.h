@@ -7,7 +7,7 @@
 extern "C" {
 #endif
 
-void event_poll();
+int event_poll();
 
 #ifdef __cplusplus
 }
