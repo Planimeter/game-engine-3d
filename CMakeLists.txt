@@ -8,7 +8,11 @@ set(CMAKE_CXX_STANDARD 98)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 # add the executable
-add_executable(game src/filesystem.c src/framework.c src/main.cpp)
+add_executable(game
+               src/event.c
+               src/filesystem.c
+               src/framework.c
+               src/main.cpp)
 
 # add the PhysicsFS library
 add_subdirectory(lib/physfs-release-3.2.0)
