@@ -11,7 +11,7 @@ extern "C" {
 
 void framework_init(const char *argv0);
 void framework_load(int argc, char *argv[]);
-void framework_quit();
+int  framework_quit();
 void framework_lowmemory();
 void framework_visible(int visible);
 void framework_move(int x, int y);

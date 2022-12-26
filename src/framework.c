@@ -43,7 +43,8 @@ void framework_init(const char *argv0) {
 void framework_load(int argc, char *argv[]) {
 }
 
-void framework_quit() {
+int framework_quit() {
+    return 1;
 }
 
 void framework_lowmemory() {
