@@ -3,7 +3,7 @@
 #include "framework.h"
 #include "event.h"
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
     framework_init(argv[0]);
     framework_load(argc, argv);
 
