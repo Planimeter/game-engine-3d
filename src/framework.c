@@ -3,11 +3,16 @@
 #include "filesystem.h"
 #include "SDL.h"
 #include <stdio.h>
+#include <stdlib.h>
 
-SDL_Window *framework_init(const char *argv0) {
+SDL_Window *window;                        // Declare a pointer
+
+static void atexit_SDL_DestroyWindow(void) {
+    SDL_DestroyWindow(window);
+}
+
+void framework_init(const char *argv0) {
     filesystem_init(argv0);
-
-    SDL_Window *window;                    // Declare a pointer
 
     SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL2
 
@@ -25,10 +30,14 @@ SDL_Window *framework_init(const char *argv0) {
     if (window == NULL) {
         // In the case that the window could not be made...
         printf("Could not create window: %s\n", SDL_GetError());
-        return NULL;
+        return;
     }
 
-    return window;
+    // Close and destroy the window
+    atexit(atexit_SDL_DestroyWindow);
+
+    // Clean up
+    atexit(SDL_Quit);
 }
 
 void framework_load(int argc, char *argv[]) {

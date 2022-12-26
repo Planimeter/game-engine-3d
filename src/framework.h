@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-SDL_Window *framework_init(const char *argv0);
+void framework_init(const char *argv0);
 void framework_load(int argc, char *argv[]);
 void framework_quit();
 void framework_lowmemory();

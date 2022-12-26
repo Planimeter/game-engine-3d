@@ -7,7 +7,8 @@
 #include "SDL.h"
 
 int main(int argc, char* argv[]) {
-    SDL_Window *window = framework_init(argv[0]);
+    framework_init(argv[0]);
+    framework_load(argc, argv);
 
     // The window is open: could enter program loop here (see SDL_PollEvent())
     bool game_is_still_running = true;
@@ -23,12 +24,5 @@ int main(int argc, char* argv[]) {
         // update game state, draw the current frame
     }
 
-    // SDL_Delay(3000);  // Pause execution for 3000 milliseconds, for example
-
-    // Close and destroy the window
-    SDL_DestroyWindow(window);
-
-    // Clean up
-    SDL_Quit();
     return 0;
 }
