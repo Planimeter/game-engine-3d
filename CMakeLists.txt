@@ -3,16 +3,6 @@ cmake_minimum_required(VERSION 3.21)
 # set the project name
 project(game)
 
-# specify the C++ standard
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD 98)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# specify the C standard
-set(CMAKE_C_EXTENSIONS OFF)
-set(CMAKE_C_STANDARD 90)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-
 # add the executable
 add_executable(game
                src/event.c
@@ -20,6 +10,16 @@ add_executable(game
                src/framework.c
                src/main.c
                src/timer.c)
+
+# specify the C++ standard
+set_property(TARGET game PROPERTY CXX_EXTENSIONS OFF)
+set_property(TARGET game PROPERTY CXX_STANDARD 98)
+set_property(TARGET game PROPERTY CXX_STANDARD_REQUIRED ON)
+
+# specify the C standard
+set_property(TARGET game PROPERTY C_EXTENSIONS OFF)
+set_property(TARGET game PROPERTY C_STANDARD 90)
+set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 
 # add the PhysicsFS library
 add_subdirectory(lib/physfs-release-3.2.0)
