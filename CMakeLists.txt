@@ -12,7 +12,7 @@ add_executable(game
                src/event.c
                src/filesystem.c
                src/framework.c
-               src/main.cpp
+               src/main.c
                src/timer.c)
 
 # add the PhysicsFS library
