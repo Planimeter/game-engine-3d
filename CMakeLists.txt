@@ -23,16 +23,16 @@ add_executable(game
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
-# add_subdirectory(lib/SDL2-2.26.1)
+add_subdirectory(lib/SDL2-2.26.1)
 
 target_link_libraries(game PUBLIC
                      physfs-static
                      )
 target_link_libraries(game PUBLIC
-                     "${PROJECT_SOURCE_DIR}/lib/SDL2-2.26.1/lib/x64/SDL2.lib"
+                     SDL2-static
                      )
 target_link_libraries(game PUBLIC
-                     "${PROJECT_SOURCE_DIR}/lib/SDL2-2.26.1/lib/x64/SDL2main.lib"
+                     SDL2main
                      )
 
 # add the binary tree to the search path for include files
@@ -40,5 +40,6 @@ target_link_libraries(game PUBLIC
 target_include_directories(game PUBLIC
                           "${PROJECT_BINARY_DIR}"
                           physfs-static
-                          "${PROJECT_SOURCE_DIR}/lib/SDL2-2.26.1/include"
+                          SDL2-static
+                          SDL2main
                           )
