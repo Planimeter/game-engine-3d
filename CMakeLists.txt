@@ -7,6 +7,10 @@ project(game)
 set(CMAKE_CXX_STANDARD 98)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+# specify the C standard
+set(CMAKE_C_STANDARD 90)
+set(CMAKE_C_STANDARD_REQUIRED True)
+
 # add the executable
 add_executable(game
                src/event.c
