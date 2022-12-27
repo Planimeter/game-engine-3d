@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
 # set the project name
 project(game)
@@ -43,3 +43,8 @@ target_include_directories(game PUBLIC
                           SDL2
                           SDL2main
                           )
+
+add_custom_command(TARGET game POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:game> $<TARGET_FILE_DIR:game>
+  COMMAND_EXPAND_LISTS
+)
