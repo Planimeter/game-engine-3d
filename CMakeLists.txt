@@ -44,7 +44,9 @@ target_include_directories(game PUBLIC
                           SDL2main
                           )
 
+if(WIN32)
 add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:game> $<TARGET_FILE_DIR:game>
   COMMAND_EXPAND_LISTS
 )
+endif()
