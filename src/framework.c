@@ -5,7 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-SDL_Window *window;                        // Declare a pointer
+SDL_Window *window;                        /* Declare a pointer */
 
 static void atexit_SDL_DestroyWindow(void) {
     SDL_DestroyWindow(window);
@@ -14,29 +14,29 @@ static void atexit_SDL_DestroyWindow(void) {
 void framework_init(const char *argv0) {
     filesystem_init(argv0);
 
-    SDL_Init(SDL_INIT_VIDEO);              // Initialize SDL2
+    SDL_Init(SDL_INIT_VIDEO);              /* Initialize SDL2 */
 
-    // Create an application window with the following settings:
+    /* Create an application window with the following settings: */
     window = SDL_CreateWindow(
-        "An SDL2 window",                  // window title
-        SDL_WINDOWPOS_UNDEFINED,           // initial x position
-        SDL_WINDOWPOS_UNDEFINED,           // initial y position
-        640,                               // width, in pixels
-        480,                               // height, in pixels
-        SDL_WINDOW_OPENGL                  // flags - see below
+        "An SDL2 window",                  /* window title */
+        SDL_WINDOWPOS_UNDEFINED,           /* initial x position */
+        SDL_WINDOWPOS_UNDEFINED,           /* initial y position */
+        640,                               /* width, in pixels */
+        480,                               /* height, in pixels */
+        SDL_WINDOW_OPENGL                  /* flags - see below */
     );
 
-    // Check that the window was successfully created
+    /* Check that the window was successfully created */
     if (window == NULL) {
-        // In the case that the window could not be made...
+        /* In the case that the window could not be made... */
         printf("Could not create window: %s\n", SDL_GetError());
         return;
     }
 
-    // Close and destroy the window
+    /* Close and destroy the window */
     atexit(atexit_SDL_DestroyWindow);
 
-    // Clean up
+    /* Clean up */
     atexit(SDL_Quit);
 }
 
