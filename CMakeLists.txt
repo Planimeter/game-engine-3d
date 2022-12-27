@@ -26,10 +26,10 @@ add_subdirectory(lib/physfs-release-3.2.0)
 add_subdirectory(lib/SDL2-2.26.1)
 
 target_link_libraries(game PUBLIC
-                     physfs-static
+                     physfs
                      )
 target_link_libraries(game PUBLIC
-                     SDL2-static
+                     SDL2
                      )
 target_link_libraries(game PUBLIC
                      SDL2main
@@ -39,7 +39,7 @@ target_link_libraries(game PUBLIC
 # so that we will find TutorialConfig.h
 target_include_directories(game PUBLIC
                           "${PROJECT_BINARY_DIR}"
-                          physfs-static
-                          SDL2-static
+                          physfs
+                          SDL2
                           SDL2main
                           )
