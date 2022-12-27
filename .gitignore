@@ -442,3 +442,4 @@ FodyWeavers.xsd
 *.vcxproj
 *.vcxproj.filters
 *.sln
+build/*
