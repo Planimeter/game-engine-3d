@@ -8,6 +8,7 @@ add_executable(game
                src/event.c
                src/filesystem.c
                src/framework.c
+               src/graphics_vulkan.c
                src/main.c
                src/timer.c)
 
