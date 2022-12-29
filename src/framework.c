@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "filesystem.h"
+#include "graphics.h"
 #include "SDL.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,6 +33,8 @@ void framework_init(const char *argv0) {
         printf("Could not create window: %s\n", SDL_GetError());
         return;
     }
+
+    graphics_init();
 
     /* Close and destroy the window */
     atexit(atexit_SDL_DestroyWindow);

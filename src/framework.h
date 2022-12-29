@@ -9,6 +9,8 @@
 extern "C" {
 #endif
 
+extern SDL_Window *window;
+
 void framework_init(const char *argv0);
 void framework_load(int argc, char *argv[]);
 int  framework_quit();
