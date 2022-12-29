@@ -23,7 +23,7 @@ void framework_init(const char *argv0) {
         SDL_WINDOWPOS_UNDEFINED,           /* initial y position */
         640,                               /* width, in pixels   */
         480,                               /* height, in pixels  */
-        SDL_WINDOW_OPENGL                  /* flags - see below  */
+        SDL_WINDOW_VULKAN                  /* flags - see below  */
     );
 
     /* Check that the window was successfully created */
