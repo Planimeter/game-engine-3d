@@ -47,9 +47,26 @@ static void graphics_createinstance()
     free(names);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-physical-device-enumeration */
+static void graphics_enumeratephysicaldevices()
+{
+    PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
+    uint32_t physicalDeviceCount;
+    VkPhysicalDevice *physicalDevices;
+
+    vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices");
+    vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
+    physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
+    vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
+
+    free(physicalDevices);
+}
+
 void graphics_init()
 {
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
     graphics_getcommandfunctionpointers();
     graphics_createinstance();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
+    graphics_enumeratephysicaldevices();
 }
