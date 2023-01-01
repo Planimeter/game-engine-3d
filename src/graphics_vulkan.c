@@ -17,6 +17,9 @@ static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 /* 4.2. Instances */
 static VkInstance instance;
 
+/* 5. Devices and Queues */
+static VkPhysicalDevice *physicalDevices;
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
@@ -52,14 +55,25 @@ static void graphics_enumeratephysicaldevices()
 {
     PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
     uint32_t physicalDeviceCount;
-    VkPhysicalDevice *physicalDevices;
 
     vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices");
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
     physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 
-    free(physicalDevices);
+    /* free(physicalDevices); */
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
+static void graphics_createdevice()
+{
+    VkDevice device;
+    PFN_vkCreateDevice vkCreateDevice;
+    VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
+    vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(instance, "vkCreateDevice");
+    vkCreateDevice(physicalDevices[0], &deviceCreateInfo, NULL, &device);
 }
 
 void graphics_init()
@@ -69,4 +83,5 @@ void graphics_init()
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
+    graphics_createdevice();
 }
