@@ -13,12 +13,16 @@
 
 /* 4.1. Command Function Pointers */
 static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+static PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
 
 /* 4.2. Instances */
 static VkInstance instance;
 
 /* 5. Devices and Queues */
 static VkPhysicalDevice *physicalDevices;
+
+/* 5.2.1. Device Creation */
+static VkDevice device;
 
 /* 5.3.2. Queue Creation */
 static VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
@@ -70,7 +74,6 @@ static void graphics_enumeratephysicaldevices()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
 static void graphics_createdevice()
 {
-    VkDevice device;
     PFN_vkCreateDevice vkCreateDevice;
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
 
@@ -92,6 +95,17 @@ static void graphics_createqueue()
     queueCreateInfo.pQueuePriorities = &queuePriority;
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
+static void graphics_getqueue()
+{
+    VkQueue queue;
+    PFN_vkGetDeviceQueue vkGetDeviceQueue;
+
+    vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr");
+    vkGetDeviceQueue = (PFN_vkGetDeviceQueue)vkGetDeviceProcAddr(device, "vkGetDeviceQueue");
+    vkGetDeviceQueue(device, 0, 0, &queue);
+}
+
 void graphics_init()
 {
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
@@ -101,4 +115,5 @@ void graphics_init()
     graphics_enumeratephysicaldevices();
     graphics_createqueue();
     graphics_createdevice();
+    graphics_getqueue();
 }
