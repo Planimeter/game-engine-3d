@@ -106,6 +106,14 @@ static void graphics_getqueue()
     vkGetDeviceQueue(device, 0, 0, &queue);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
+static void graphics_createsurface()
+{
+    VkSurfaceKHR surface;
+
+    SDL_Vulkan_CreateSurface(window, instance, &surface);
+}
+
 void graphics_init()
 {
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
@@ -116,4 +124,6 @@ void graphics_init()
     graphics_createqueue();
     graphics_createdevice();
     graphics_getqueue();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
+    graphics_createsurface();
 }
