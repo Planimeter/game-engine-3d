@@ -7,7 +7,7 @@
 #include <vulkan/vulkan.h>
 #else
 /* SDL includes a copy for building on systems without the Vulkan SDK */
-#include "../lib/SDL2-2.26.1/src/video/khronos/vulkan/vulkan.h"
+#include "../lib/SDL2-2.26.2/src/video/khronos/vulkan/vulkan.h"
 #endif
 #include "SDL_vulkan.h"
 

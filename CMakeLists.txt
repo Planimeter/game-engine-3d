@@ -26,7 +26,7 @@ set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
-add_subdirectory(lib/SDL2-2.26.1)
+add_subdirectory(lib/SDL2-2.26.2)
 
 target_link_libraries(game PUBLIC physfs)
 target_link_libraries(game PUBLIC SDL2)
