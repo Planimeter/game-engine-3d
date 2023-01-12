@@ -111,10 +111,15 @@ static void graphics_allocatecommandbuffer()
 {
     VkCommandBuffer commandBuffer;
     PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+    VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandBufferAllocateInfo */
+    allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocateInfo.commandBufferCount = 1;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkAllocateCommandBuffers */
     vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)vkGetDeviceProcAddr(device, "vkAllocateCommandBuffers");
-    /* vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer); */
+    vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
