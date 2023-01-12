@@ -27,6 +27,9 @@ static VkDevice device;
 /* 5.3.2. Queue Creation */
 static VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
 
+/* 6.2. Command Pools */
+static VkCommandPool commandPool;
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
@@ -114,12 +117,27 @@ static void graphics_allocatecommandbuffer()
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandBufferAllocateInfo */
+    allocateInfo.commandPool        = commandPool;
     allocateInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocateInfo.commandBufferCount = 1;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkAllocateCommandBuffers */
     vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)vkGetDeviceProcAddr(device, "vkAllocateCommandBuffers");
     vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-pools */
+static void graphics_createcommandpool()
+{
+    PFN_vkCreateCommandPool vkCreateCommandPool;
+    VkCommandPoolCreateInfo commandPoolCreateInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
+    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkCreateCommandPool */
+    vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetDeviceProcAddr(device, "vkCreateCommandPool");
+    vkCreateCommandPool(device, &commandPoolCreateInfo, NULL, &commandPool);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
@@ -141,6 +159,7 @@ void graphics_init()
     graphics_createdevice();
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
+    graphics_createcommandpool();
     graphics_allocatecommandbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
