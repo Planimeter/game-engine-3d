@@ -110,6 +110,11 @@ static void graphics_getqueue()
 static void graphics_allocatecommandbuffer()
 {
     VkCommandBuffer commandBuffer;
+    PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkAllocateCommandBuffers */
+    vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)vkGetDeviceProcAddr(device, "vkAllocateCommandBuffers");
+    /* vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer); */
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
