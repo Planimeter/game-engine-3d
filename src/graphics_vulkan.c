@@ -106,6 +106,12 @@ static void graphics_getqueue()
     vkGetDeviceQueue(device, 0, 0, &queue);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffer-allocation */
+static void graphics_allocatecommandbuffer()
+{
+    VkCommandBuffer commandBuffer;
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -124,6 +130,8 @@ void graphics_init()
     graphics_createqueue();
     graphics_createdevice();
     graphics_getqueue();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
+    graphics_allocatecommandbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
 }
