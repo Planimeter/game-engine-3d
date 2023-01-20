@@ -128,4 +128,5 @@ void framework_update(uint64_t dt)
 
 void framework_draw()
 {
+    graphics_present();
 }
