@@ -85,10 +85,13 @@ static void graphics_createdevice()
 {
     PFN_vkCreateDevice vkCreateDevice;
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#VkDeviceCreateInfo */
-    deviceCreateInfo.queueCreateInfoCount = 1;
-    deviceCreateInfo.pQueueCreateInfos    = &queueCreateInfo;
+    deviceCreateInfo.queueCreateInfoCount    = 1;
+    deviceCreateInfo.pQueueCreateInfos       = &queueCreateInfo;
+    deviceCreateInfo.enabledExtensionCount   = 1;
+    deviceCreateInfo.ppEnabledExtensionNames = &enabledExtensionNames;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
     vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(instance, "vkCreateDevice");
