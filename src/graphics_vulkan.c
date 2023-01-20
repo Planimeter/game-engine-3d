@@ -42,6 +42,12 @@ static VkFence fence;
 /* 7.4. Semaphores */
 static VkSemaphore semaphore;
 
+/* 34.2. WSI Surface */
+static VkSurfaceKHR surface;
+
+/* 34.10. WSI Swapchain */
+static VkSwapchainKHR swapchain;
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
@@ -179,9 +185,39 @@ static void graphics_createsemaphore()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
-    VkSurfaceKHR surface;
-
     SDL_Vulkan_CreateSurface(window, instance, &surface);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
+static void graphics_createswapchain()
+{
+    PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+    VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    VkExtent2D imageExtent;
+    int w, h;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+    imageExtent.width  = w;
+    imageExtent.height = h;
+
+    swapchainCreateInfo.surface          = surface;
+    swapchainCreateInfo.minImageCount    = 2;
+    swapchainCreateInfo.imageFormat      = VK_FORMAT_B8G8R8A8_SRGB;
+    swapchainCreateInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    swapchainCreateInfo.imageExtent      = imageExtent;
+    swapchainCreateInfo.imageArrayLayers = 1;
+    swapchainCreateInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    swapchainCreateInfo.preTransform     = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    swapchainCreateInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchainCreateInfo.presentMode      = VK_PRESENT_MODE_FIFO_KHR;
+    swapchainCreateInfo.clipped          = VK_TRUE;
+    swapchainCreateInfo.oldSwapchain     = VK_NULL_HANDLE;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
+    vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
+    vkCreateSwapchainKHR(device, &swapchainCreateInfo, NULL, &swapchain);
 }
 
 void graphics_init()
@@ -202,6 +238,7 @@ void graphics_init()
     graphics_createsemaphore();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
+    graphics_createswapchain();
 }
 
 void graphics_present()
