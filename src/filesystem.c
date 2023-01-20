@@ -2,6 +2,7 @@
 
 #include "physfs.h"
 
-void filesystem_init(const char *argv0) {
+void filesystem_init(const char *argv0)
+{
     PHYSFS_init(argv0);
 }

@@ -3,7 +3,8 @@
 #include "SDL.h"
 #include "framework.h"
 
-int event_poll() {
+int event_poll()
+{
     int game_is_still_running = 1;
     SDL_Event event;
     while (SDL_PollEvent(&event)) {  /* poll until all events are handled! */
