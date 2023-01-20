@@ -36,6 +36,9 @@ static VkCommandBuffer commandBuffer;
 /* 6.2. Command Pools */
 static VkCommandPool commandPool;
 
+/* 7.3. Fences */
+static VkFence fence;
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
@@ -148,6 +151,17 @@ static void graphics_createcommandpool()
     vkCreateCommandPool(device, &commandPoolCreateInfo, NULL, &commandPool);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-fences */
+static void graphics_createfence()
+{
+    PFN_vkCreateFence vkCreateFence;
+    VkFenceCreateInfo fenceCreateInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
+    vkCreateFence = (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
+    vkCreateFence(device, &fenceCreateInfo, NULL, &fence);
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -169,6 +183,8 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
     graphics_createcommandpool();
     graphics_allocatecommandbuffer();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
+    graphics_createfence();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
 }
