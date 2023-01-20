@@ -182,6 +182,18 @@ static void graphics_createsemaphore()
     vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &semaphore);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
+static void graphics_createrenderpass()
+{
+    VkRenderPass renderPass;
+    PFN_vkCreateRenderPass vkCreateRenderPass;
+    VkRenderPassCreateInfo renderPassCreateInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
+    vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(device, "vkCreateRenderPass");
+    vkCreateRenderPass(device, &renderPassCreateInfo, NULL, &renderPass);
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -236,6 +248,8 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createfence();
     graphics_createsemaphore();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
+    graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
