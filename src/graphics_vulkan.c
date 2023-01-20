@@ -27,6 +27,9 @@ static VkDevice device;
 /* 5.3.2. Queue Creation */
 static VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
 
+/* 6. Command Buffers */
+static VkCommandBuffer commandBuffer;
+
 /* 6.2. Command Pools */
 static VkCommandPool commandPool;
 
@@ -112,7 +115,6 @@ static void graphics_getqueue()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffer-allocation */
 static void graphics_allocatecommandbuffer()
 {
-    VkCommandBuffer commandBuffer;
     PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
 
@@ -167,4 +169,11 @@ void graphics_init()
 
 void graphics_present()
 {
+    /* 6.4 Command Buffer Recording */
+    PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
+    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(instance, "vkBeginCommandBuffer");
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
 }
