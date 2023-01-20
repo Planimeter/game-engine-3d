@@ -15,8 +15,7 @@ int event_poll()
             }
         }
 
-        switch (event.type)
-        {
+        switch (event.type) {
         /* Application events */
         case SDL_APP_LOWMEMORY:
             framework_lowmemory();
