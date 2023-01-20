@@ -39,6 +39,9 @@ static VkCommandPool commandPool;
 /* 7.3. Fences */
 static VkFence fence;
 
+/* 7.4. Semaphores */
+static VkSemaphore semaphore;
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
@@ -162,6 +165,17 @@ static void graphics_createfence()
     vkCreateFence(device, &fenceCreateInfo, NULL, &fence);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-semaphores */
+static void graphics_createsemaphore()
+{
+    PFN_vkCreateSemaphore vkCreateSemaphore;
+    VkSemaphoreCreateInfo semaphoreCreateInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
+    vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetDeviceProcAddr(device, "vkCreateSemaphore");
+    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &semaphore);
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -185,6 +199,7 @@ void graphics_init()
     graphics_allocatecommandbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createfence();
+    graphics_createsemaphore();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
 }
