@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 void graphics_init();
+void graphics_present();
 
 #ifdef __cplusplus
 }

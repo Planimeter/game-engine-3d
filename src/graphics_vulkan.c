@@ -164,3 +164,7 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
 }
+
+void graphics_present()
+{
+}
