@@ -42,6 +42,12 @@ static VkFence fence;
 /* 7.4. Semaphores */
 static VkSemaphore semaphore;
 
+/* 8. Render Pass */
+static VkRenderPass renderPass;
+
+/* 8.3. Framebuffers */
+static int w, h;
+
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
 
@@ -185,13 +191,31 @@ static void graphics_createsemaphore()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
 static void graphics_createrenderpass()
 {
-    VkRenderPass renderPass;
     PFN_vkCreateRenderPass vkCreateRenderPass;
     VkRenderPassCreateInfo renderPassCreateInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
     vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(device, "vkCreateRenderPass");
     vkCreateRenderPass(device, &renderPassCreateInfo, NULL, &renderPass);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
+static void graphics_createframebuffer()
+{
+    VkFramebuffer framebuffer;
+    PFN_vkCreateFramebuffer vkCreateFramebuffer;
+    VkFramebufferCreateInfo framebufferCreateInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+
+    framebufferCreateInfo.renderPass = renderPass;
+    framebufferCreateInfo.width      = w;
+    framebufferCreateInfo.height     = h;
+    framebufferCreateInfo.layers     = 1;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
+    vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(device, "vkCreateFramebuffer");
+    vkCreateFramebuffer(device, &framebufferCreateInfo, NULL, &framebuffer);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
@@ -206,10 +230,8 @@ static void graphics_createswapchain()
     PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
     VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
-    int w, h;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
-    SDL_Vulkan_GetDrawableSize(window, &w, &h);
     imageExtent.width  = w;
     imageExtent.height = h;
 
@@ -250,6 +272,7 @@ void graphics_init()
     graphics_createsemaphore();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
     graphics_createrenderpass();
+    graphics_createframebuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
