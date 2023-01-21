@@ -2,8 +2,8 @@
 
 #include "SDL.h"
 
-uint64_t dt = 0;
-uint64_t prevtime = 0;
+static uint64_t dt = 0;
+static uint64_t prevtime = 0;
 
 uint64_t timer_gettime() { return SDL_GetTicks64(); }
 
