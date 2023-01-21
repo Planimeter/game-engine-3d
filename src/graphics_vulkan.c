@@ -309,4 +309,20 @@ void graphics_present()
 
 void graphics_shutdown()
 {
+    PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+    PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+    PFN_vkDestroyDevice vkDestroyDevice;
+    PFN_vkDestroyInstance vkDestroyInstance;
+
+    vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR");
+    vkDestroySurfaceKHR(instance, surface, NULL);
+
+    vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
+    vkDestroySwapchainKHR(device, swapchain, NULL);
+
+    vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
+    vkDestroyDevice(device, NULL);
+
+    vkDestroyInstance = (PFN_vkDestroyInstance)vkGetInstanceProcAddr(instance, "vkDestroyInstance");
+    vkDestroyInstance(instance, NULL);
 }
