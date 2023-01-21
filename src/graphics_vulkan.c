@@ -53,6 +53,8 @@ static VkSurfaceKHR surface;
 
 /* 34.10. WSI Swapchain */
 static VkSwapchainKHR swapchain;
+static uint32_t swapchainImageCount;
+static VkImage *swapchainImages;
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
@@ -254,6 +256,17 @@ static void graphics_createswapchain()
     vkCreateSwapchainKHR(device, &swapchainCreateInfo, NULL, &swapchain);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetSwapchainImagesKHR */
+static void graphics_getswapchainimages()
+{
+    PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+
+    vkGetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)vkGetDeviceProcAddr(device, "vkGetSwapchainImagesKHR");
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, NULL);
+    swapchainImages = malloc(sizeof(VkImage) * swapchainImageCount);
+    vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
+}
+
 void graphics_init()
 {
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
@@ -276,6 +289,7 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
+    graphics_getswapchainimages();
 }
 
 void graphics_present()
