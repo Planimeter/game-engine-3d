@@ -306,3 +306,7 @@ void graphics_present()
     vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(instance, "vkBeginCommandBuffer");
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 }
+
+void graphics_shutdown()
+{
+}
