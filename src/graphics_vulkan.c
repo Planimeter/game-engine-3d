@@ -48,6 +48,9 @@ static VkRenderPass renderPass;
 /* 8.3. Framebuffers */
 static int w, h;
 
+/* 12.5. Image Views */
+static VkImageView *swapchainImageViews;
+
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
 
@@ -267,6 +270,35 @@ static void graphics_getswapchainimages()
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-image-views */
+static void graphics_createimageviews()
+{
+    PFN_vkCreateImageView vkCreateImageView;
+    size_t i;
+    VkImageViewCreateInfo createInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+
+    vkCreateImageView = (PFN_vkCreateImageView)vkGetDeviceProcAddr(device, "vkCreateImageView");
+
+    createInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
+    createInfo.format                      = VK_FORMAT_B8G8R8A8_SRGB;
+    createInfo.components.r                = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.g                = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.b                = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.components.a                = VK_COMPONENT_SWIZZLE_IDENTITY;
+    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    createInfo.subresourceRange.levelCount = 1;
+    createInfo.subresourceRange.layerCount = 1;
+
+    swapchainImageViews = malloc(sizeof(VkImageView) * swapchainImageCount);
+
+    for (i = 0; i < swapchainImageCount; i++)
+    {
+        createInfo.image = swapchainImages[i];
+
+        vkCreateImageView(device, &createInfo, NULL, &swapchainImageViews[i]);
+    }
+}
+
 void graphics_init()
 {
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
@@ -290,6 +322,8 @@ void graphics_init()
     graphics_createsurface();
     graphics_createswapchain();
     graphics_getswapchainimages();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
+    graphics_createimageviews();
 }
 
 void graphics_present()
