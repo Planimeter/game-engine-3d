@@ -357,10 +357,18 @@ void graphics_present()
 
 void graphics_shutdown()
 {
+    PFN_vkDestroyImageView vkDestroyImageView;
     PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
     PFN_vkDestroyDevice vkDestroyDevice;
     PFN_vkDestroyInstance vkDestroyInstance;
+
+    vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
+
+    for (size_t i = 0; i < swapchainImageCount; i++)
+    {
+        vkDestroyImageView(device, swapchainImageViews[i], NULL);
+    }
 
     vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR");
     vkDestroySurfaceKHR(instance, surface, NULL);
