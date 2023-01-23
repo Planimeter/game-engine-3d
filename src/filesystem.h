@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 void filesystem_init(const char *argv0);
+void filesystem_shutdown();
 
 #ifdef __cplusplus
 }

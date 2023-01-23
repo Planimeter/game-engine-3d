@@ -6,3 +6,8 @@ void filesystem_init(const char *argv0)
 {
     PHYSFS_init(argv0);
 }
+
+void filesystem_shutdown()
+{
+    PHYSFS_deinit();
+}
