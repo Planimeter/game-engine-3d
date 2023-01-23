@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
+#include "graphics.h"
 
 #define VK_NO_PROTOTYPES
 #ifdef HAVE_VULKAN_H
@@ -324,6 +325,8 @@ void graphics_init()
     graphics_getswapchainimages();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
     graphics_createimageviews();
+
+    atexit(graphics_shutdown);
 }
 
 void graphics_present()
