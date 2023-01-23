@@ -242,7 +242,7 @@ static void graphics_createswapchain()
 
     swapchainCreateInfo.surface          = surface;
     swapchainCreateInfo.minImageCount    = 2;
-    swapchainCreateInfo.imageFormat      = VK_FORMAT_B8G8R8A8_SRGB;
+    swapchainCreateInfo.imageFormat      = VK_FORMAT_B8G8R8A8_UNORM;
     swapchainCreateInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     swapchainCreateInfo.imageExtent      = imageExtent;
     swapchainCreateInfo.imageArrayLayers = 1;
@@ -280,7 +280,7 @@ static void graphics_createimageviews()
     vkCreateImageView = (PFN_vkCreateImageView)vkGetDeviceProcAddr(device, "vkCreateImageView");
 
     createInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format                      = VK_FORMAT_B8G8R8A8_SRGB;
+    createInfo.format                      = VK_FORMAT_B8G8R8A8_UNORM;
     createInfo.components.r                = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.g                = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.b                = VK_COMPONENT_SWIZZLE_IDENTITY;
