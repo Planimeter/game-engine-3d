@@ -3,6 +3,7 @@
 #include "framework.h"
 #include "event.h"
 #include "timer.h"
+#include "graphics.h"
 
 int main(int argc, char *argv[])
 {
@@ -13,6 +14,7 @@ int main(int argc, char *argv[])
         uint64_t dt = timer_step();
         framework_update(dt);
         framework_draw();
+        graphics_present();
         timer_sleep(1);
     }
 
