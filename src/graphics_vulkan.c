@@ -1,7 +1,6 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
-#include "graphics.h"
 
 #define VK_NO_PROTOTYPES
 #ifdef HAVE_VULKAN_H
@@ -302,6 +301,8 @@ static void graphics_createimageviews()
 
 void graphics_init()
 {
+    void graphics_shutdown();
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
     graphics_getcommandfunctionpointers();
     graphics_createinstance();
