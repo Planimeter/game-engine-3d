@@ -5,7 +5,7 @@
 
 void filesystem_init(const char *argv0)
 {
-    void filesystem_shutdown();
+    void filesystem_shutdown(void);
 
     PHYSFS_init(argv0);
 
@@ -37,7 +37,7 @@ char *filesystem_fileread(const char *pathname)
     return p;
 }
 
-void filesystem_shutdown()
+void filesystem_shutdown(void)
 {
     PHYSFS_deinit();
 }

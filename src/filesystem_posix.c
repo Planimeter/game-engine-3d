@@ -9,7 +9,7 @@ static off_t fsize(char *name, FILE *stream)
 {
     struct stat stbuf;
 
-    if (fstat(stream, &stbuf) == -1) {
+    if (fstat(fileno(stream), &stbuf) == -1) {
         fprintf(stderr, "fsize: can't access %s\n", name);
         return -1;
     }
@@ -18,7 +18,7 @@ static off_t fsize(char *name, FILE *stream)
 
 void filesystem_init(const char *argv0)
 {
-    void filesystem_shutdown();
+    void filesystem_shutdown(void);
 
     atexit(filesystem_shutdown);
 }
@@ -32,7 +32,7 @@ char *filesystem_fileread(const char *pathname)
 
     if ((fp = fopen(pathname, "rb")) == NULL)
         return NULL;
-    size = fsize(pathname, fp);
+    size = fsize((char *)pathname, fp);
     p = (char *) malloc(size+1);  /* +1 for ′\0′ */
     if (p == NULL) {
         fclose(fp);
@@ -48,6 +48,6 @@ char *filesystem_fileread(const char *pathname)
     return p;
 }
 
-void filesystem_shutdown()
+void filesystem_shutdown(void)
 {
 }
