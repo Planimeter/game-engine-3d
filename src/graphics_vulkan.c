@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
+#include <stdlib.h>
 
 #define VK_NO_PROTOTYPES
 #ifdef HAVE_VULKAN_H

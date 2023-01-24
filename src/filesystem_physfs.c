@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "physfs.h"
+#include <stdlib.h>
 
 void filesystem_init(const char *argv0)
 {
