@@ -38,6 +38,7 @@ char *filesystem_fileread(const char *pathname)
         PHYSFS_close(fp);
         return NULL;
     }
+    p[size] = '\0';
     PHYSFS_close(fp);
     return p;
 }

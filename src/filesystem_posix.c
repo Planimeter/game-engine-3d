@@ -47,6 +47,7 @@ char *filesystem_fileread(const char *pathname)
         fclose(fp);
         return NULL;
     }
+    p[size] = '\0';
     fclose(fp);
     return p;
 }
