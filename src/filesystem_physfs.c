@@ -14,7 +14,7 @@ void filesystem_init(const char *argv0)
     atexit(filesystem_shutdown);
 }
 
-char *filesystem_fileread(const char *pathname)
+size_t filesystem_fileread(void **ptr, const char *pathname)
 {
     PHYSFS_File *fp;
     PHYSFS_sint64 size;
@@ -23,24 +23,25 @@ char *filesystem_fileread(const char *pathname)
 
     if ((fp = PHYSFS_openRead(pathname)) == NULL) {
         fprintf(stderr, "filesystem_fileread: can't open %s\n", pathname);
-        return NULL;
+        return 0;
     }
     size = PHYSFS_fileLength(fp);
     p = (char *) malloc(size+1);  /* +1 for ′\0′ */
     if (p == NULL) {
         PHYSFS_close(fp);
-        return NULL;
+        return 0;
     }
     elements_read = PHYSFS_readBytes(fp, p, size);
     if (elements_read != size) {
         fprintf(stderr, "filesystem_fileread: can't read %s\n", pathname);
         free(p);
         PHYSFS_close(fp);
-        return NULL;
+        return 0;
     }
     p[size] = '\0';
     PHYSFS_close(fp);
-    return p;
+    *ptr = p;
+    return size;
 }
 
 void filesystem_shutdown(void)

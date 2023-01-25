@@ -7,9 +7,9 @@
 extern "C" {
 #endif
 
-void  filesystem_init(const char *argv0);
-char *filesystem_fileread(const char *pathname);
-void  filesystem_shutdown(void);
+void   filesystem_init(const char *argv0);
+size_t filesystem_fileread(void **ptr, const char *pathname);
+void   filesystem_shutdown(void);
 
 #ifdef __cplusplus
 }
