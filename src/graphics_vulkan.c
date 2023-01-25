@@ -2,6 +2,7 @@
 
 #include "framework.h"
 #include "filesystem.h"
+#include "graphics.h"
 #include <stdlib.h>
 
 #define VK_NO_PROTOTYPES
@@ -228,11 +229,16 @@ static void graphics_createframebuffer()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
 static void graphics_createshaders()
 {
-    char *vertBinary;
-    char *fragBinary;
+    char   *vertBinary;
+    size_t  vertSize;
+    char   *fragBinary;
+    size_t  fragSize;
 
-    vertBinary = filesystem_fileread("shaders/triangle.vert.spv");
-    fragBinary = filesystem_fileread("shaders/triangle.frag.spv");
+    vertSize = filesystem_fileread(&vertBinary, "shaders/triangle.vert.spv");
+    fragSize = filesystem_fileread(&fragBinary, "shaders/triangle.frag.spv");
+
+    Shader vertShader = graphics_createshader(vertBinary, vertSize);
+    Shader fragShader = graphics_createshader(fragBinary, fragSize);
 
     free(fragBinary);
     free(vertBinary);
@@ -345,6 +351,21 @@ void graphics_init()
     graphics_createimageviews();
 
     atexit(graphics_shutdown);
+}
+
+Shader graphics_createshader(const char *shader, size_t size)
+{
+    VkShaderModule shaderModule;
+    PFN_vkCreateShaderModule vkCreateShaderModule;
+    VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+
+    createInfo.codeSize = size;
+    createInfo.pCode    = (const uint32_t *)shader;
+
+    vkCreateShaderModule = (PFN_vkCreateShaderModule)vkGetDeviceProcAddr(device, "vkCreateShaderModule");
+    vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+
+    return shaderModule;
 }
 
 void graphics_present()

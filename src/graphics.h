@@ -7,9 +7,12 @@
 extern "C" {
 #endif
 
-void graphics_init();
-void graphics_present();
-void graphics_shutdown(void);
+typedef void *Shader;
+
+void   graphics_init();
+Shader graphics_createshader(const char *shader, size_t size);
+void   graphics_present();
+void   graphics_shutdown(void);
 
 #ifdef __cplusplus
 }
