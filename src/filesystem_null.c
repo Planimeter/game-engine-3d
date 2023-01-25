@@ -23,8 +23,10 @@ char *filesystem_fileread(const char *pathname)
     char *p;
     size_t elements_read;
 
-    if ((fp = fopen(pathname, "rb")) == NULL)
+    if ((fp = fopen(pathname, "rb")) == NULL) {
+        fprintf(stderr, "filesystem_fileread: can't open %s\n", pathname);
         return NULL;
+    }
     size = fsize((char *)pathname, fp);
     p = (char *) malloc(size+1);  /* +1 for ′\0′ */
     if (p == NULL) {
@@ -33,6 +35,7 @@ char *filesystem_fileread(const char *pathname)
     }
     elements_read = fread(p, size, 1, fp);
     if (elements_read != 1) {
+        fprintf(stderr, "filesystem_fileread: can't read %s\n", pathname);
         free(p);
         fclose(fp);
         return NULL;

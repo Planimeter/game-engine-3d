@@ -2,6 +2,7 @@
 
 #include "physfs.h"
 #include <stdlib.h>
+#include <stdio.h>
 
 void filesystem_init(const char *argv0)
 {
@@ -19,8 +20,10 @@ char *filesystem_fileread(const char *pathname)
     char *p;
     PHYSFS_sint64 elements_read;
 
-    if ((fp = PHYSFS_openRead(pathname)) == NULL)
+    if ((fp = PHYSFS_openRead(pathname)) == NULL) {
+        fprintf(stderr, "filesystem_fileread: can't open %s\n", pathname);
         return NULL;
+    }
     size = PHYSFS_fileLength(fp);
     p = (char *) malloc(size+1);  /* +1 for ′\0′ */
     if (p == NULL) {
@@ -29,6 +32,7 @@ char *filesystem_fileread(const char *pathname)
     }
     elements_read = PHYSFS_readBytes(fp, p, size);
     if (elements_read != 1) {
+        fprintf(stderr, "filesystem_fileread: can't read %s\n", pathname);
         free(p);
         PHYSFS_close(fp);
         return NULL;
