@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
+#include "filesystem.h"
 #include <stdlib.h>
 
 #define VK_NO_PROTOTYPES
@@ -227,6 +228,14 @@ static void graphics_createframebuffer()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
 static void graphics_createshaders()
 {
+    char *vertBinary;
+    char *fragBinary;
+
+    vertBinary = filesystem_fileread("shaders/triangle.vert.spv");
+    fragBinary = filesystem_fileread("shaders/triangle.frag.spv");
+
+    free(fragBinary);
+    free(vertBinary);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
