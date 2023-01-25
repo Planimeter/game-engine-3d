@@ -247,7 +247,7 @@ static void graphics_createshaders()
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
-static void graphics_createpipeline()
+static void graphics_creategraphicspipeline()
 {
     VkPipeline graphicsPipeline;
     PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
@@ -357,7 +357,7 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
-    graphics_createpipeline();
+    graphics_creategraphicspipeline();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
