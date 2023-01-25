@@ -246,6 +246,11 @@ static void graphics_createshaders()
     free(vertBinary);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
+static void graphics_createpipeline()
+{
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -345,6 +350,8 @@ void graphics_init()
     graphics_createframebuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
+    graphics_createpipeline();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
