@@ -240,6 +240,9 @@ static void graphics_createshaders()
     Shader vertShader = graphics_createshader(vertBinary, vertSize);
     Shader fragShader = graphics_createshader(fragBinary, fragSize);
 
+    graphics_destroyshader(vertShader);
+    graphics_destroyshader(fragShader);
+
     free(fragBinary);
     free(vertBinary);
 }
@@ -366,6 +369,14 @@ Shader graphics_createshader(const char *shader, size_t size)
     vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
 
     return shaderModule;
+}
+
+void graphics_destroyshader(Shader shader)
+{
+    PFN_vkDestroyShaderModule vkDestroyShaderModule;
+
+    vkDestroyShaderModule = (PFN_vkDestroyShaderModule)vkGetDeviceProcAddr(device, "vkDestroyShaderModule");
+    vkDestroyShaderModule(device, shader, NULL);
 }
 
 void graphics_present()

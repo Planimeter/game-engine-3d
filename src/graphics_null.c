@@ -16,6 +16,10 @@ Shader graphics_createshader(const char *shader, size_t size)
     return NULL;
 }
 
+void graphics_destroyshader(Shader shader)
+{
+}
+
 void graphics_present()
 {
 }
