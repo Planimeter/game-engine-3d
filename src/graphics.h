@@ -9,7 +9,7 @@ extern "C" {
 
 void graphics_init();
 void graphics_present();
-void graphics_shutdown();
+void graphics_shutdown(void);
 
 #ifdef __cplusplus
 }

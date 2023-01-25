@@ -307,7 +307,7 @@ static void graphics_createimageviews()
 
 void graphics_init()
 {
-    void graphics_shutdown();
+    void graphics_shutdown(void);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
     graphics_getcommandfunctionpointers();
@@ -367,7 +367,7 @@ void graphics_present()
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 }
 
-void graphics_shutdown()
+void graphics_shutdown(void)
 {
     PFN_vkDestroyImageView vkDestroyImageView;
     PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
