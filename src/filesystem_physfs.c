@@ -9,6 +9,7 @@ void filesystem_init(const char *argv0)
     void filesystem_shutdown(void);
 
     PHYSFS_init(argv0);
+    PHYSFS_mount(".", NULL, 1);
 
     atexit(filesystem_shutdown);
 }
@@ -31,7 +32,7 @@ char *filesystem_fileread(const char *pathname)
         return NULL;
     }
     elements_read = PHYSFS_readBytes(fp, p, size);
-    if (elements_read != 1) {
+    if (elements_read != size) {
         fprintf(stderr, "filesystem_fileread: can't read %s\n", pathname);
         free(p);
         PHYSFS_close(fp);
