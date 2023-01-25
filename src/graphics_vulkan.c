@@ -233,16 +233,15 @@ static void graphics_createshaders()
     size_t  vertSize;
     char   *fragBinary;
     size_t  fragSize;
+    Shader  vertShader;
+    Shader  fragShader;
 
-    vertSize = filesystem_fileread(&vertBinary, "shaders/triangle.vert.spv");
-    fragSize = filesystem_fileread(&fragBinary, "shaders/triangle.frag.spv");
-
-    Shader vertShader = graphics_createshader(vertBinary, vertSize);
-    Shader fragShader = graphics_createshader(fragBinary, fragSize);
-
+    vertSize   = filesystem_fileread(&vertBinary, "shaders/triangle.vert.spv");
+    fragSize   = filesystem_fileread(&fragBinary, "shaders/triangle.frag.spv");
+    vertShader = graphics_createshader(vertBinary, vertSize);
+    fragShader = graphics_createshader(fragBinary, fragSize);
     graphics_destroyshader(vertShader);
     graphics_destroyshader(fragShader);
-
     free(fragBinary);
     free(vertBinary);
 }
