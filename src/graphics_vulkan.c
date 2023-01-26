@@ -276,7 +276,7 @@ static void graphics_creategraphicspipeline()
     VkGraphicsPipelineCreateInfo           createInfo                 = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo        vertShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo        fragShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
-    VkPipelineShaderStageCreateInfo        stages[]                   = { vertShaderStage, fragShaderStage };
+    VkPipelineShaderStageCreateInfo        stages[2];
     VkPipelineVertexInputStateCreateInfo   vertexInput                = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
     VkPipelineInputAssemblyStateCreateInfo inputAssembly              = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
     VkPipelineViewportStateCreateInfo      viewport                   = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
@@ -297,6 +297,9 @@ static void graphics_creategraphicspipeline()
     fragShaderStage.stage                = VK_SHADER_STAGE_FRAGMENT_BIT;
     fragShaderStage.module               = fragShader;
     fragShaderStage.pName                = "main";
+
+    stages[0]                            = vertShaderStage;
+    stages[1]                            = fragShaderStage;
 
     inputAssembly.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
