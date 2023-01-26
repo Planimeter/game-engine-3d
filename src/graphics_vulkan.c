@@ -203,12 +203,33 @@ static void graphics_createsemaphore()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
 static void graphics_createrenderpass()
 {
-    PFN_vkCreateRenderPass vkCreateRenderPass;
-    VkRenderPassCreateInfo renderPassCreateInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    PFN_vkCreateRenderPass  vkCreateRenderPass;
+    VkRenderPassCreateInfo  createInfo     = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    VkAttachmentDescription attachment     = { 0 };
+    VkSubpassDescription    subpass        = { 0 };
+    VkAttachmentReference   colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+
+    attachment.format            = VK_FORMAT_B8G8R8A8_UNORM;
+    attachment.samples           = VK_SAMPLE_COUNT_1_BIT;
+    attachment.loadOp            = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachment.storeOp           = VK_ATTACHMENT_STORE_OP_STORE;
+    attachment.stencilLoadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachment.stencilStoreOp    = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachment.initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachment.finalLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &colorReference;
+
+    createInfo.attachmentCount   = 1;
+    createInfo.pAttachments      = &attachment;
+    createInfo.subpassCount      = 1;
+    createInfo.pSubpasses        = &subpass;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
     vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(device, "vkCreateRenderPass");
-    vkCreateRenderPass(device, &renderPassCreateInfo, NULL, &renderPass);
+    vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
