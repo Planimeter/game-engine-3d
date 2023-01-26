@@ -263,7 +263,7 @@ static void graphics_creategraphicspipeline()
     VkPipelineColorBlendStateCreateInfo    colorBlend                 = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
     VkPipelineColorBlendAttachmentState    colorBlendAttachment       = { 0 };
     VkPipelineDynamicStateCreateInfo       dynamicState               = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
-    VkDynamicState                         states[]                   = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    const VkDynamicState                   states[]                   = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineLayout                       pipelineLayout;
     PFN_vkCreatePipelineLayout             vkCreatePipelineLayout;
     VkPipelineLayoutCreateInfo             pipelineLayoutCreateInfo   = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
@@ -293,7 +293,10 @@ static void graphics_creategraphicspipeline()
     colorBlend.pAttachments              = &colorBlendAttachment;
 
     dynamicState.dynamicStateCount       = 2;
-    dynamicState.pDynamicStates          = &states;
+    dynamicState.pDynamicStates          = states;
+
+    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetDeviceProcAddr(device, "vkCreatePipelineLayout");
+    vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
 
     createInfo.stageCount                = 2;
     createInfo.pStages                   = stages;
@@ -306,9 +309,6 @@ static void graphics_creategraphicspipeline()
     createInfo.pDynamicState             = &dynamicState;
     createInfo.layout                    = pipelineLayout;
     createInfo.renderPass                = renderPass;
-
-    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetDeviceProcAddr(device, "vkCreatePipelineLayout");
-    vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
 
     vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)vkGetDeviceProcAddr(device, "vkCreateGraphicsPipelines");
     vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
