@@ -51,6 +51,10 @@ static VkRenderPass renderPass;
 /* 8.3. Framebuffers */
 static int w, h;
 
+/* 9. Shaders */
+Shader vertShader;
+Shader fragShader;
+
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
 
@@ -233,15 +237,11 @@ static void graphics_createshaders()
     size_t  vertSize;
     char   *fragBinary;
     size_t  fragSize;
-    Shader  vertShader;
-    Shader  fragShader;
 
     vertSize   = filesystem_fileread(&vertBinary, "shaders/triangle.vert.spv");
     fragSize   = filesystem_fileread(&fragBinary, "shaders/triangle.frag.spv");
     vertShader = graphics_createshader(vertBinary, vertSize);
     fragShader = graphics_createshader(fragBinary, fragSize);
-    graphics_destroyshader(vertShader);
-    graphics_destroyshader(fragShader);
     free(fragBinary);
     free(vertBinary);
 }
@@ -249,12 +249,72 @@ static void graphics_createshaders()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
-    VkPipeline graphicsPipeline;
-    PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
-    VkGraphicsPipelineCreateInfo createInfo = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    VkPipeline                             graphicsPipeline;
+    PFN_vkCreateGraphicsPipelines          vkCreateGraphicsPipelines;
+    VkGraphicsPipelineCreateInfo           createInfo                 = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo        vertShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo        fragShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo        stages[]                   = { vertShaderStage, fragShaderStage };
+    VkPipelineVertexInputStateCreateInfo   vertexInput                = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly              = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    VkPipelineViewportStateCreateInfo      viewport                   = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    VkPipelineRasterizationStateCreateInfo rasterization              = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    VkPipelineMultisampleStateCreateInfo   multisample                = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    VkPipelineColorBlendStateCreateInfo    colorBlend                 = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    VkPipelineColorBlendAttachmentState    colorBlendAttachment       = { 0 };
+    VkPipelineDynamicStateCreateInfo       dynamicState               = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    VkDynamicState                         states[]                   = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineLayout                       pipelineLayout;
+    PFN_vkCreatePipelineLayout             vkCreatePipelineLayout;
+    VkPipelineLayoutCreateInfo             pipelineLayoutCreateInfo   = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+
+    vertShaderStage.stage                = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStage.module               = vertShader;
+    vertShaderStage.pName                = "main";
+
+    fragShaderStage.stage                = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStage.module               = fragShader;
+    fragShaderStage.pName                = "main";
+
+    inputAssembly.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    viewport.viewportCount               = 1;
+    viewport.scissorCount                = 1;
+
+    rasterization.cullMode               = VK_CULL_MODE_BACK_BIT;
+    rasterization.frontFace              = VK_FRONT_FACE_CLOCKWISE;
+    rasterization.lineWidth              = 1.0f;
+
+    multisample.rasterizationSamples     = VK_SAMPLE_COUNT_1_BIT;
+
+    colorBlendAttachment.colorWriteMask  = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    colorBlend.attachmentCount           = 1;
+    colorBlend.pAttachments              = &colorBlendAttachment;
+
+    dynamicState.dynamicStateCount       = 2;
+    dynamicState.pDynamicStates          = &states;
+
+    createInfo.stageCount                = 2;
+    createInfo.pStages                   = stages;
+    createInfo.pVertexInputState         = &vertexInput;
+    createInfo.pInputAssemblyState       = &inputAssembly;
+    createInfo.pViewportState            = &viewport;
+    createInfo.pRasterizationState       = &rasterization;
+    createInfo.pMultisampleState         = &multisample;
+    createInfo.pColorBlendState          = &colorBlend;
+    createInfo.pDynamicState             = &dynamicState;
+    createInfo.layout                    = pipelineLayout;
+    createInfo.renderPass                = renderPass;
+
+    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetDeviceProcAddr(device, "vkCreatePipelineLayout");
+    vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
 
     vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)vkGetDeviceProcAddr(device, "vkCreateGraphicsPipelines");
     vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
+
+    graphics_destroyshader(vertShader);
+    graphics_destroyshader(fragShader);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
