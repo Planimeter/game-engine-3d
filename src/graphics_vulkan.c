@@ -79,6 +79,7 @@ static void graphics_createinstance()
     unsigned int count;
     char **names;
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+    const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
 
     vkCreateInstance = (PFN_vkCreateInstance)vkGetInstanceProcAddr(NULL, "vkCreateInstance");
 
@@ -87,6 +88,8 @@ static void graphics_createinstance()
     SDL_Vulkan_GetInstanceExtensions(window, &count, names);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
+    createInfo.enabledLayerCount       = 1;
+    createInfo.ppEnabledLayerNames     = enabledLayerNames;
     createInfo.enabledExtensionCount   = count;
     createInfo.ppEnabledExtensionNames = names;
 
