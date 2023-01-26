@@ -52,8 +52,8 @@ static VkRenderPass renderPass;
 static int w, h;
 
 /* 9. Shaders */
-Shader vertShader;
-Shader fragShader;
+static Shader vertShader;
+static Shader fragShader;
 
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
