@@ -236,13 +236,11 @@ static void graphics_createrenderpass()
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
-static void graphics_createframebuffer()
+static void graphics_createframebuffers()
 {
     VkFramebuffer framebuffer;
     PFN_vkCreateFramebuffer vkCreateFramebuffer;
     VkFramebufferCreateInfo framebufferCreateInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
-
-    SDL_Vulkan_GetDrawableSize(window, &w, &h);
 
     framebufferCreateInfo.renderPass = renderPass;
     framebufferCreateInfo.width      = w;
@@ -354,6 +352,8 @@ static void graphics_createswapchain()
     VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
 
+    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
     imageExtent.width  = w;
     imageExtent.height = h;
@@ -437,7 +437,6 @@ void graphics_init()
     graphics_createsemaphore();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
     graphics_createrenderpass();
-    graphics_createframebuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
@@ -448,7 +447,8 @@ void graphics_init()
     graphics_getswapchainimages();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
     graphics_createimageviews();
-
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
+    graphics_createframebuffers();
     atexit(graphics_shutdown);
 }
 
