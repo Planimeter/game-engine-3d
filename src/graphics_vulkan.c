@@ -480,31 +480,6 @@ void graphics_destroyshader(Shader shader)
 
 void graphics_present()
 {
-    /* 6.4 Command Buffer Recording */
-    PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
-    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
-
-#if 0
-    /* 6.5 Command Buffer Submission */
-    PFN_vkQueueSubmit vkQueueSubmit;
-    VkSubmitInfo submitInfo = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkSubmitInfo */
-    submitInfo.commandBufferCount   = 1;
-    submitInfo.pCommandBuffers      = &commandBuffer;
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-submission */
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkQueueSubmit */
-    vkQueueSubmit = (PFN_vkQueueSubmit)vkGetInstanceProcAddr(instance, "vkQueueSubmit");
-    vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
-#endif
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandBufferBeginInfo */
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
-    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(instance, "vkBeginCommandBuffer");
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
 }
 
 void graphics_shutdown(void)
