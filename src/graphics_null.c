@@ -20,6 +20,14 @@ void graphics_destroyshader(Shader shader)
 {
 }
 
+void graphics_predraw()
+{
+}
+
+void graphics_postdraw()
+{
+}
+
 void graphics_present()
 {
 }

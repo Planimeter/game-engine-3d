@@ -486,6 +486,14 @@ void graphics_destroyshader(Shader shader)
     vkDestroyShaderModule(device, shader, NULL);
 }
 
+void graphics_predraw()
+{
+}
+
+void graphics_postdraw()
+{
+}
+
 void graphics_present()
 {
 }

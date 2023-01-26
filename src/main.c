@@ -13,7 +13,9 @@ int main(int argc, char *argv[])
     while (event_poll()) {
         uint64_t dt = timer_step();
         framework_update(dt);
+        graphics_predraw();
         framework_draw();
+        graphics_postdraw();
         graphics_present();
         timer_sleep(1);
     }
