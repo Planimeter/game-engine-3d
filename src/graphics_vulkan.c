@@ -134,10 +134,10 @@ static void graphics_createdevice()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-queue-creation */
 static void graphics_createqueue()
 {
-    const float queuePriority = 1.0f;
+    const float queuePriority[] = { 1.0f };
 
     queueCreateInfo.queueCount       = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    queueCreateInfo.pQueuePriorities = queuePriority;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
