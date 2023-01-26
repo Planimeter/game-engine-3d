@@ -49,7 +49,7 @@ static VkSemaphore semaphore;
 static VkRenderPass renderPass;
 
 /* 8.3. Framebuffers */
-static int w, h;
+static VkFramebuffer *framebuffers;
 
 /* 9. Shaders */
 static Shader vertShader;
@@ -62,6 +62,7 @@ static VkImageView *swapchainImageViews;
 static VkSurfaceKHR surface;
 
 /* 34.10. WSI Swapchain */
+static int w, h;
 static VkSwapchainKHR swapchain;
 static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
@@ -238,18 +239,25 @@ static void graphics_createrenderpass()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
 static void graphics_createframebuffers()
 {
-    VkFramebuffer framebuffer;
     PFN_vkCreateFramebuffer vkCreateFramebuffer;
     VkFramebufferCreateInfo framebufferCreateInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 
-    framebufferCreateInfo.renderPass = renderPass;
-    framebufferCreateInfo.width      = w;
-    framebufferCreateInfo.height     = h;
-    framebufferCreateInfo.layers     = 1;
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
+    framebuffers = malloc(sizeof(VkFramebuffer) * swapchainImageCount);
     vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(device, "vkCreateFramebuffer");
-    vkCreateFramebuffer(device, &framebufferCreateInfo, NULL, &framebuffer);
+
+    for (size_t i = 0; i < swapchainImageCount; i++)
+    {
+        VkImageView attachments[] = { swapchainImageViews[i] };
+
+        framebufferCreateInfo.renderPass      = renderPass;
+        framebufferCreateInfo.attachmentCount = 1;
+        framebufferCreateInfo.pAttachments    = attachments;
+        framebufferCreateInfo.width           = w;
+        framebufferCreateInfo.height          = h;
+        framebufferCreateInfo.layers          = 1;
+
+        vkCreateFramebuffer(device, &framebufferCreateInfo, NULL, &framebuffers[i]);
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
