@@ -126,6 +126,11 @@ static void graphics_createdevice()
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
+    float queuePriority = 1.0f;
+
+    queueCreateInfo.queueCount       = 1;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#VkDeviceCreateInfo */
     deviceCreateInfo.queueCreateInfoCount    = 1;
     deviceCreateInfo.pQueueCreateInfos       = &queueCreateInfo;
@@ -140,10 +145,10 @@ static void graphics_createdevice()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-queue-creation */
 static void graphics_createqueue()
 {
-    const float queuePriority[] = { 1.0f };
+    float queuePriority = 1.0f;
 
     queueCreateInfo.queueCount       = 1;
-    queueCreateInfo.pQueuePriorities = queuePriority;
+    queueCreateInfo.pQueuePriorities = &queuePriority;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
@@ -453,7 +458,7 @@ void graphics_init()
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
-    graphics_createqueue();
+    /* graphics_createqueue(); */
     graphics_createdevice();
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
