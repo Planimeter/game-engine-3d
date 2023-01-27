@@ -543,6 +543,11 @@ void graphics_postdraw()
 
 void graphics_present()
 {
+    PFN_vkQueuePresentKHR vkQueuePresentKHR;
+    VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+
+    vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(device, "vkQueuePresentKHR");
+    vkQueuePresentKHR(queue, &presentInfo);
 }
 
 void graphics_shutdown(void)
