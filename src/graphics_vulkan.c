@@ -488,6 +488,23 @@ void graphics_destroyshader(Shader shader)
 
 void graphics_predraw()
 {
+    /* 6.4. Command Buffer Recording */
+    PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+
+    /* 8.4. Render Pass Commands */
+    PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
+    VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
+    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(device, "vkBeginCommandBuffer");
+    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+    renderPassBegin.renderPass = renderPass;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
+    vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass");
+    vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_NULL_HANDLE);
 }
 
 void graphics_postdraw()
