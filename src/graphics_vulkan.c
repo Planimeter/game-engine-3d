@@ -55,6 +55,9 @@ static VkFramebuffer *framebuffers;
 static Shader vertShader;
 static Shader fragShader;
 
+/* 10. Pipelines */
+static VkPipeline graphicsPipeline;
+
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
 
@@ -279,7 +282,6 @@ static void graphics_createshaders()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
-    VkPipeline                             graphicsPipeline;
     PFN_vkCreateGraphicsPipelines          vkCreateGraphicsPipelines;
     VkGraphicsPipelineCreateInfo           createInfo                 = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo        vertShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
