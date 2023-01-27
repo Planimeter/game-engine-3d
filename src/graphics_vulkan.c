@@ -526,6 +526,19 @@ void graphics_predraw()
 
 void graphics_postdraw()
 {
+    /* 8.4. Render Pass Commands */
+    PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
+
+    /* 6.4. Command Buffer Recording */
+    PFN_vkEndCommandBuffer vkEndCommandBuffer;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCmdEndRenderPass */
+    vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkGetDeviceProcAddr(device, "vkCmdEndRenderPass");
+    vkCmdEndRenderPass(commandBuffer);
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkEndCommandBuffer */
+    vkEndCommandBuffer = (PFN_vkEndCommandBuffer)vkGetDeviceProcAddr(device, "vkEndCommandBuffer");
+    vkEndCommandBuffer(commandBuffer);
 }
 
 void graphics_present()
