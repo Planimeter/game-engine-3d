@@ -513,7 +513,7 @@ void graphics_predraw()
 
     /* 29.2. Scissor Test */
     PFN_vkCmdSetScissor vkCmdSetScissor;
-    VkRect2D scissor;
+    VkRect2D scissor = { 0 };
 
     /* 34.10. WSI Swapchain */
     PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
