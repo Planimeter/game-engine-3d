@@ -524,7 +524,7 @@ void graphics_predraw()
 
     /* 27.9. Controlling the Viewport */
     PFN_vkCmdSetViewport vkCmdSetViewport;
-    VkViewport viewport;
+    VkViewport viewport = { 0 };
 
     /* 29.2. Scissor Test */
     PFN_vkCmdSetScissor vkCmdSetScissor;
