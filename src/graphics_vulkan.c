@@ -28,9 +28,6 @@ static VkPhysicalDevice *physicalDevices;
 static VkDevice device;
 
 /* 5.3.2. Queue Creation */
-static VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
-
-/* 5.3.2. Queue Creation */
 static VkQueue queue;
 
 /* 6. Command Buffers */
@@ -124,10 +121,11 @@ static void graphics_createdevice()
 {
     PFN_vkCreateDevice vkCreateDevice;
     VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
+    float queuePriority = 1.0f;
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
-    float queuePriority = 1.0f;
-
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-queue-creation */
     queueCreateInfo.queueCount       = 1;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
@@ -140,15 +138,6 @@ static void graphics_createdevice()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
     vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(instance, "vkCreateDevice");
     vkCreateDevice(physicalDevices[0], &deviceCreateInfo, NULL, &device);
-}
-
-/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-queue-creation */
-static void graphics_createqueue()
-{
-    float queuePriority = 1.0f;
-
-    queueCreateInfo.queueCount       = 1;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
@@ -458,7 +447,6 @@ void graphics_init()
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
-    /* graphics_createqueue(); */
     graphics_createdevice();
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
