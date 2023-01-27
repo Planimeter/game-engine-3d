@@ -193,6 +193,8 @@ static void graphics_createfence()
     PFN_vkCreateFence vkCreateFence;
     VkFenceCreateInfo fenceCreateInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 
+    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
     vkCreateFence = (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
     vkCreateFence(device, &fenceCreateInfo, NULL, &fence);
@@ -218,6 +220,7 @@ static void graphics_createrenderpass()
     VkAttachmentDescription attachment     = { 0 };
     VkSubpassDescription    subpass        = { 0 };
     VkAttachmentReference   colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+    VkSubpassDependency     dependency     = { 0 };
 
     attachment.format            = VK_FORMAT_B8G8R8A8_UNORM;
     attachment.samples           = VK_SAMPLE_COUNT_1_BIT;
@@ -232,10 +235,19 @@ static void graphics_createrenderpass()
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments    = &colorReference;
 
+	dependency.srcSubpass        = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass        = 0;
+	dependency.srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.srcAccessMask     = 0;
+	dependency.dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
     createInfo.attachmentCount   = 1;
     createInfo.pAttachments      = &attachment;
     createInfo.subpassCount      = 1;
     createInfo.pSubpasses        = &subpass;
+    createInfo.dependencyCount   = 1;
+    createInfo.pDependencies     = &dependency;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
     vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(device, "vkCreateRenderPass");
