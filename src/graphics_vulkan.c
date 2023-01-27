@@ -497,6 +497,10 @@ void graphics_predraw()
     PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 
+    /* 7.3. Fences */
+    PFN_vkWaitForFences vkWaitForFences;
+    PFN_vkResetFences vkResetFences;
+
     /* 8.4. Render Pass Commands */
     PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -521,6 +525,14 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
     vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
     vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &index);
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkWaitForFences */
+    vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
+    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkResetFences */
+    vkResetFences = (PFN_vkResetFences)vkGetDeviceProcAddr(device, "vkResetFences");
+    vkResetFences(device, 1, &fence);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
     vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetDeviceProcAddr(device, "vkBeginCommandBuffer");
@@ -591,7 +603,7 @@ void graphics_postdraw()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkQueueSubmit */
     vkQueueSubmit = (PFN_vkQueueSubmit)vkGetDeviceProcAddr(device, "vkQueueSubmit");
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueSubmit(queue, 1, &submit, fence);
 }
 
 void graphics_present()
