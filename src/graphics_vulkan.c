@@ -507,6 +507,14 @@ void graphics_predraw()
     /* 19.3. Clear Values */
     VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
 
+    /* 27.9. Controlling the Viewport */
+    PFN_vkCmdSetViewport vkCmdSetViewport;
+    VkViewport viewport;
+
+    /* 29.2. Scissor Test */
+    PFN_vkCmdSetScissor vkCmdSetScissor;
+    VkRect2D scissor;
+
     /* 34.10. WSI Swapchain */
     PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
 
@@ -532,6 +540,22 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-binding */
     vkCmdBindPipeline = (PFN_vkCmdBindPipeline)vkGetDeviceProcAddr(device, "vkCmdBindPipeline");
     vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+    viewport.width    = w;
+    viewport.height   = h;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap27.html#vertexpostproc-viewport */
+    vkCmdSetViewport = (PFN_vkCmdSetViewport)vkGetDeviceProcAddr(device, "vkCmdSetViewport");
+    vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+    scissor.extent.width  = w;
+    scissor.extent.height = h;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
+    vkCmdSetScissor = (PFN_vkCmdSetScissor)vkGetDeviceProcAddr(device, "vkCmdSetScissor");
+    vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 }
 
 void graphics_postdraw()
@@ -542,6 +566,13 @@ void graphics_postdraw()
     /* 6.4. Command Buffer Recording */
     PFN_vkEndCommandBuffer vkEndCommandBuffer;
 
+    /* 6.5. Command Buffer Submission */
+    PFN_vkQueueSubmit vkQueueSubmit;
+    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+
+    /* 7.1.2. Pipeline Stages */
+    VkPipelineStageFlags waitStage = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCmdEndRenderPass */
     vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkGetDeviceProcAddr(device, "vkCmdEndRenderPass");
     vkCmdEndRenderPass(commandBuffer);
@@ -549,6 +580,18 @@ void graphics_postdraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkEndCommandBuffer */
     vkEndCommandBuffer = (PFN_vkEndCommandBuffer)vkGetDeviceProcAddr(device, "vkEndCommandBuffer");
     vkEndCommandBuffer(commandBuffer);
+
+    submit.commandBufferCount   = 1;
+    submit.pCommandBuffers      = &commandBuffer;
+    submit.waitSemaphoreCount   = 1;
+    submit.pWaitSemaphores      = &acquireSemaphore;
+    submit.pWaitDstStageMask    = &waitStage;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores    = &releaseSemaphore;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkQueueSubmit */
+    vkQueueSubmit = (PFN_vkQueueSubmit)vkGetDeviceProcAddr(device, "vkQueueSubmit");
+    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
 }
 
 void graphics_present()
