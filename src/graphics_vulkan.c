@@ -70,6 +70,7 @@ static int w, h;
 static VkSwapchainKHR swapchain;
 static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
+static uint32_t index;
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
@@ -508,7 +509,6 @@ void graphics_predraw()
 
     /* 34.10. WSI Swapchain */
     PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
-    uint32_t index;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
     vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
@@ -555,6 +555,12 @@ void graphics_present()
 {
     PFN_vkQueuePresentKHR vkQueuePresentKHR;
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+
+    presentInfo.swapchainCount     = 1;
+    presentInfo.pSwapchains        = &swapchain;
+    presentInfo.pImageIndices      = &index;
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores    = &releaseSemaphore;
 
     vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(device, "vkQueuePresentKHR");
     vkQueuePresentKHR(queue, &presentInfo);
