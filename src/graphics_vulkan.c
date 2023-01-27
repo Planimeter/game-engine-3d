@@ -498,15 +498,30 @@ void graphics_predraw()
     PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 
+    /* 10.10. Pipeline Binding */
+    PFN_vkCmdBindPipeline vkCmdBindPipeline;
+
+    /* 19.3. Clear Values */
+    VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
-    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetInstanceProcAddr(device, "vkBeginCommandBuffer");
+    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetDeviceProcAddr(device, "vkBeginCommandBuffer");
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
-    renderPassBegin.renderPass = renderPass;
+    renderPassBegin.renderPass               = renderPass;
+    renderPassBegin.framebuffer              = framebuffers[0];
+    renderPassBegin.renderArea.extent.width  = w;
+    renderPassBegin.renderArea.extent.height = h;
+    renderPassBegin.clearValueCount          = 1;
+    renderPassBegin.pClearValues             = &clearValue;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
     vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass");
     vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-binding */
+    vkCmdBindPipeline = (PFN_vkCmdBindPipeline)vkGetDeviceProcAddr(device, "vkCmdBindPipeline");
+    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 }
 
 void graphics_postdraw()
