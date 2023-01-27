@@ -504,7 +504,7 @@ void graphics_predraw()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
     vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass");
-    vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_NULL_HANDLE);
+    vkCmdBeginRenderPass(commandBuffer, &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 }
 
 void graphics_postdraw()
