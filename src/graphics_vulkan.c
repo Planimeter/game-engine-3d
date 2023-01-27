@@ -43,7 +43,8 @@ static VkCommandPool commandPool;
 static VkFence fence;
 
 /* 7.4. Semaphores */
-static VkSemaphore semaphore;
+static VkSemaphore acquireSemaphore;
+static VkSemaphore releaseSemaphore;
 
 /* 8. Render Pass */
 static VkRenderPass renderPass;
@@ -197,14 +198,15 @@ static void graphics_createfence()
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-semaphores */
-static void graphics_createsemaphore()
+static void graphics_createsemaphores()
 {
     PFN_vkCreateSemaphore vkCreateSemaphore;
     VkSemaphoreCreateInfo semaphoreCreateInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
     vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetDeviceProcAddr(device, "vkCreateSemaphore");
-    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &semaphore);
+    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &acquireSemaphore);
+    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &releaseSemaphore);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
@@ -447,7 +449,7 @@ void graphics_init()
     graphics_allocatecommandbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createfence();
-    graphics_createsemaphore();
+    graphics_createsemaphores();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
     graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
@@ -517,7 +519,7 @@ void graphics_predraw()
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
     renderPassBegin.renderPass               = renderPass;
-    renderPassBegin.framebuffer              = framebuffers[0];
+    renderPassBegin.framebuffer              = framebuffers[index];
     renderPassBegin.renderArea.extent.width  = w;
     renderPassBegin.renderArea.extent.height = h;
     renderPassBegin.clearValueCount          = 1;
