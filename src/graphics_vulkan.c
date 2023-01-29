@@ -112,8 +112,6 @@ static void graphics_enumeratephysicaldevices()
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
     physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
-
-    /* free(physicalDevices); */
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
@@ -653,6 +651,8 @@ void graphics_shutdown(void)
 
     vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
     vkDestroyDevice(device, NULL);
+
+    free(physicalDevices);
 
     vkDestroyInstance = (PFN_vkDestroyInstance)vkGetInstanceProcAddr(instance, "vkDestroyInstance");
     vkDestroyInstance(instance, NULL);
