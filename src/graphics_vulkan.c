@@ -125,7 +125,6 @@ static void graphics_createdevice()
     float queuePriority = 1.0f;
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
 
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-queue-creation */
     queueCreateInfo.queueCount       = 1;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
@@ -413,7 +412,6 @@ static void graphics_getswapchainimages()
 static void graphics_createimageviews()
 {
     PFN_vkCreateImageView vkCreateImageView;
-    size_t i;
     VkImageViewCreateInfo createInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 
     vkCreateImageView = (PFN_vkCreateImageView)vkGetDeviceProcAddr(device, "vkCreateImageView");
@@ -430,7 +428,7 @@ static void graphics_createimageviews()
 
     swapchainImageViews = malloc(sizeof(VkImageView) * swapchainImageCount);
 
-    for (i = 0; i < swapchainImageCount; i++)
+    for (size_t i = 0; i < swapchainImageCount; i++)
     {
         createInfo.image = swapchainImages[i];
 
