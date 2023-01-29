@@ -5,6 +5,7 @@ Planimeter Game Engine 3D
 * [PhysicsFS 3.2.0](https://github.com/icculus/physfs/releases/tag/release-3.2.0)
 * [SDL 2.26.2](https://github.com/libsdl-org/SDL/releases/tag/release-2.26.2)
 * A Vulkan 1.3 capable driver ([Specification](https://registry.khronos.org/vulkan/specs/1.3-extensions/html/index.html))
+* [GLM 0.9.9.8](https://github.com/g-truc/glm/releases/tag/0.9.9.8)
 
 ## Build
 ```sh

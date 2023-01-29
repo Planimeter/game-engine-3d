@@ -28,9 +28,13 @@ add_subdirectory(lib/physfs-release-3.2.0)
 # add the SDL2 library
 add_subdirectory(lib/SDL2-2.26.2)
 
+# add the GLM library
+add_subdirectory(lib/glm-0.9.9.8/glm)
+
 target_link_libraries(game PUBLIC physfs)
 target_link_libraries(game PUBLIC SDL2)
 target_link_libraries(game PUBLIC SDL2main)
+target_link_libraries(game PUBLIC glm)
 
 # add the binary tree to the search path for include files
 # so that we will find TutorialConfig.h
@@ -39,6 +43,7 @@ target_include_directories(game PUBLIC
                           physfs
                           SDL2
                           SDL2main
+                          glm
                           )
 
 if(WIN32)
