@@ -32,6 +32,10 @@ void graphics_present()
 {
 }
 
+void graphics_resize()
+{
+}
+
 void graphics_shutdown(void)
 {
 }

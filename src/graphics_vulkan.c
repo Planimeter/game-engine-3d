@@ -629,6 +629,10 @@ void graphics_present()
     vkQueuePresentKHR(queue, &presentInfo);
 }
 
+void graphics_resize()
+{
+}
+
 void graphics_shutdown(void)
 {
     PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
