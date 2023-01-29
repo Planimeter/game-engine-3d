@@ -631,12 +631,12 @@ void graphics_present()
 
 void graphics_shutdown(void)
 {
-    PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
-    PFN_vkDestroyImageView vkDestroyImageView;
-    PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+    PFN_vkDeviceWaitIdle      vkDeviceWaitIdle;
+    PFN_vkDestroyImageView    vkDestroyImageView;
+    PFN_vkDestroySurfaceKHR   vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
-    PFN_vkDestroyDevice vkDestroyDevice;
-    PFN_vkDestroyInstance vkDestroyInstance;
+    PFN_vkDestroyDevice       vkDestroyDevice;
+    PFN_vkDestroyInstance     vkDestroyInstance;
 
     vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
     vkDeviceWaitIdle(device);
