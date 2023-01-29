@@ -183,6 +183,7 @@ static void graphics_createfence()
     PFN_vkCreateFence vkCreateFence;
     VkFenceCreateInfo fenceCreateInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
     fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
