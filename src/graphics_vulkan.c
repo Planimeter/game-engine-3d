@@ -513,6 +513,9 @@ void graphics_predraw()
     /* 19.3. Clear Values */
     VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
 
+    /* 21.3. Programmable Primitive Shading */
+    PFN_vkCmdDraw vkCmdDraw;
+
     /* 27.9. Controlling the Viewport */
     PFN_vkCmdSetViewport vkCmdSetViewport;
     VkViewport viewport = { 0 };
@@ -570,6 +573,10 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
     vkCmdSetScissor = (PFN_vkCmdSetScissor)vkGetDeviceProcAddr(device, "vkCmdSetScissor");
     vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
+    vkCmdDraw = (PFN_vkCmdDraw)vkGetDeviceProcAddr(device, "vkCmdDraw");
+    vkCmdDraw(commandBuffer, 3, 1, 0, 0);
 }
 
 void graphics_postdraw()
