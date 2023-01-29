@@ -67,7 +67,7 @@ static int w, h;
 static VkSwapchainKHR swapchain;
 static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
-static uint32_t index;
+static uint32_t imageIndex;
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
@@ -529,7 +529,7 @@ void graphics_predraw()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
     vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
-    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &index);
+    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkWaitForFences */
     vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
@@ -544,7 +544,7 @@ void graphics_predraw()
     vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
     renderPassBegin.renderPass               = renderPass;
-    renderPassBegin.framebuffer              = framebuffers[index];
+    renderPassBegin.framebuffer              = framebuffers[imageIndex];
     renderPassBegin.renderArea.extent.width  = w;
     renderPassBegin.renderArea.extent.height = h;
     renderPassBegin.clearValueCount          = 1;
@@ -622,7 +622,7 @@ void graphics_present()
 
     presentInfo.swapchainCount     = 1;
     presentInfo.pSwapchains        = &swapchain;
-    presentInfo.pImageIndices      = &index;
+    presentInfo.pImageIndices      = &imageIndex;
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores    = &releaseSemaphore;
 
