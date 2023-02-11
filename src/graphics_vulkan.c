@@ -119,7 +119,7 @@ static void graphics_enumeratephysicaldevices()
 static void graphics_createdevice()
 {
     PFN_vkCreateDevice vkCreateDevice;
-    VkDeviceCreateInfo deviceCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
+    VkDeviceCreateInfo createInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     float queuePriority = 1.0f;
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
@@ -128,14 +128,14 @@ static void graphics_createdevice()
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#VkDeviceCreateInfo */
-    deviceCreateInfo.queueCreateInfoCount    = 1;
-    deviceCreateInfo.pQueueCreateInfos       = &queueCreateInfo;
-    deviceCreateInfo.enabledExtensionCount   = 1;
-    deviceCreateInfo.ppEnabledExtensionNames = &enabledExtensionNames;
+    createInfo.queueCreateInfoCount    = 1;
+    createInfo.pQueueCreateInfos       = &queueCreateInfo;
+    createInfo.enabledExtensionCount   = 1;
+    createInfo.ppEnabledExtensionNames = &enabledExtensionNames;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
     vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(instance, "vkCreateDevice");
-    vkCreateDevice(physicalDevices[0], &deviceCreateInfo, NULL, &device);
+    vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
@@ -152,14 +152,14 @@ static void graphics_getqueue()
 static void graphics_createcommandpool()
 {
     PFN_vkCreateCommandPool vkCreateCommandPool;
-    VkCommandPoolCreateInfo commandPoolCreateInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
-    commandPoolCreateInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkCreateCommandPool */
     vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetDeviceProcAddr(device, "vkCreateCommandPool");
-    vkCreateCommandPool(device, &commandPoolCreateInfo, NULL, &commandPool);
+    vkCreateCommandPool(device, &createInfo, NULL, &commandPool);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffer-allocation */
@@ -182,26 +182,26 @@ static void graphics_allocatecommandbuffer()
 static void graphics_createfence()
 {
     PFN_vkCreateFence vkCreateFence;
-    VkFenceCreateInfo fenceCreateInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
-    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+    createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
     vkCreateFence = (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
-    vkCreateFence(device, &fenceCreateInfo, NULL, &fence);
+    vkCreateFence(device, &createInfo, NULL, &fence);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-semaphores */
 static void graphics_createsemaphores()
 {
     PFN_vkCreateSemaphore vkCreateSemaphore;
-    VkSemaphoreCreateInfo semaphoreCreateInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
     vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetDeviceProcAddr(device, "vkCreateSemaphore");
-    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &acquireSemaphore);
-    vkCreateSemaphore(device, &semaphoreCreateInfo, NULL, &releaseSemaphore);
+    vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
+    vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
@@ -250,7 +250,7 @@ static void graphics_createrenderpass()
 static void graphics_createframebuffers()
 {
     PFN_vkCreateFramebuffer vkCreateFramebuffer;
-    VkFramebufferCreateInfo framebufferCreateInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
 
     framebuffers = malloc(sizeof(VkFramebuffer) * swapchainImageCount);
     vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(device, "vkCreateFramebuffer");
@@ -259,14 +259,14 @@ static void graphics_createframebuffers()
     {
         VkImageView attachments[] = { swapchainImageViews[i] };
 
-        framebufferCreateInfo.renderPass      = renderPass;
-        framebufferCreateInfo.attachmentCount = 1;
-        framebufferCreateInfo.pAttachments    = attachments;
-        framebufferCreateInfo.width           = w;
-        framebufferCreateInfo.height          = h;
-        framebufferCreateInfo.layers          = 1;
+        createInfo.renderPass      = renderPass;
+        createInfo.attachmentCount = 1;
+        createInfo.pAttachments    = attachments;
+        createInfo.width           = w;
+        createInfo.height          = h;
+        createInfo.layers          = 1;
 
-        vkCreateFramebuffer(device, &framebufferCreateInfo, NULL, &framebuffers[i]);
+        vkCreateFramebuffer(device, &createInfo, NULL, &framebuffers[i]);
     }
 }
 
@@ -368,7 +368,7 @@ static void graphics_createsurface()
 static void graphics_createswapchain()
 {
     PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
-    VkSwapchainCreateInfoKHR swapchainCreateInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+    VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
 
     SDL_Vulkan_GetDrawableSize(window, &w, &h);
@@ -377,23 +377,23 @@ static void graphics_createswapchain()
     imageExtent.width  = w;
     imageExtent.height = h;
 
-    swapchainCreateInfo.surface          = surface;
-    swapchainCreateInfo.minImageCount    = 2;
-    swapchainCreateInfo.imageFormat      = VK_FORMAT_B8G8R8A8_UNORM;
-    swapchainCreateInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-    swapchainCreateInfo.imageExtent      = imageExtent;
-    swapchainCreateInfo.imageArrayLayers = 1;
-    swapchainCreateInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchainCreateInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    swapchainCreateInfo.preTransform     = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-    swapchainCreateInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-    swapchainCreateInfo.presentMode      = VK_PRESENT_MODE_FIFO_KHR;
-    swapchainCreateInfo.clipped          = VK_TRUE;
-    swapchainCreateInfo.oldSwapchain     = VK_NULL_HANDLE;
+    createInfo.surface          = surface;
+    createInfo.minImageCount    = 2;
+    createInfo.imageFormat      = VK_FORMAT_B8G8R8A8_UNORM;
+    createInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    createInfo.imageExtent      = imageExtent;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    createInfo.preTransform     = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    createInfo.presentMode      = VK_PRESENT_MODE_FIFO_KHR;
+    createInfo.clipped          = VK_TRUE;
+    createInfo.oldSwapchain     = VK_NULL_HANDLE;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
     vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
-    vkCreateSwapchainKHR(device, &swapchainCreateInfo, NULL, &swapchain);
+    vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetSwapchainImagesKHR */
