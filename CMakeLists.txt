@@ -14,12 +14,12 @@ add_executable(game
 
 # specify the C++ standard
 set_property(TARGET game PROPERTY CXX_EXTENSIONS OFF)
-set_property(TARGET game PROPERTY CXX_STANDARD 11)
+set_property(TARGET game PROPERTY CXX_STANDARD 98)
 set_property(TARGET game PROPERTY CXX_STANDARD_REQUIRED ON)
 
 # specify the C standard
 set_property(TARGET game PROPERTY C_EXTENSIONS OFF)
-set_property(TARGET game PROPERTY C_STANDARD 99)
+set_property(TARGET game PROPERTY C_STANDARD 90)
 set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 
 # add the PhysicsFS library
