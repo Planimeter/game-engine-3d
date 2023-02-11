@@ -227,12 +227,12 @@ static void graphics_createrenderpass()
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments    = &colorReference;
 
-	dependency.srcSubpass        = VK_SUBPASS_EXTERNAL;
-	dependency.dstSubpass        = 0;
-	dependency.srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	dependency.srcAccessMask     = 0;
-	dependency.dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependency.srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass        = 0;
+    dependency.srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask     = 0;
+    dependency.dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
     createInfo.attachmentCount   = 1;
     createInfo.pAttachments      = &attachment;
