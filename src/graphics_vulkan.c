@@ -89,13 +89,13 @@ static void graphics_createinstance()
 
     SDL_Vulkan_GetInstanceExtensions(window, &count, NULL);
     names = malloc(sizeof(char *) * count);
-    SDL_Vulkan_GetInstanceExtensions(window, &count, names);
+    SDL_Vulkan_GetInstanceExtensions(window, &count, (const char **)names);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.enabledLayerCount       = 1;
     createInfo.ppEnabledLayerNames     = enabledLayerNames;
     createInfo.enabledExtensionCount   = count;
-    createInfo.ppEnabledExtensionNames = names;
+    createInfo.ppEnabledExtensionNames = (const char* const*)names;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#vkCreateInstance */
     vkCreateInstance(&createInfo, NULL, &instance);
@@ -153,6 +153,7 @@ static void graphics_createcommandpools()
 {
     PFN_vkCreateCommandPool vkCreateCommandPool;
     VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    size_t i;
 
     commandPools = malloc(sizeof(VkCommandPool) * swapchainImageCount);
 
@@ -162,7 +163,7 @@ static void graphics_createcommandpools()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkCreateCommandPool */
     vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetDeviceProcAddr(device, "vkCreateCommandPool");
 
-    for (size_t i = 0; i < swapchainImageCount; i++)
+    for (i = 0; i < swapchainImageCount; i++)
     {
         vkCreateCommandPool(device, &createInfo, NULL, &commandPools[i]);
     }
@@ -173,10 +174,11 @@ static void graphics_allocatecommandbuffers()
 {
     PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    size_t i;
 
     commandBuffers = malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
 
-    for (size_t i = 0; i < swapchainImageCount; i++)
+    for (i = 0; i < swapchainImageCount; i++)
     {
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandBufferAllocateInfo */
         allocateInfo.commandPool        = commandPools[i];
@@ -194,6 +196,7 @@ static void graphics_createfences()
 {
     PFN_vkCreateFence vkCreateFence;
     VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    size_t i;
 
     fences = malloc(sizeof(VkFence) * swapchainImageCount);
 
@@ -203,7 +206,7 @@ static void graphics_createfences()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
     vkCreateFence = (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
 
-    for (size_t i = 0; i < swapchainImageCount; i++)
+    for (i = 0; i < swapchainImageCount; i++)
     {
         vkCreateFence(device, &createInfo, NULL, &fences[i]);
     }
@@ -268,11 +271,12 @@ static void graphics_createframebuffers()
 {
     PFN_vkCreateFramebuffer vkCreateFramebuffer;
     VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    size_t i;
 
     framebuffers = malloc(sizeof(VkFramebuffer) * swapchainImageCount);
     vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(device, "vkCreateFramebuffer");
 
-    for (size_t i = 0; i < swapchainImageCount; i++)
+    for (i = 0; i < swapchainImageCount; i++)
     {
         VkImageView attachments[] = { swapchainImageViews[i] };
 
@@ -295,8 +299,8 @@ static void graphics_createshaders()
     char   *fragBinary;
     size_t  fragSize;
 
-    vertSize   = filesystem_fileread(&vertBinary, "shaders/triangle.vert.spv");
-    fragSize   = filesystem_fileread(&fragBinary, "shaders/triangle.frag.spv");
+    vertSize   = filesystem_fileread((void **)&vertBinary, "shaders/triangle.vert.spv");
+    fragSize   = filesystem_fileread((void **)&fragBinary, "shaders/triangle.frag.spv");
     vertShader = graphics_createshader(vertBinary, vertSize);
     fragShader = graphics_createshader(fragBinary, fragSize);
     free(fragBinary);
@@ -429,6 +433,7 @@ static void graphics_createimageviews()
 {
     PFN_vkCreateImageView vkCreateImageView;
     VkImageViewCreateInfo createInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    size_t i;
 
     vkCreateImageView = (PFN_vkCreateImageView)vkGetDeviceProcAddr(device, "vkCreateImageView");
 
@@ -444,7 +449,7 @@ static void graphics_createimageviews()
 
     swapchainImageViews = malloc(sizeof(VkImageView) * swapchainImageCount);
 
-    for (size_t i = 0; i < swapchainImageCount; i++)
+    for (i = 0; i < swapchainImageCount; i++)
     {
         createInfo.image = swapchainImages[i];
 
@@ -655,6 +660,7 @@ void graphics_shutdown(void)
 {
     PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
     PFN_vkDestroyFramebuffer    vkDestroyFramebuffer;
+    size_t                      i;
     PFN_vkDestroyImageView      vkDestroyImageView;
     PFN_vkDestroySurfaceKHR     vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR   vkDestroySwapchainKHR;
@@ -673,14 +679,14 @@ void graphics_shutdown(void)
 
     vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(device, "vkDestroyFramebuffer");
 
-    for (size_t i = swapchainImageCount; i-- > 0;)
+    for (i = swapchainImageCount; i-- > 0;)
     {
         vkDestroyFramebuffer(device, framebuffers[i], NULL);
     }
     
     vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
 
-    for (size_t i = swapchainImageCount; i-- > 0;)
+    for (i = swapchainImageCount; i-- > 0;)
     {
         vkDestroyImageView(device, swapchainImageViews[i], NULL);
     }
@@ -706,12 +712,12 @@ void graphics_shutdown(void)
 
     vkDestroyFence = (PFN_vkDestroyFence)vkGetDeviceProcAddr(device, "vkDestroyFence");
 
-    for (size_t i = swapchainImageCount; i-- > 0;)
+    for (i = swapchainImageCount; i-- > 0;)
     {
         vkDestroyFence(device, fences[i], NULL);
     }
 
-    for (size_t i = swapchainImageCount; i-- > 0;)
+    for (i = swapchainImageCount; i-- > 0;)
     {
         vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)vkGetDeviceProcAddr(device, "vkFreeCommandBuffers");
         vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
