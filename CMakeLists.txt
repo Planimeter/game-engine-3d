@@ -23,27 +23,34 @@ set_property(TARGET game PROPERTY C_STANDARD 99)
 set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 
 # add the PhysicsFS library
+set(PHYSFS_BUILD_STATIC OFF)
+set(PHYSFS_BUILD_TEST OFF)
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
-add_subdirectory(lib/SDL2-2.26.2)
+find_package(SDL2 2.26.3 EXACT REQUIRED PATHS lib)
+
+# add the Vulkan library
+find_package(Vulkan REQUIRED)
 
 # add the GLM library
-add_subdirectory(lib/glm-0.9.9.8/glm)
+find_package(glm REQUIRED PATHS lib/glm/cmake)
 
-target_link_libraries(game PUBLIC physfs)
-target_link_libraries(game PUBLIC SDL2)
-target_link_libraries(game PUBLIC SDL2main)
-target_link_libraries(game PUBLIC glm)
+target_link_libraries(game PUBLIC PhysFS::PhysFS)
+target_link_libraries(game PUBLIC SDL2::SDL2)
+target_link_libraries(game PUBLIC SDL2::SDL2main)
+target_link_libraries(game PUBLIC Vulkan::Headers)
+target_link_libraries(game PUBLIC glm::glm)
 
 # add the binary tree to the search path for include files
 # so that we will find TutorialConfig.h
 target_include_directories(game PUBLIC
                           "${PROJECT_BINARY_DIR}"
-                          physfs
-                          SDL2
-                          SDL2main
-                          glm
+                          PhysFS::PhysFS
+                          SDL2::SDL2
+                          SDL2::SDL2main
+                          Vulkan::Headers
+                          glm::glm
                           )
 
 if(WIN32)
