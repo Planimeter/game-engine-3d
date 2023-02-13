@@ -20,6 +20,11 @@ void graphics_destroyshader(Shader shader)
 {
 }
 
+int graphics_isminimized()
+{
+    return 0;
+}
+
 void graphics_predraw()
 {
 }

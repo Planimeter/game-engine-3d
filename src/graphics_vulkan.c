@@ -648,6 +648,23 @@ void graphics_destroyshader(Shader shader)
     vkDestroyShaderModule(device, shader, NULL);
 }
 
+int graphics_isminimized()
+{
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevices[0], surface, &surfaceCapabilities);
+
+    if (surfaceCapabilities.currentExtent.width  == 0 &&
+        surfaceCapabilities.currentExtent.height == 0)
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
 void graphics_predraw()
 {
     /* 6.4. Command Buffer Recording */
@@ -680,6 +697,11 @@ void graphics_predraw()
 
     /* 34.10. WSI Swapchain */
     VkResult res;
+
+    if (graphics_isminimized())
+    {
+        return;
+    }
 
     res = graphics_acquirenextimage();
 
@@ -751,6 +773,11 @@ void graphics_postdraw()
     /* 7.1.2. Pipeline Stages */
     VkPipelineStageFlags waitStage = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 
+    if (graphics_isminimized())
+    {
+        return;
+    }
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCmdEndRenderPass */
     vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkGetDeviceProcAddr(device, "vkCmdEndRenderPass");
     vkCmdEndRenderPass(commandBuffers[imageIndex]);
@@ -777,6 +804,11 @@ void graphics_present()
     PFN_vkQueuePresentKHR vkQueuePresentKHR;
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     VkResult res;
+
+    if (graphics_isminimized())
+    {
+        return;
+    }
 
     presentInfo.swapchainCount     = 1;
     presentInfo.pSwapchains        = &swapchain;

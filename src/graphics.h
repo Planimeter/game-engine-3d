@@ -12,6 +12,7 @@ typedef void *Shader;
 void   graphics_init();
 Shader graphics_createshader(const char *shader, size_t size);
 void   graphics_destroyshader(Shader shader);
+int    graphics_isminimized();
 void   graphics_predraw();
 void   graphics_postdraw();
 void   graphics_present();
