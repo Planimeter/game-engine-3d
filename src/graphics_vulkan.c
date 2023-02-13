@@ -667,6 +667,26 @@ void graphics_present()
 
 void graphics_resize()
 {
+    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+    VkSurfaceCapabilitiesKHR surfaceCapabilities;
+    PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
+
+    if (device == VK_NULL_HANDLE)
+    {
+        return;
+    }
+
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetDeviceProcAddr(device, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevices[0], surface, &surfaceCapabilities);
+
+    if (surfaceCapabilities.currentExtent.width  == w &&
+        surfaceCapabilities.currentExtent.height == h)
+    {
+        return;
+    }
+
+    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
+    vkDeviceWaitIdle(device);
 }
 
 void graphics_shutdown(void)
