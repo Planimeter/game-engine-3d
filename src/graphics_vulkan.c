@@ -389,6 +389,7 @@ static void graphics_createswapchain()
     PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
     VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
+    VkSwapchainKHR oldSwapchain;
 
     // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetDrawableSize(window, &w, &h);
@@ -396,6 +397,8 @@ static void graphics_createswapchain()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
     imageExtent.width  = w;
     imageExtent.height = h;
+
+    oldSwapchain = swapchain;
 
     createInfo.surface          = surface;
     createInfo.minImageCount    = 2;
@@ -409,7 +412,7 @@ static void graphics_createswapchain()
     createInfo.compositeAlpha   = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
     createInfo.presentMode      = VK_PRESENT_MODE_IMMEDIATE_KHR;
     createInfo.clipped          = VK_TRUE;
-    createInfo.oldSwapchain     = VK_NULL_HANDLE;
+    createInfo.oldSwapchain     = oldSwapchain;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
     vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
@@ -729,6 +732,9 @@ void graphics_resize()
 
     vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
     vkDeviceWaitIdle(device);
+
+    graphics_destroyframebuffers();
+    graphics_createswapchain();
 }
 
 void graphics_shutdown(void)
