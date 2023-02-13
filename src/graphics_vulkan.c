@@ -68,6 +68,7 @@ static uint32_t imageIndex;
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
 static void graphics_getcommandfunctionpointers()
 {
+    // FIXME: Separate SDL from this implementation.
     vkGetInstanceProcAddr = SDL_Vulkan_GetVkGetInstanceProcAddr();
 }
 
@@ -82,6 +83,7 @@ static void graphics_createinstance()
 
     vkCreateInstance = (PFN_vkCreateInstance)vkGetInstanceProcAddr(NULL, "vkCreateInstance");
 
+    // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetInstanceExtensions(window, &count, NULL);
     names = malloc(sizeof(char *) * count);
     SDL_Vulkan_GetInstanceExtensions(window, &count, (const char **)names);
@@ -377,6 +379,7 @@ static void graphics_creategraphicspipeline()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
+    // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_CreateSurface(window, instance, &surface);
 }
 
@@ -387,6 +390,7 @@ static void graphics_createswapchain()
     VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
 
+    // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetDrawableSize(window, &w, &h);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */

@@ -9,6 +9,7 @@
 extern "C" {
 #endif
 
+// FIXME: Separate SDL from this interface.
 extern SDL_Window *window;
 
 void framework_init(const char *argv0);
