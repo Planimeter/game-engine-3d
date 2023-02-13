@@ -390,6 +390,7 @@ static void graphics_createswapchain()
     VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
     VkSwapchainKHR oldSwapchain;
+    PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
 
     // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetDrawableSize(window, &w, &h);
@@ -417,6 +418,16 @@ static void graphics_createswapchain()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
     vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
     vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
+
+    if (oldSwapchain != VK_NULL_HANDLE)
+    {
+        graphics_destroyimageviews();
+        graphics_getswapchainimages();
+
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkDestroySwapchainKHR */
+        vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
+        vkDestroySwapchainKHR(device, oldSwapchain, NULL);
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetSwapchainImagesKHR */
@@ -475,6 +486,20 @@ static void graphics_destroyframebuffers()
         vkDestroyFramebuffer(device, framebuffers[i], NULL);
     }
     free(framebuffers);
+}
+
+static void graphics_destroyimageviews()
+{
+    PFN_vkDestroyImageView vkDestroyImageView;
+    size_t i;
+
+    vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
+
+    for (i = swapchainImageCount; i-- > 0;)
+    {
+        vkDestroyImageView(device, swapchainImageViews[i], NULL);
+    }
+    free(swapchainImageViews);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
@@ -740,7 +765,6 @@ void graphics_resize()
 void graphics_shutdown(void)
 {
     PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
-    PFN_vkDestroyImageView      vkDestroyImageView;
     size_t                      i;
     PFN_vkDestroySurfaceKHR     vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR   vkDestroySwapchainKHR;
@@ -758,14 +782,7 @@ void graphics_shutdown(void)
     vkDeviceWaitIdle(device);
 
     graphics_destroyframebuffers();
-
-    vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
-
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyImageView(device, swapchainImageViews[i], NULL);
-    }
-    free(swapchainImageViews);
+    graphics_destroyimageviews();
 
     vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
     vkDestroySwapchainKHR(device, swapchain, NULL);
