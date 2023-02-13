@@ -391,6 +391,11 @@ static void graphics_createswapchain()
     VkExtent2D imageExtent;
     VkSwapchainKHR oldSwapchain;
     PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+    static void graphics_destroyimageviews();
+    static void graphics_destroyfences();
+    static void graphics_freecommandbuffers();
+    static void graphics_destroycommandpools();
+    static void graphics_destroysemaphores();
 
     // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetDrawableSize(window, &w, &h);
@@ -422,7 +427,10 @@ static void graphics_createswapchain()
     if (oldSwapchain != VK_NULL_HANDLE)
     {
         graphics_destroyimageviews();
-        graphics_getswapchainimages();
+        graphics_destroyfences();
+        graphics_freecommandbuffers();
+        graphics_destroycommandpools();
+        graphics_destroysemaphores();
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkDestroySwapchainKHR */
         vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
@@ -500,6 +508,56 @@ static void graphics_destroyimageviews()
         vkDestroyImageView(device, swapchainImageViews[i], NULL);
     }
     free(swapchainImageViews);
+}
+
+static void graphics_destroyfences()
+{
+    PFN_vkDestroyFence vkDestroyFence;
+    size_t i;
+
+    vkDestroyFence = (PFN_vkDestroyFence)vkGetDeviceProcAddr(device, "vkDestroyFence");
+
+    for (i = swapchainImageCount; i-- > 0;)
+    {
+        vkDestroyFence(device, fences[i], NULL);
+    }
+    free(fences);
+}
+
+static void graphics_freecommandbuffers()
+{
+    size_t i;
+    PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
+
+    for (i = swapchainImageCount; i-- > 0;)
+    {
+        vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)vkGetDeviceProcAddr(device, "vkFreeCommandBuffers");
+        vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
+    }
+    free(commandBuffers);
+}
+
+static void graphics_destroycommandpools()
+{
+    size_t i;
+    PFN_vkDestroyCommandPool vkDestroyCommandPool;
+
+    for (i = swapchainImageCount; i-- > 0;)
+    {
+        vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(device, "vkDestroyCommandPool");
+        vkDestroyCommandPool(device, commandPools[i], NULL);
+    }
+    free(commandPools);
+
+}
+
+static void graphics_destroysemaphores()
+{
+    PFN_vkDestroySemaphore vkDestroySemaphore;
+
+    vkDestroySemaphore = (PFN_vkDestroySemaphore)vkGetDeviceProcAddr(device, "vkDestroySemaphore");
+    vkDestroySemaphore(device, releaseSemaphore, NULL);
+    vkDestroySemaphore(device, acquireSemaphore, NULL);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
@@ -760,21 +818,22 @@ void graphics_resize()
 
     graphics_destroyframebuffers();
     graphics_createswapchain();
+    graphics_getswapchainimages();
+    graphics_createcommandpools();
+    graphics_allocatecommandbuffers();
+    graphics_createfences();
+    graphics_createimageviews();
+    graphics_createframebuffers();
 }
 
 void graphics_shutdown(void)
 {
     PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
-    size_t                      i;
     PFN_vkDestroySurfaceKHR     vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR   vkDestroySwapchainKHR;
     PFN_vkDestroyPipeline       vkDestroyPipeline;
     PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
     PFN_vkDestroyRenderPass     vkDestroyRenderPass;
-    PFN_vkDestroySemaphore      vkDestroySemaphore;
-    PFN_vkDestroyFence          vkDestroyFence;
-    PFN_vkFreeCommandBuffers    vkFreeCommandBuffers;
-    PFN_vkDestroyCommandPool    vkDestroyCommandPool;
     PFN_vkDestroyDevice         vkDestroyDevice;
     PFN_vkDestroyInstance       vkDestroyInstance;
 
@@ -799,28 +858,10 @@ void graphics_shutdown(void)
     vkDestroyRenderPass = (PFN_vkDestroyRenderPass)vkGetDeviceProcAddr(device, "vkDestroyRenderPass");
     vkDestroyRenderPass(device, renderPass, NULL);
 
-    vkDestroySemaphore = (PFN_vkDestroySemaphore)vkGetDeviceProcAddr(device, "vkDestroySemaphore");
-    vkDestroySemaphore(device, releaseSemaphore, NULL);
-    vkDestroySemaphore(device, acquireSemaphore, NULL);
-
-    vkDestroyFence = (PFN_vkDestroyFence)vkGetDeviceProcAddr(device, "vkDestroyFence");
-
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyFence(device, fences[i], NULL);
-    }
-    free(fences);
-
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)vkGetDeviceProcAddr(device, "vkFreeCommandBuffers");
-        vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
-
-        vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(device, "vkDestroyCommandPool");
-        vkDestroyCommandPool(device, commandPools[i], NULL);
-    }
-    free(commandBuffers);
-    free(commandPools);
+    graphics_destroysemaphores();
+    graphics_destroyfences();
+    graphics_freecommandbuffers();
+    graphics_destroycommandpools();
 
     vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
     vkDestroyDevice(device, NULL);
