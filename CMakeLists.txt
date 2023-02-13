@@ -23,8 +23,9 @@ set_property(TARGET game PROPERTY C_STANDARD 99)
 set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 
 # add the PhysicsFS library
-set(PHYSFS_BUILD_STATIC OFF)
-set(PHYSFS_BUILD_TEST OFF)
+set(PHYSFS_BUILD_STATIC FALSE CACHE BOOL "Build static library")
+set(PHYSFS_BUILD_TEST FALSE CACHE BOOL "Build stdio test program.")
+set(PHYSFS_BUILD_DOCS FALSE CACHE BOOL "Build doxygen based documentation")
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
