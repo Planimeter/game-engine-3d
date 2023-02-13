@@ -456,7 +456,7 @@ static void graphics_createimageviews()
     }
 }
 
-static graphics_destroyframebuffers()
+static void graphics_destroyframebuffers()
 {
     PFN_vkQueueWaitIdle vkQueueWaitIdle;
     PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
@@ -472,6 +472,36 @@ static graphics_destroyframebuffers()
         vkDestroyFramebuffer(device, framebuffers[i], NULL);
     }
     free(framebuffers);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
+static VkResult graphics_acquirenextimage()
+{
+    PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+    VkResult res;
+    PFN_vkWaitForFences vkWaitForFences;
+    PFN_vkResetFences vkResetFences;
+    PFN_vkResetCommandPool vkResetCommandPool;
+
+    vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
+    res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+    if (res != VK_SUCCESS)
+    {
+        return res;
+    }
+    if (fences[imageIndex] != VK_NULL_HANDLE)
+    {
+        vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
+        vkWaitForFences(device, 1, &fences[imageIndex], VK_TRUE, UINT64_MAX);
+        vkResetFences = (PFN_vkResetFences)vkGetDeviceProcAddr(device, "vkResetFences");
+        vkResetFences(device, 1, &fences[imageIndex]);
+    }
+    if (commandPools[imageIndex] != VK_NULL_HANDLE)
+    {
+        vkResetCommandPool = (PFN_vkResetCommandPool)vkGetDeviceProcAddr(device, "vkResetCommandPool");
+        vkResetCommandPool(device, commandPools[imageIndex], 0);
+    }
+    return VK_SUCCESS;
 }
 
 void graphics_init()
@@ -538,10 +568,6 @@ void graphics_predraw()
     PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 
-    /* 7.3. Fences */
-    PFN_vkWaitForFences vkWaitForFences;
-    PFN_vkResetFences vkResetFences;
-
     /* 7.8. Wait Idle Operations */
     PFN_vkQueueWaitIdle vkQueueWaitIdle;
 
@@ -567,17 +593,14 @@ void graphics_predraw()
     VkRect2D scissor = { 0 };
 
     /* 34.10. WSI Swapchain */
-    PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
     VkResult res;
 
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
-    vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
-    res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+    res = graphics_acquirenextimage();
 
     if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
     {
         graphics_resize();
-        res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+        res = graphics_acquirenextimage();
     }
 
     if (res != VK_SUCCESS)
@@ -586,14 +609,6 @@ void graphics_predraw()
         vkQueueWaitIdle(queue);
         return;
     }
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkWaitForFences */
-    vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
-    vkWaitForFences(device, 1, &fences[imageIndex], VK_TRUE, UINT64_MAX);
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkResetFences */
-    vkResetFences = (PFN_vkResetFences)vkGetDeviceProcAddr(device, "vkResetFences");
-    vkResetFences(device, 1, &fences[imageIndex]);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
     vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetDeviceProcAddr(device, "vkBeginCommandBuffer");
