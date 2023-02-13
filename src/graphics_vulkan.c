@@ -456,6 +456,20 @@ static void graphics_createimageviews()
     }
 }
 
+static graphics_destroyframebuffers()
+{
+    PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
+    size_t i;
+
+    vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(device, "vkDestroyFramebuffer");
+
+    for (i = swapchainImageCount; i-- > 0;)
+    {
+        vkDestroyFramebuffer(device, framebuffers[i], NULL);
+    }
+    free(framebuffers);
+}
+
 void graphics_init()
 {
     void graphics_shutdown(void);
@@ -658,9 +672,8 @@ void graphics_resize()
 void graphics_shutdown(void)
 {
     PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
-    PFN_vkDestroyFramebuffer    vkDestroyFramebuffer;
-    size_t                      i;
     PFN_vkDestroyImageView      vkDestroyImageView;
+    size_t                      i;
     PFN_vkDestroySurfaceKHR     vkDestroySurfaceKHR;
     PFN_vkDestroySwapchainKHR   vkDestroySwapchainKHR;
     PFN_vkDestroyPipeline       vkDestroyPipeline;
@@ -676,19 +689,15 @@ void graphics_shutdown(void)
     vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
     vkDeviceWaitIdle(device);
 
-    vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(device, "vkDestroyFramebuffer");
+    graphics_destroyframebuffers();
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyFramebuffer(device, framebuffers[i], NULL);
-    }
-    
     vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
 
     for (i = swapchainImageCount; i-- > 0;)
     {
         vkDestroyImageView(device, swapchainImageViews[i], NULL);
     }
+    free(swapchainImageViews);
 
     vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
     vkDestroySwapchainKHR(device, swapchain, NULL);
@@ -715,6 +724,7 @@ void graphics_shutdown(void)
     {
         vkDestroyFence(device, fences[i], NULL);
     }
+    free(fences);
 
     for (i = swapchainImageCount; i-- > 0;)
     {
@@ -724,6 +734,8 @@ void graphics_shutdown(void)
         vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(device, "vkDestroyCommandPool");
         vkDestroyCommandPool(device, commandPools[i], NULL);
     }
+    free(commandPools);
+    free(commandBuffers);
 
     vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
     vkDestroyDevice(device, NULL);
