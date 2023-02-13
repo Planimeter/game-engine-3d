@@ -671,6 +671,7 @@ void graphics_present()
 {
     PFN_vkQueuePresentKHR vkQueuePresentKHR;
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+    VkResult res;
 
     presentInfo.swapchainCount     = 1;
     presentInfo.pSwapchains        = &swapchain;
@@ -679,7 +680,12 @@ void graphics_present()
     presentInfo.pWaitSemaphores    = &releaseSemaphore;
 
     vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(device, "vkQueuePresentKHR");
-    vkQueuePresentKHR(queue, &presentInfo);
+    res = vkQueuePresentKHR(queue, &presentInfo);
+
+    if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        graphics_resize();
+    }
 }
 
 void graphics_resize()
