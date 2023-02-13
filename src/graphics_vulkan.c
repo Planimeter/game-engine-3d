@@ -538,6 +538,9 @@ void graphics_predraw()
     PFN_vkWaitForFences vkWaitForFences;
     PFN_vkResetFences vkResetFences;
 
+    /* 7.8. Wait Idle Operations */
+    PFN_vkQueueWaitIdle vkQueueWaitIdle;
+
     /* 8.4. Render Pass Commands */
     PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
@@ -561,10 +564,24 @@ void graphics_predraw()
 
     /* 34.10. WSI Swapchain */
     PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+    VkResult res;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
     vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
-    vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+    res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+    if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        graphics_resize();
+        res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+    }
+
+    if (res != VK_SUCCESS)
+    {
+        vkQueueWaitIdle = (PFN_vkQueueWaitIdle)vkGetDeviceProcAddr(device, "vkQueueWaitIdle");
+        vkQueueWaitIdle(queue);
+        return;
+    }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkWaitForFences */
     vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
