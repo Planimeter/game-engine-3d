@@ -781,8 +781,8 @@ void graphics_shutdown(void)
         vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(device, "vkDestroyCommandPool");
         vkDestroyCommandPool(device, commandPools[i], NULL);
     }
-    free(commandPools);
     free(commandBuffers);
+    free(commandPools);
 
     vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
     vkDestroyDevice(device, NULL);
