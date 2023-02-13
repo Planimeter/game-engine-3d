@@ -58,4 +58,9 @@ add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:game> $<TARGET_FILE_DIR:game>
   COMMAND_EXPAND_LISTS
 )
+
+add_custom_command(TARGET game POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/src/shaders $<TARGET_FILE_DIR:game>/shaders
+  COMMAND_EXPAND_LISTS
+)
 endif()
