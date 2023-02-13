@@ -458,8 +458,12 @@ static void graphics_createimageviews()
 
 static graphics_destroyframebuffers()
 {
+    PFN_vkQueueWaitIdle vkQueueWaitIdle;
     PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
     size_t i;
+
+    vkQueueWaitIdle = (PFN_vkQueueWaitIdle)vkGetDeviceProcAddr(device, "vkQueueWaitIdle");
+    vkQueueWaitIdle(queue);
 
     vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(device, "vkDestroyFramebuffer");
 
@@ -699,7 +703,7 @@ void graphics_resize()
         return;
     }
 
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetDeviceProcAddr(device, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevices[0], surface, &surfaceCapabilities);
 
     if (surfaceCapabilities.currentExtent.width  == w &&
