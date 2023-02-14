@@ -27,14 +27,26 @@ int graphics_isminimized()
 
 void graphics_predraw()
 {
+    if (graphics_isminimized())
+    {
+        return;
+    }
 }
 
 void graphics_postdraw()
 {
+    if (graphics_isminimized())
+    {
+        return;
+    }
 }
 
 void graphics_present()
 {
+    if (graphics_isminimized())
+    {
+        return;
+    }
 }
 
 void graphics_resize()
