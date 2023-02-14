@@ -6,12 +6,8 @@
 #include <stdlib.h>
 
 #define VK_NO_PROTOTYPES
-#include <vulkan/vulkan.h>
+#include "volk.h"
 #include "SDL_vulkan.h"
-
-/* 4.1. Command Function Pointers */
-static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
-static PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
 
 /* 4.2. Instances */
 static VkInstance instance;
@@ -75,13 +71,12 @@ static void graphics_getcommandfunctionpointers()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
 {
-    PFN_vkCreateInstance vkCreateInstance;
     unsigned int count;
     char **names;
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
 
-    vkCreateInstance = (PFN_vkCreateInstance)vkGetInstanceProcAddr(NULL, "vkCreateInstance");
+    volkInitialize();
 
     // FIXME: Separate SDL from this implementation.
     SDL_Vulkan_GetInstanceExtensions(window, &count, NULL);
@@ -96,6 +91,7 @@ static void graphics_createinstance()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#vkCreateInstance */
     vkCreateInstance(&createInfo, NULL, &instance);
+    volkLoadInstance(instance);
 
     free(names);
 }
@@ -103,10 +99,8 @@ static void graphics_createinstance()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-physical-device-enumeration */
 static void graphics_enumeratephysicaldevices()
 {
-    PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
     uint32_t physicalDeviceCount;
 
-    vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices");
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
     physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
@@ -115,7 +109,6 @@ static void graphics_enumeratephysicaldevices()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
 static void graphics_createdevice()
 {
-    PFN_vkCreateDevice vkCreateDevice;
     VkDeviceCreateInfo createInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     float queuePriority = 1.0f;
@@ -131,24 +124,19 @@ static void graphics_createdevice()
     createInfo.ppEnabledExtensionNames = &enabledExtensionNames;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
-    vkCreateDevice = (PFN_vkCreateDevice)vkGetInstanceProcAddr(instance, "vkCreateDevice");
     vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
+    volkLoadDevice(device);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
 static void graphics_getqueue()
 {
-    PFN_vkGetDeviceQueue vkGetDeviceQueue;
-
-    vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)vkGetInstanceProcAddr(instance, "vkGetDeviceProcAddr");
-    vkGetDeviceQueue = (PFN_vkGetDeviceQueue)vkGetDeviceProcAddr(device, "vkGetDeviceQueue");
     vkGetDeviceQueue(device, 0, 0, &queue);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-pools */
 static void graphics_createcommandpools()
 {
-    PFN_vkCreateCommandPool vkCreateCommandPool;
     VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     size_t i;
 
@@ -156,9 +144,6 @@ static void graphics_createcommandpools()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
     createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkCreateCommandPool */
-    vkCreateCommandPool = (PFN_vkCreateCommandPool)vkGetDeviceProcAddr(device, "vkCreateCommandPool");
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -169,7 +154,6 @@ static void graphics_createcommandpools()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffer-allocation */
 static void graphics_allocatecommandbuffers()
 {
-    PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     size_t i;
 
@@ -183,7 +167,6 @@ static void graphics_allocatecommandbuffers()
         allocateInfo.commandBufferCount = 1;
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkAllocateCommandBuffers */
-        vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)vkGetDeviceProcAddr(device, "vkAllocateCommandBuffers");
         vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffers[i]);
     }
 }
@@ -191,7 +174,6 @@ static void graphics_allocatecommandbuffers()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-fences */
 static void graphics_createfences()
 {
-    PFN_vkCreateFence vkCreateFence;
     VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     size_t i;
 
@@ -201,8 +183,6 @@ static void graphics_createfences()
     createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
-    vkCreateFence = (PFN_vkCreateFence)vkGetDeviceProcAddr(device, "vkCreateFence");
-
     for (i = 0; i < swapchainImageCount; i++)
     {
         vkCreateFence(device, &createInfo, NULL, &fences[i]);
@@ -212,11 +192,9 @@ static void graphics_createfences()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-semaphores */
 static void graphics_createsemaphores()
 {
-    PFN_vkCreateSemaphore vkCreateSemaphore;
     VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
-    vkCreateSemaphore = (PFN_vkCreateSemaphore)vkGetDeviceProcAddr(device, "vkCreateSemaphore");
     vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
     vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
 }
@@ -224,7 +202,6 @@ static void graphics_createsemaphores()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
 static void graphics_createrenderpass()
 {
-    PFN_vkCreateRenderPass  vkCreateRenderPass;
     VkRenderPassCreateInfo  createInfo     = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
     VkAttachmentDescription attachment     = { 0 };
     VkSubpassDescription    subpass        = { 0 };
@@ -259,19 +236,16 @@ static void graphics_createrenderpass()
     createInfo.pDependencies     = &dependency;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
-    vkCreateRenderPass = (PFN_vkCreateRenderPass)vkGetDeviceProcAddr(device, "vkCreateRenderPass");
     vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
 static void graphics_createframebuffers()
 {
-    PFN_vkCreateFramebuffer vkCreateFramebuffer;
     VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
     size_t i;
 
     framebuffers = malloc(sizeof(VkFramebuffer) * swapchainImageCount);
-    vkCreateFramebuffer = (PFN_vkCreateFramebuffer)vkGetDeviceProcAddr(device, "vkCreateFramebuffer");
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -307,7 +281,6 @@ static void graphics_createshaders()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
-    PFN_vkCreateGraphicsPipelines          vkCreateGraphicsPipelines;
     VkGraphicsPipelineCreateInfo           createInfo                 = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo        vertShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo        fragShaderStage            = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
@@ -321,7 +294,6 @@ static void graphics_creategraphicspipeline()
     VkPipelineColorBlendAttachmentState    colorBlendAttachment       = { 0 };
     VkPipelineDynamicStateCreateInfo       dynamicState               = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     const VkDynamicState                   states[]                   = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-    PFN_vkCreatePipelineLayout             vkCreatePipelineLayout;
     VkPipelineLayoutCreateInfo             pipelineLayoutCreateInfo   = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 
     vertShaderStage.stage                = VK_SHADER_STAGE_VERTEX_BIT;
@@ -354,7 +326,6 @@ static void graphics_creategraphicspipeline()
     dynamicState.dynamicStateCount       = 2;
     dynamicState.pDynamicStates          = states;
 
-    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)vkGetDeviceProcAddr(device, "vkCreatePipelineLayout");
     vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
 
     createInfo.stageCount                = 2;
@@ -369,7 +340,6 @@ static void graphics_creategraphicspipeline()
     createInfo.layout                    = pipelineLayout;
     createInfo.renderPass                = renderPass;
 
-    vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)vkGetDeviceProcAddr(device, "vkCreateGraphicsPipelines");
     vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
 
     graphics_destroyshader(vertShader);
@@ -386,11 +356,9 @@ static void graphics_createsurface()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
 static void graphics_createswapchain()
 {
-    PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
     VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
     VkSwapchainKHR oldSwapchain;
-    PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
     static void graphics_destroyimageviews();
     static void graphics_destroyfences();
     static void graphics_freecommandbuffers();
@@ -421,7 +389,6 @@ static void graphics_createswapchain()
     createInfo.oldSwapchain     = oldSwapchain;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
-    vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)vkGetDeviceProcAddr(device, "vkCreateSwapchainKHR");
     vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
 
     if (oldSwapchain != VK_NULL_HANDLE)
@@ -433,7 +400,6 @@ static void graphics_createswapchain()
         graphics_destroysemaphores();
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkDestroySwapchainKHR */
-        vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
         vkDestroySwapchainKHR(device, oldSwapchain, NULL);
     }
 }
@@ -441,9 +407,6 @@ static void graphics_createswapchain()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetSwapchainImagesKHR */
 static void graphics_getswapchainimages()
 {
-    PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
-
-    vkGetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)vkGetDeviceProcAddr(device, "vkGetSwapchainImagesKHR");
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, NULL);
     swapchainImages = malloc(sizeof(VkImage) * swapchainImageCount);
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
@@ -452,11 +415,8 @@ static void graphics_getswapchainimages()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-image-views */
 static void graphics_createimageviews()
 {
-    PFN_vkCreateImageView vkCreateImageView;
     VkImageViewCreateInfo createInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     size_t i;
-
-    vkCreateImageView = (PFN_vkCreateImageView)vkGetDeviceProcAddr(device, "vkCreateImageView");
 
     createInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
     createInfo.format                      = VK_FORMAT_B8G8R8A8_UNORM;
@@ -480,14 +440,9 @@ static void graphics_createimageviews()
 
 static void graphics_destroyframebuffers()
 {
-    PFN_vkQueueWaitIdle vkQueueWaitIdle;
-    PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
     size_t i;
 
-    vkQueueWaitIdle = (PFN_vkQueueWaitIdle)vkGetDeviceProcAddr(device, "vkQueueWaitIdle");
     vkQueueWaitIdle(queue);
-
-    vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)vkGetDeviceProcAddr(device, "vkDestroyFramebuffer");
 
     for (i = swapchainImageCount; i-- > 0;)
     {
@@ -498,10 +453,7 @@ static void graphics_destroyframebuffers()
 
 static void graphics_destroyimageviews()
 {
-    PFN_vkDestroyImageView vkDestroyImageView;
     size_t i;
-
-    vkDestroyImageView = (PFN_vkDestroyImageView)vkGetDeviceProcAddr(device, "vkDestroyImageView");
 
     for (i = swapchainImageCount; i-- > 0;)
     {
@@ -512,10 +464,7 @@ static void graphics_destroyimageviews()
 
 static void graphics_destroyfences()
 {
-    PFN_vkDestroyFence vkDestroyFence;
     size_t i;
-
-    vkDestroyFence = (PFN_vkDestroyFence)vkGetDeviceProcAddr(device, "vkDestroyFence");
 
     for (i = swapchainImageCount; i-- > 0;)
     {
@@ -527,11 +476,9 @@ static void graphics_destroyfences()
 static void graphics_freecommandbuffers()
 {
     size_t i;
-    PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
 
     for (i = swapchainImageCount; i-- > 0;)
     {
-        vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)vkGetDeviceProcAddr(device, "vkFreeCommandBuffers");
         vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
     }
     free(commandBuffers);
@@ -540,11 +487,9 @@ static void graphics_freecommandbuffers()
 static void graphics_destroycommandpools()
 {
     size_t i;
-    PFN_vkDestroyCommandPool vkDestroyCommandPool;
 
     for (i = swapchainImageCount; i-- > 0;)
     {
-        vkDestroyCommandPool = (PFN_vkDestroyCommandPool)vkGetDeviceProcAddr(device, "vkDestroyCommandPool");
         vkDestroyCommandPool(device, commandPools[i], NULL);
     }
     free(commandPools);
@@ -553,9 +498,6 @@ static void graphics_destroycommandpools()
 
 static void graphics_destroysemaphores()
 {
-    PFN_vkDestroySemaphore vkDestroySemaphore;
-
-    vkDestroySemaphore = (PFN_vkDestroySemaphore)vkGetDeviceProcAddr(device, "vkDestroySemaphore");
     vkDestroySemaphore(device, releaseSemaphore, NULL);
     vkDestroySemaphore(device, acquireSemaphore, NULL);
 }
@@ -563,13 +505,8 @@ static void graphics_destroysemaphores()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
 static VkResult graphics_acquirenextimage()
 {
-    PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
     VkResult res;
-    PFN_vkWaitForFences vkWaitForFences;
-    PFN_vkResetFences vkResetFences;
-    PFN_vkResetCommandPool vkResetCommandPool;
 
-    vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR");
     res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
     if (res != VK_SUCCESS)
     {
@@ -577,14 +514,11 @@ static VkResult graphics_acquirenextimage()
     }
     if (fences[imageIndex] != VK_NULL_HANDLE)
     {
-        vkWaitForFences = (PFN_vkWaitForFences)vkGetDeviceProcAddr(device, "vkWaitForFences");
         vkWaitForFences(device, 1, &fences[imageIndex], VK_TRUE, UINT64_MAX);
-        vkResetFences = (PFN_vkResetFences)vkGetDeviceProcAddr(device, "vkResetFences");
         vkResetFences(device, 1, &fences[imageIndex]);
     }
     if (commandPools[imageIndex] != VK_NULL_HANDLE)
     {
-        vkResetCommandPool = (PFN_vkResetCommandPool)vkGetDeviceProcAddr(device, "vkResetCommandPool");
         vkResetCommandPool(device, commandPools[imageIndex], 0);
     }
     return VK_SUCCESS;
@@ -628,13 +562,11 @@ void graphics_init()
 Shader graphics_createshader(const char *shader, size_t size)
 {
     VkShaderModule shaderModule;
-    PFN_vkCreateShaderModule vkCreateShaderModule;
     VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
 
     createInfo.codeSize = size;
     createInfo.pCode    = (const uint32_t *)shader;
 
-    vkCreateShaderModule = (PFN_vkCreateShaderModule)vkGetDeviceProcAddr(device, "vkCreateShaderModule");
     vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
 
     return shaderModule;
@@ -642,18 +574,13 @@ Shader graphics_createshader(const char *shader, size_t size)
 
 void graphics_destroyshader(Shader shader)
 {
-    PFN_vkDestroyShaderModule vkDestroyShaderModule;
-
-    vkDestroyShaderModule = (PFN_vkDestroyShaderModule)vkGetDeviceProcAddr(device, "vkDestroyShaderModule");
     vkDestroyShaderModule(device, shader, NULL);
 }
 
 int graphics_isminimized()
 {
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
 
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevices[0], surface, &surfaceCapabilities);
 
     if (surfaceCapabilities.currentExtent.width  == 0 &&
@@ -668,31 +595,18 @@ int graphics_isminimized()
 void graphics_predraw()
 {
     /* 6.4. Command Buffer Recording */
-    PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 
-    /* 7.8. Wait Idle Operations */
-    PFN_vkQueueWaitIdle vkQueueWaitIdle;
-
     /* 8.4. Render Pass Commands */
-    PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-
-    /* 10.10. Pipeline Binding */
-    PFN_vkCmdBindPipeline vkCmdBindPipeline;
 
     /* 19.3. Clear Values */
     VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
 
-    /* 21.3. Programmable Primitive Shading */
-    PFN_vkCmdDraw vkCmdDraw;
-
     /* 27.9. Controlling the Viewport */
-    PFN_vkCmdSetViewport vkCmdSetViewport;
     VkViewport viewport = { 0 };
 
     /* 29.2. Scissor Test */
-    PFN_vkCmdSetScissor vkCmdSetScissor;
     VkRect2D scissor = { 0 };
 
     /* 34.10. WSI Swapchain */
@@ -713,13 +627,11 @@ void graphics_predraw()
 
     if (res != VK_SUCCESS)
     {
-        vkQueueWaitIdle = (PFN_vkQueueWaitIdle)vkGetDeviceProcAddr(device, "vkQueueWaitIdle");
         vkQueueWaitIdle(queue);
         return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
-    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)vkGetDeviceProcAddr(device, "vkBeginCommandBuffer");
     vkBeginCommandBuffer(commandBuffers[imageIndex], &beginInfo);
 
     renderPassBegin.renderPass               = renderPass;
@@ -730,11 +642,9 @@ void graphics_predraw()
     renderPassBegin.pClearValues             = &clearValue;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
-    vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)vkGetDeviceProcAddr(device, "vkCmdBeginRenderPass");
     vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-binding */
-    vkCmdBindPipeline = (PFN_vkCmdBindPipeline)vkGetDeviceProcAddr(device, "vkCmdBindPipeline");
     vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
     viewport.width    = w;
@@ -743,31 +653,21 @@ void graphics_predraw()
     viewport.maxDepth = 1.0f;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap27.html#vertexpostproc-viewport */
-    vkCmdSetViewport = (PFN_vkCmdSetViewport)vkGetDeviceProcAddr(device, "vkCmdSetViewport");
     vkCmdSetViewport(commandBuffers[imageIndex], 0, 1, &viewport);
 
     scissor.extent.width  = w;
     scissor.extent.height = h;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
-    vkCmdSetScissor = (PFN_vkCmdSetScissor)vkGetDeviceProcAddr(device, "vkCmdSetScissor");
     vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
-    vkCmdDraw = (PFN_vkCmdDraw)vkGetDeviceProcAddr(device, "vkCmdDraw");
     vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 }
 
 void graphics_postdraw()
 {
-    /* 8.4. Render Pass Commands */
-    PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
-
-    /* 6.4. Command Buffer Recording */
-    PFN_vkEndCommandBuffer vkEndCommandBuffer;
-
     /* 6.5. Command Buffer Submission */
-    PFN_vkQueueSubmit vkQueueSubmit;
     VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
 
     /* 7.1.2. Pipeline Stages */
@@ -779,11 +679,9 @@ void graphics_postdraw()
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCmdEndRenderPass */
-    vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)vkGetDeviceProcAddr(device, "vkCmdEndRenderPass");
     vkCmdEndRenderPass(commandBuffers[imageIndex]);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkEndCommandBuffer */
-    vkEndCommandBuffer = (PFN_vkEndCommandBuffer)vkGetDeviceProcAddr(device, "vkEndCommandBuffer");
     vkEndCommandBuffer(commandBuffers[imageIndex]);
 
     submit.commandBufferCount   = 1;
@@ -795,13 +693,11 @@ void graphics_postdraw()
     submit.pSignalSemaphores    = &releaseSemaphore;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkQueueSubmit */
-    vkQueueSubmit = (PFN_vkQueueSubmit)vkGetDeviceProcAddr(device, "vkQueueSubmit");
     vkQueueSubmit(queue, 1, &submit, fences[imageIndex]);
 }
 
 void graphics_present()
 {
-    PFN_vkQueuePresentKHR vkQueuePresentKHR;
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     VkResult res;
 
@@ -816,7 +712,6 @@ void graphics_present()
     presentInfo.waitSemaphoreCount = 1;
     presentInfo.pWaitSemaphores    = &releaseSemaphore;
 
-    vkQueuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(device, "vkQueuePresentKHR");
     res = vkQueuePresentKHR(queue, &presentInfo);
 
     if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
@@ -827,16 +722,13 @@ void graphics_present()
 
 void graphics_resize()
 {
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
-    PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
 
     if (device == VK_NULL_HANDLE)
     {
         return;
     }
 
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevices[0], surface, &surfaceCapabilities);
 
     if (surfaceCapabilities.currentExtent.width  == w &&
@@ -845,7 +737,6 @@ void graphics_resize()
         return;
     }
 
-    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
     vkDeviceWaitIdle(device);
 
     graphics_destroyframebuffers();
@@ -860,34 +751,15 @@ void graphics_resize()
 
 void graphics_shutdown(void)
 {
-    PFN_vkDeviceWaitIdle        vkDeviceWaitIdle;
-    PFN_vkDestroySurfaceKHR     vkDestroySurfaceKHR;
-    PFN_vkDestroySwapchainKHR   vkDestroySwapchainKHR;
-    PFN_vkDestroyPipeline       vkDestroyPipeline;
-    PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
-    PFN_vkDestroyRenderPass     vkDestroyRenderPass;
-    PFN_vkDestroyDevice         vkDestroyDevice;
-    PFN_vkDestroyInstance       vkDestroyInstance;
-
-    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)vkGetDeviceProcAddr(device, "vkDeviceWaitIdle");
     vkDeviceWaitIdle(device);
 
     graphics_destroyframebuffers();
     graphics_destroyimageviews();
 
-    vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)vkGetDeviceProcAddr(device, "vkDestroySwapchainKHR");
     vkDestroySwapchainKHR(device, swapchain, NULL);
-
-    vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)vkGetInstanceProcAddr(instance, "vkDestroySurfaceKHR");
     vkDestroySurfaceKHR(instance, surface, NULL);
-
-    vkDestroyPipeline = (PFN_vkDestroyPipeline)vkGetDeviceProcAddr(device, "vkDestroyPipeline");
     vkDestroyPipeline(device, graphicsPipeline, NULL);
-
-    vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)vkGetDeviceProcAddr(device, "vkDestroyPipelineLayout");
     vkDestroyPipelineLayout(device, pipelineLayout, NULL);
-
-    vkDestroyRenderPass = (PFN_vkDestroyRenderPass)vkGetDeviceProcAddr(device, "vkDestroyRenderPass");
     vkDestroyRenderPass(device, renderPass, NULL);
 
     graphics_destroysemaphores();
@@ -895,11 +767,9 @@ void graphics_shutdown(void)
     graphics_freecommandbuffers();
     graphics_destroycommandpools();
 
-    vkDestroyDevice = (PFN_vkDestroyDevice)vkGetDeviceProcAddr(device, "vkDestroyDevice");
     vkDestroyDevice(device, NULL);
 
     free(physicalDevices);
 
-    vkDestroyInstance = (PFN_vkDestroyInstance)vkGetInstanceProcAddr(instance, "vkDestroyInstance");
     vkDestroyInstance(instance, NULL);
 }

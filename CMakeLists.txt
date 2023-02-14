@@ -31,8 +31,8 @@ add_subdirectory(lib/physfs-release-3.2.0)
 # add the SDL2 library
 find_package(SDL2 2.26.3 EXACT REQUIRED PATHS lib)
 
-# add the Vulkan library
-find_package(Vulkan REQUIRED)
+# add the volk library
+add_subdirectory(lib/volk)
 
 # add the GLM library
 find_package(glm REQUIRED PATHS lib/glm/cmake)
@@ -40,7 +40,7 @@ find_package(glm REQUIRED PATHS lib/glm/cmake)
 target_link_libraries(game PUBLIC PhysFS::PhysFS)
 target_link_libraries(game PUBLIC SDL2::SDL2)
 target_link_libraries(game PUBLIC SDL2::SDL2main)
-target_link_libraries(game PUBLIC Vulkan::Headers)
+target_link_libraries(game PUBLIC volk::volk)
 target_link_libraries(game PUBLIC glm::glm)
 
 # add the binary tree to the search path for include files
@@ -50,7 +50,7 @@ target_include_directories(game PUBLIC
                           PhysFS::PhysFS
                           SDL2::SDL2
                           SDL2::SDL2main
-                          Vulkan::Headers
+                          volk::volk
                           glm::glm
                           )
 
