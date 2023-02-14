@@ -61,13 +61,6 @@ static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
 static uint32_t imageIndex;
 
-/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-functionpointers */
-static void graphics_getcommandfunctionpointers()
-{
-    // FIXME: Separate SDL from this implementation.
-    vkGetInstanceProcAddr = SDL_Vulkan_GetVkGetInstanceProcAddr();
-}
-
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
 {
@@ -529,7 +522,6 @@ void graphics_init()
     void graphics_shutdown(void);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
-    graphics_getcommandfunctionpointers();
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
