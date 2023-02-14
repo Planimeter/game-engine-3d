@@ -1,6 +1,6 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include "SDL.h"
+#include <stdint.h>
 
 static uint64_t dt = 0;
 static uint64_t prevtime = 0;

@@ -1,10 +1,8 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include "SDL.h"
 #include "filesystem.h"
 #include "graphics.h"
-#include <stdio.h>
-#include <stdlib.h>
+#include <stdint.h>
 
 void framework_init(const char *argv0)
 {
