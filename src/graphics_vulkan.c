@@ -91,7 +91,7 @@ static void graphics_createinstance()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.enabledLayerCount       = 1;
     createInfo.ppEnabledLayerNames     = enabledLayerNames;
-    createInfo.enabledExtensionCount   = sizeof names;
+    createInfo.enabledExtensionCount   = 2;
     createInfo.ppEnabledExtensionNames = names;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#vkCreateInstance */
