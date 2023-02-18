@@ -1,13 +1,14 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "filesystem.h"
+#include "window.h"
 #include "graphics.h"
 #include <stdint.h>
 
 void framework_init(const char *argv0)
 {
     filesystem_init(argv0);
-
+    window_init();
     graphics_init();
 }
 

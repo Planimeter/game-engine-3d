@@ -7,10 +7,11 @@ project(game)
 add_executable(game
                src/event_sdl.c
                src/filesystem_physfs.c
-               src/framework_sdl.c
+               src/framework.c
                src/graphics_vulkan.c
                src/main.c
-               src/timer_sdl.c)
+               src/timer_sdl.c
+               src/window_sdl.c)
 
 # specify the C++ standard
 set_property(TARGET game PROPERTY CXX_EXTENSIONS OFF)

@@ -3,11 +3,11 @@
 #include "framework.h"
 #include "filesystem.h"
 #include "graphics.h"
+#include "window.h"
 #include <stdlib.h>
 
 #define VK_NO_PROTOTYPES
 #include "volk.h"
-#include "SDL_vulkan.h"
 
 /* 4.2. Instances */
 static VkInstance instance;
@@ -352,8 +352,7 @@ static void graphics_creategraphicspipeline()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
-    // FIXME: Separate SDL from this implementation.
-    SDL_Vulkan_CreateSurface(window, instance, &surface);
+    window_vulkan_createsurface(instance, &surface);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
@@ -368,8 +367,7 @@ static void graphics_createswapchain()
     static void graphics_destroycommandpools();
     static void graphics_destroysemaphores();
 
-    // FIXME: Separate SDL from this implementation.
-    SDL_Vulkan_GetDrawableSize(window, &w, &h);
+    window_vulkan_getdrawablesize(&w, &h);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
     imageExtent.width  = w;
