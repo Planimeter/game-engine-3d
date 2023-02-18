@@ -3,7 +3,7 @@
 #ifndef FRAMEWORK_H
 #define FRAMEWORK_H
 
-#include "SDL.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
