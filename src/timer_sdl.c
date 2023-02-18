@@ -1,5 +1,6 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
+#include "timer.h"
 #include "SDL.h"
 
 static uint64_t dt = 0;

@@ -1,6 +1,6 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include <stdint.h>
+#include "timer.h"
 
 static uint64_t dt = 0;
 static uint64_t prevtime = 0;
