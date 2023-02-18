@@ -64,29 +64,40 @@ static uint32_t imageIndex;
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
 {
-    unsigned int count;
-    char **names;
+    char *names[2];
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
 
     volkInitialize();
 
-    // FIXME: Separate SDL from this implementation.
-    SDL_Vulkan_GetInstanceExtensions(window, &count, NULL);
-    names = malloc(sizeof(char *) * count);
-    SDL_Vulkan_GetInstanceExtensions(window, &count, (const char **)names);
+    names[0] = VK_KHR_SURFACE_EXTENSION_NAME;
+#if defined(VK_USE_PLATFORM_ANDROID_KHR)
+    names[1] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_WIN32_KHR)
+    names[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_METAL_EXT)
+    names[1] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_XCB_KHR)
+    names[1] = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_XLIB_KHR)
+    names[1] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
+    names[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+#elif defined(VK_USE_PLATFORM_DISPLAY_KHR)
+    names[1] = VK_KHR_DISPLAY_EXTENSION_NAME;
+#else
+    #error Platform not supported
+#endif
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.enabledLayerCount       = 1;
     createInfo.ppEnabledLayerNames     = enabledLayerNames;
-    createInfo.enabledExtensionCount   = count;
-    createInfo.ppEnabledExtensionNames = (const char* const*)names;
+    createInfo.enabledExtensionCount   = sizeof names;
+    createInfo.ppEnabledExtensionNames = names;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#vkCreateInstance */
     vkCreateInstance(&createInfo, NULL, &instance);
     volkLoadInstance(instance);
-
-    free(names);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-physical-device-enumeration */
