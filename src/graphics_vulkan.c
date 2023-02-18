@@ -64,13 +64,12 @@ static uint32_t imageIndex;
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
 {
-    char *names[2];
+    char *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
 
     volkInitialize();
 
-    names[0] = VK_KHR_SURFACE_EXTENSION_NAME;
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
     names[1] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_WIN32_KHR)
