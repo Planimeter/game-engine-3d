@@ -7,6 +7,7 @@
 extern "C" {
 #endif
 
+/* https://github.com/libsdl-org/SDL/blob/release-2.26.3/include/SDL_vulkan.h#L39-L58 */
 /* Avoid including vulkan.h, don't define VkInstance if it's already included */
 #ifdef VULKAN_H_
 #define NO_VULKAN_TYPEDEFS
