@@ -48,6 +48,9 @@ static Shader fragShader;
 static VkPipelineLayout pipelineLayout;
 static VkPipeline graphicsPipeline;
 
+/* 12.1. Buffers */
+static VkBuffer vertexBuffer;
+
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
 
@@ -349,6 +352,14 @@ static void graphics_creategraphicspipeline()
     graphics_destroyshader(fragShader);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
+static void graphics_createvertexbuffer()
+{
+    VkBufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+
+    vkCreateBuffer(device, &createInfo, NULL, &vertexBuffer);
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -543,6 +554,8 @@ void graphics_init()
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
     graphics_creategraphicspipeline();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
+    graphics_createvertexbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     graphics_createswapchain();
@@ -758,6 +771,7 @@ void graphics_shutdown(void)
 
     vkDestroySwapchainKHR(device, swapchain, NULL);
     vkDestroySurfaceKHR(instance, surface, NULL);
+    vkDestroyBuffer(device, vertexBuffer, NULL);
     vkDestroyPipeline(device, graphicsPipeline, NULL);
     vkDestroyPipelineLayout(device, pipelineLayout, NULL);
     vkDestroyRenderPass(device, renderPass, NULL);
