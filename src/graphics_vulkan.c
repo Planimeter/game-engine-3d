@@ -357,6 +357,10 @@ static void graphics_createvertexbuffer()
 {
     VkBufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 
+    createInfo.size        = 0;
+    createInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
     vkCreateBuffer(device, &createInfo, NULL, &vertexBuffer);
 }
 
