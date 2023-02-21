@@ -11,6 +11,7 @@ add_executable(game
                src/graphics_vulkan.c
                src/main.c
                src/timer_sdl.c
+               src/vk_mem_alloc.cpp
                src/window_sdl.c)
 
 # specify the C++ standard
@@ -71,6 +72,11 @@ elseif(UNIX)
     endif()
 endif()
 
+# add the Vulkan Memory Allocator library
+add_subdirectory(lib/VulkanMemoryAllocator-3.0.1)
+target_compile_definitions(VulkanMemoryAllocator PUBLIC VMA_STATIC_VULKAN_FUNCTIONS=0)
+target_compile_definitions(VulkanMemoryAllocator PUBLIC VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
+
 # add the GLM library
 find_package(glm REQUIRED PATHS lib/glm/cmake)
 
@@ -78,6 +84,7 @@ target_link_libraries(game PUBLIC PhysFS::PhysFS)
 target_link_libraries(game PUBLIC SDL2::SDL2)
 target_link_libraries(game PUBLIC SDL2::SDL2main)
 target_link_libraries(game PUBLIC volk::volk)
+target_link_libraries(game PUBLIC VulkanMemoryAllocator)
 target_link_libraries(game PUBLIC glm::glm)
 
 # add the binary tree to the search path for include files
@@ -88,6 +95,7 @@ target_include_directories(game PUBLIC
                           SDL2::SDL2
                           SDL2::SDL2main
                           volk::volk
+                          VulkanMemoryAllocator
                           glm::glm
                           )
 

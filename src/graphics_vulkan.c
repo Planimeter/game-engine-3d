@@ -9,6 +9,8 @@
 #define VK_NO_PROTOTYPES
 #include "volk.h"
 
+#include "vk_mem_alloc.h"
+
 /* 4.2. Instances */
 static VkInstance instance;
 
@@ -17,6 +19,9 @@ static VkPhysicalDevice *physicalDevices;
 
 /* 5.2.1. Device Creation */
 static VkDevice device;
+
+/* VmaAllocator Struct */
+static VmaAllocator allocator;
 
 /* 5.3.2. Queue Creation */
 static VkQueue queue;
@@ -50,6 +55,9 @@ static VkPipeline graphicsPipeline;
 
 /* 12.1. Buffers */
 static VkBuffer vertexBuffer;
+
+/* VmaAllocation Struct */
+static VmaAllocation allocation;
 
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
@@ -132,6 +140,64 @@ static void graphics_createdevice()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
     vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
     volkLoadDevice(device);
+}
+
+/* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/quick_start.html#quick_start_initialization */
+static void graphics_createallocator()
+{
+    VmaAllocatorCreateInfo allocatorCreateInfo = { 0 };
+    VmaVulkanFunctions vulkanFunctions;
+
+    /// Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS.
+    vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
+    /// Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS.
+    vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
+    vulkanFunctions.vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties;
+    vulkanFunctions.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
+    vulkanFunctions.vkAllocateMemory = vkAllocateMemory;
+    vulkanFunctions.vkFreeMemory = vkFreeMemory;
+    vulkanFunctions.vkMapMemory = vkMapMemory;
+    vulkanFunctions.vkUnmapMemory = vkUnmapMemory;
+    vulkanFunctions.vkFlushMappedMemoryRanges = vkFlushMappedMemoryRanges;
+    vulkanFunctions.vkInvalidateMappedMemoryRanges = vkInvalidateMappedMemoryRanges;
+    vulkanFunctions.vkBindBufferMemory = vkBindBufferMemory;
+    vulkanFunctions.vkBindImageMemory = vkBindImageMemory;
+    vulkanFunctions.vkGetBufferMemoryRequirements = vkGetBufferMemoryRequirements;
+    vulkanFunctions.vkGetImageMemoryRequirements = vkGetImageMemoryRequirements;
+    vulkanFunctions.vkCreateBuffer = vkCreateBuffer;
+    vulkanFunctions.vkDestroyBuffer = vkDestroyBuffer;
+    vulkanFunctions.vkCreateImage = vkCreateImage;
+    vulkanFunctions.vkDestroyImage = vkDestroyImage;
+    vulkanFunctions.vkCmdCopyBuffer = vkCmdCopyBuffer;
+#if VMA_DEDICATED_ALLOCATION || VMA_VULKAN_VERSION >= 1001000
+    /// Fetch "vkGetBufferMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetBufferMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension.
+    vulkanFunctions.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2KHR;
+    /// Fetch "vkGetImageMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetImageMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension.
+    vulkanFunctions.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2KHR;
+#endif
+#if VMA_BIND_MEMORY2 || VMA_VULKAN_VERSION >= 1001000
+    /// Fetch "vkBindBufferMemory2" on Vulkan >= 1.1, fetch "vkBindBufferMemory2KHR" when using VK_KHR_bind_memory2 extension.
+    vulkanFunctions.vkBindBufferMemory2KHR = vkBindBufferMemory2KHR;
+    /// Fetch "vkBindImageMemory2" on Vulkan >= 1.1, fetch "vkBindImageMemory2KHR" when using VK_KHR_bind_memory2 extension.
+    vulkanFunctions.vkBindImageMemory2KHR = vkBindImageMemory2KHR;
+#endif
+#if VMA_MEMORY_BUDGET || VMA_VULKAN_VERSION >= 1001000
+    vulkanFunctions.vkGetPhysicalDeviceMemoryProperties2KHR = vkGetPhysicalDeviceMemoryProperties2KHR;
+#endif
+#if VMA_VULKAN_VERSION >= 1003000
+    /// Fetch from "vkGetDeviceBufferMemoryRequirements" on Vulkan >= 1.3, but you can also fetch it from "vkGetDeviceBufferMemoryRequirementsKHR" if you enabled extension VK_KHR_maintenance4.
+    vulkanFunctions.vkGetDeviceBufferMemoryRequirements = vkGetDeviceBufferMemoryRequirements;
+    /// Fetch from "vkGetDeviceImageMemoryRequirements" on Vulkan >= 1.3, but you can also fetch it from "vkGetDeviceImageMemoryRequirementsKHR" if you enabled extension VK_KHR_maintenance4.
+    vulkanFunctions.vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements;
+#endif
+
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorCreateInfo.physicalDevice   = physicalDevices[0];
+    allocatorCreateInfo.device           = device;
+    allocatorCreateInfo.instance         = instance;
+    allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
+
+    vmaCreateAllocator(&allocatorCreateInfo, &allocator);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
@@ -355,13 +421,16 @@ static void graphics_creategraphicspipeline()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
 static void graphics_createvertexbuffer()
 {
-    VkBufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 
-    createInfo.size        = 0;
-    createInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    bufferInfo.size        = 0;
+    bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateBuffer(device, &createInfo, NULL, &vertexBuffer);
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+
+    vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
@@ -549,6 +618,9 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
     graphics_createdevice();
+    /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/quick_start.html */
+    graphics_createallocator();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createsemaphores();
@@ -785,6 +857,8 @@ void graphics_shutdown(void)
     graphics_freecommandbuffers();
     graphics_destroycommandpools();
 
+    vmaDestroyBuffer(allocator, vertexBuffer, allocation);
+    vmaDestroyAllocator(allocator);
     vkDestroyDevice(device, NULL);
 
     free(physicalDevices);
