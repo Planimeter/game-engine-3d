@@ -412,10 +412,18 @@ static void graphics_creategraphicspipeline()
     createInfo.layout                    = pipelineLayout;
     createInfo.renderPass                = renderPass;
 
+    if (graphicsPipeline != VK_NULL_HANDLE)
+    {
+        vkDestroyPipeline(device, graphicsPipeline, NULL);
+        graphicsPipeline = VK_NULL_HANDLE;
+    }
+
     vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
 
     graphics_destroyshader(vertShader);
     graphics_destroyshader(fragShader);
+    vertShader = VK_NULL_HANDLE;
+    fragShader = VK_NULL_HANDLE;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
@@ -838,8 +846,11 @@ void graphics_resize()
     graphics_createframebuffers();
 }
 
-void graphics_setshader(Shader vertShader, Shader fragShader)
+void graphics_setshader(Shader _vertShader, Shader _fragShader)
 {
+    vertShader = _vertShader;
+    fragShader = _fragShader;
+    graphics_creategraphicspipeline();
 }
 
 void graphics_shutdown(void)
