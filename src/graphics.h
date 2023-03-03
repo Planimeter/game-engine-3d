@@ -17,6 +17,7 @@ void   graphics_predraw();
 void   graphics_postdraw();
 void   graphics_present();
 void   graphics_resize();
+void   graphics_setshader(Shader vertShader, Shader fragShader);
 void   graphics_shutdown(void);
 
 #ifdef __cplusplus

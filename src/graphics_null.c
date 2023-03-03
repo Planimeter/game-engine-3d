@@ -53,6 +53,10 @@ void graphics_resize()
 {
 }
 
+void graphics_setshader(Shader vertShader, Shader fragShader)
+{
+}
+
 void graphics_shutdown(void)
 {
 }

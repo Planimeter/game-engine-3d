@@ -838,6 +838,10 @@ void graphics_resize()
     graphics_createframebuffers();
 }
 
+void graphics_setshader(Shader vertShader, Shader fragShader)
+{
+}
+
 void graphics_shutdown(void)
 {
     vkDeviceWaitIdle(device);
