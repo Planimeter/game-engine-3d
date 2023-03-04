@@ -869,7 +869,6 @@ void graphics_shutdown(void)
 
     vkDestroySwapchainKHR(device, swapchain, NULL);
     vkDestroySurfaceKHR(instance, surface, NULL);
-    vkDestroyBuffer(device, vertexBuffer, NULL);
     vkDestroyPipeline(device, graphicsPipeline, NULL);
     vkDestroyPipelineLayout(device, pipelineLayout, NULL);
     vkDestroyRenderPass(device, renderPass, NULL);
