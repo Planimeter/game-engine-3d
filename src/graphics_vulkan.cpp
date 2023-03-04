@@ -154,9 +154,9 @@ static void graphics_createallocator()
     VmaAllocatorCreateInfo allocatorCreateInfo = { 0 };
     VmaVulkanFunctions vulkanFunctions;
 
-    /// Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS.
+    /* Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS. */
     vulkanFunctions.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
-    /// Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS.
+    /* Required when using VMA_DYNAMIC_VULKAN_FUNCTIONS. */
     vulkanFunctions.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
     vulkanFunctions.vkGetPhysicalDeviceProperties = vkGetPhysicalDeviceProperties;
     vulkanFunctions.vkGetPhysicalDeviceMemoryProperties = vkGetPhysicalDeviceMemoryProperties;
@@ -176,15 +176,15 @@ static void graphics_createallocator()
     vulkanFunctions.vkDestroyImage = vkDestroyImage;
     vulkanFunctions.vkCmdCopyBuffer = vkCmdCopyBuffer;
 #if VMA_DEDICATED_ALLOCATION || VMA_VULKAN_VERSION >= 1001000
-    /// Fetch "vkGetBufferMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetBufferMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension.
+    /* Fetch "vkGetBufferMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetBufferMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension. */
     vulkanFunctions.vkGetBufferMemoryRequirements2KHR = vkGetBufferMemoryRequirements2;
-    /// Fetch "vkGetImageMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetImageMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension.
+    /* Fetch "vkGetImageMemoryRequirements2" on Vulkan >= 1.1, fetch "vkGetImageMemoryRequirements2KHR" when using VK_KHR_dedicated_allocation extension. */
     vulkanFunctions.vkGetImageMemoryRequirements2KHR = vkGetImageMemoryRequirements2;
 #endif
 #if VMA_BIND_MEMORY2 || VMA_VULKAN_VERSION >= 1001000
-    /// Fetch "vkBindBufferMemory2" on Vulkan >= 1.1, fetch "vkBindBufferMemory2KHR" when using VK_KHR_bind_memory2 extension.
+    /* Fetch "vkBindBufferMemory2" on Vulkan >= 1.1, fetch "vkBindBufferMemory2KHR" when using VK_KHR_bind_memory2 extension. */
     vulkanFunctions.vkBindBufferMemory2KHR = vkBindBufferMemory2;
-    /// Fetch "vkBindImageMemory2" on Vulkan >= 1.1, fetch "vkBindImageMemory2KHR" when using VK_KHR_bind_memory2 extension.
+    /* Fetch "vkBindImageMemory2" on Vulkan >= 1.1, fetch "vkBindImageMemory2KHR" when using VK_KHR_bind_memory2 extension. */
     vulkanFunctions.vkBindImageMemory2KHR = vkBindImageMemory2;
 #endif
 #if VMA_MEMORY_BUDGET || VMA_VULKAN_VERSION >= 1001000
