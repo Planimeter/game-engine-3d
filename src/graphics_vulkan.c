@@ -116,7 +116,7 @@ static void graphics_enumeratephysicaldevices()
     uint32_t physicalDeviceCount;
 
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
-    physicalDevices = malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
+    physicalDevices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
 
@@ -212,7 +212,7 @@ static void graphics_createcommandpools()
     VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     size_t i;
 
-    commandPools = malloc(sizeof(VkCommandPool) * swapchainImageCount);
+    commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
     createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -229,7 +229,7 @@ static void graphics_allocatecommandbuffers()
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     size_t i;
 
-    commandBuffers = malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
+    commandBuffers = (VkCommandBuffer *)malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -249,7 +249,7 @@ static void graphics_createfences()
     VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     size_t i;
 
-    fences = malloc(sizeof(VkFence) * swapchainImageCount);
+    fences = (VkFence *)malloc(sizeof(VkFence) * swapchainImageCount);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
     createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -317,7 +317,7 @@ static void graphics_createframebuffers()
     VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
     size_t i;
 
-    framebuffers = malloc(sizeof(VkFramebuffer) * swapchainImageCount);
+    framebuffers = (VkFramebuffer *)malloc(sizeof(VkFramebuffer) * swapchainImageCount);
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -369,11 +369,11 @@ static void graphics_creategraphicspipeline()
     VkPipelineLayoutCreateInfo             pipelineLayoutCreateInfo   = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 
     vertShaderStage.stage                = VK_SHADER_STAGE_VERTEX_BIT;
-    vertShaderStage.module               = vertShader;
+    vertShaderStage.module               = (VkShaderModule)vertShader;
     vertShaderStage.pName                = "main";
 
     fragShaderStage.stage                = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStage.module               = fragShader;
+    fragShaderStage.module               = (VkShaderModule)fragShader;
     fragShaderStage.pName                = "main";
 
     stages[0]                            = vertShaderStage;
@@ -430,13 +430,14 @@ static void graphics_creategraphicspipeline()
 static void graphics_createvertexbuffer()
 {
     VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
 
     bufferInfo.size        = 0;
     bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VmaAllocationCreateInfo allocInfo = { 0 };
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
 }
@@ -447,17 +448,18 @@ static void graphics_createsurface()
     window_vulkan_createsurface(instance, &surface);
 }
 
+static void graphics_destroyimageviews();
+static void graphics_destroyfences();
+static void graphics_freecommandbuffers();
+static void graphics_destroycommandpools();
+static void graphics_destroysemaphores();
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
 static void graphics_createswapchain()
 {
     VkSwapchainCreateInfoKHR createInfo = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
     VkExtent2D imageExtent;
     VkSwapchainKHR oldSwapchain;
-    static void graphics_destroyimageviews();
-    static void graphics_destroyfences();
-    static void graphics_freecommandbuffers();
-    static void graphics_destroycommandpools();
-    static void graphics_destroysemaphores();
 
     window_vulkan_getdrawablesize(&w, &h);
 
@@ -501,7 +503,7 @@ static void graphics_createswapchain()
 static void graphics_getswapchainimages()
 {
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, NULL);
-    swapchainImages = malloc(sizeof(VkImage) * swapchainImageCount);
+    swapchainImages = (VkImage *)malloc(sizeof(VkImage) * swapchainImageCount);
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
 }
 
@@ -521,7 +523,7 @@ static void graphics_createimageviews()
     createInfo.subresourceRange.levelCount = 1;
     createInfo.subresourceRange.layerCount = 1;
 
-    swapchainImageViews = malloc(sizeof(VkImageView) * swapchainImageCount);
+    swapchainImageViews = (VkImageView *)malloc(sizeof(VkImageView) * swapchainImageCount);
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -671,7 +673,7 @@ Shader graphics_createshader(const char *shader, size_t size)
 
 void graphics_destroyshader(Shader shader)
 {
-    vkDestroyShaderModule(device, shader, NULL);
+    vkDestroyShaderModule(device, (VkShaderModule)shader, NULL);
 }
 
 int graphics_isminimized()
