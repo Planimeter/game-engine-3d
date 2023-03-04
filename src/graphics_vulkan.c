@@ -75,9 +75,10 @@ static uint32_t imageIndex;
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
 {
-    char *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
+    VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
+    char *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
 
     volkInitialize();
 
@@ -99,7 +100,11 @@ static void graphics_createinstance()
     #error Platform not supported
 #endif
 
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkApplicationInfo */
+    app.apiVersion = VK_API_VERSION_1_3;
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
+    createInfo.pApplicationInfo        = &app;
     createInfo.enabledLayerCount       = 1;
     createInfo.ppEnabledLayerNames     = enabledLayerNames;
     createInfo.enabledExtensionCount   = 2;
