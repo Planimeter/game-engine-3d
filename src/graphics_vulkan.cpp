@@ -10,6 +10,7 @@
 #include "volk.h"
 
 #include "vk_mem_alloc.h"
+#include <glm/vec2.hpp>
 
 /* 4.2. Instances */
 static VkInstance instance;
@@ -431,13 +432,20 @@ static void graphics_creategraphicspipeline()
     fragShader = VK_NULL_HANDLE;
 }
 
+static glm::vec2 triangle_positions[3] = {
+    glm::vec2(0.0, -0.5),
+    glm::vec2(0.5, 0.5),
+    glm::vec2(-0.5, 0.5)
+};
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
 static void graphics_createvertexbuffer()
 {
     VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     VmaAllocationCreateInfo allocInfo = { 0 };
+    void *mappedData;
 
-    bufferInfo.size        = 0;
+    bufferInfo.size        = sizeof(triangle_positions) * sizeof(glm::vec2);
     bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -445,6 +453,10 @@ static void graphics_createvertexbuffer()
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
     vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
+
+    vmaMapMemory(allocator, allocation, &mappedData);
+    memcpy(mappedData, &triangle_positions, sizeof(triangle_positions) * sizeof(glm::vec2));
+    vmaUnmapMemory(allocator, allocation);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
@@ -698,11 +710,17 @@ int graphics_isminimized()
 
 void graphics_predraw()
 {
+    /* 3.5. Command Syntax and Duration */
+    VkDeviceSize offsets[] = {0};
+
     /* 6.4. Command Buffer Recording */
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 
     /* 8.4. Render Pass Commands */
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+
+    /* 12.1. Buffers */
+    VkBuffer vertexBuffers[] = {vertexBuffer};
 
     /* 19.3. Clear Values */
     VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
@@ -765,8 +783,11 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
     vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
 
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#vkCmdBindVertexBuffers */
+    vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
-    vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
+    vkCmdDraw(commandBuffers[imageIndex], sizeof(triangle_positions), 1, 0, 0);
 }
 
 void graphics_postdraw()

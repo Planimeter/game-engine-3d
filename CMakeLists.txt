@@ -8,7 +8,7 @@ add_executable(game
                src/event_sdl.c
                src/filesystem_physfs.c
                src/framework.c
-               src/graphics_vulkan.c
+               src/graphics_vulkan.cpp
                src/main.c
                src/timer_sdl.c
                src/vk_mem_alloc.cpp
