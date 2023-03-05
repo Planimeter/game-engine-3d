@@ -11,6 +11,7 @@
 
 #include "vk_mem_alloc.h"
 #include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
 
 /* 4.2. Instances */
 static VkInstance instance;
@@ -437,10 +438,15 @@ static void graphics_creategraphicspipeline()
     fragShader = VK_NULL_HANDLE;
 }
 
-static glm::vec2 triangle_positions[3] = {
-    glm::vec2(0.0, -0.5),
-    glm::vec2(0.5, 0.5),
-    glm::vec2(-0.5, 0.5)
+typedef struct Vertex {
+    glm::vec2 position;
+    glm::vec3 color;
+} Vertex;
+
+static Vertex triangle_vertices[3] = {
+    glm::vec2(0.0, -0.5), glm::vec3(1.0, 0.0, 0.0),
+    glm::vec2(0.5, 0.5),  glm::vec3(0.0, 1.0, 0.0),
+    glm::vec2(-0.5, 0.5), glm::vec3(0.0, 0.0, 1.0)
 };
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
@@ -450,7 +456,7 @@ static void graphics_createvertexbuffer()
     VmaAllocationCreateInfo allocInfo = { 0 };
     void *mappedData;
 
-    bufferInfo.size        = sizeof(triangle_positions) * sizeof(glm::vec2);
+    bufferInfo.size        = sizeof(triangle_vertices) * sizeof(Vertex);
     bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -460,7 +466,7 @@ static void graphics_createvertexbuffer()
     vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
 
     vmaMapMemory(allocator, allocation, &mappedData);
-    memcpy(mappedData, &triangle_positions, sizeof(triangle_positions) * sizeof(glm::vec2));
+    memcpy(mappedData, &triangle_vertices, sizeof(triangle_vertices) * sizeof(Vertex));
     vmaUnmapMemory(allocator, allocation);
 }
 
@@ -792,7 +798,7 @@ void graphics_predraw()
     vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
-    vkCmdDraw(commandBuffers[imageIndex], sizeof(triangle_positions), 1, 0, 0);
+    vkCmdDraw(commandBuffers[imageIndex], sizeof(triangle_vertices), 1, 0, 0);
 }
 
 void graphics_postdraw()
