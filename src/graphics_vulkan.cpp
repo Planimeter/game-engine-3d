@@ -5,6 +5,7 @@
 #include "graphics.h"
 #include "window.h"
 #include <stdlib.h>
+#include <string.h>
 
 #define VK_NO_PROTOTYPES
 #include "volk.h"

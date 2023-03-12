@@ -3,6 +3,8 @@
 #ifndef GRAPHICS_H
 #define GRAPHICS_H
 
+#include <sys/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

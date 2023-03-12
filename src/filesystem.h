@@ -3,6 +3,8 @@
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 
+#include <sys/types.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
