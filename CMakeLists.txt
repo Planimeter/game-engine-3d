@@ -3,37 +3,25 @@ cmake_minimum_required(VERSION 3.21)
 # set the project name
 project(game)
 
+# specify the list of paths to source files
+set(SOURCES
+   src/event_sdl.c
+   src/filesystem_physfs.c
+   src/framework.c
+   src/graphics_vulkan.cpp
+   src/main.c
+   src/timer_sdl.c
+   src/vk_mem_alloc.cpp
+   src/window_sdl.c
+   )
+
 # add the executable
 if (WIN32)
-    add_executable(game WIN32
-                   src/event_sdl.c
-                   src/filesystem_physfs.c
-                   src/framework.c
-                   src/graphics_vulkan.cpp
-                   src/main.c
-                   src/timer_sdl.c
-                   src/vk_mem_alloc.cpp
-                   src/window_sdl.c)
+    add_executable(game WIN32 ${SOURCES})
 elseif(APPLE)
-    add_executable(game MACOSX_BUNDLE
-                   src/event_sdl.c
-                   src/filesystem_physfs.c
-                   src/framework.c
-                   src/graphics_vulkan.cpp
-                   src/main.c
-                   src/timer_sdl.c
-                   src/vk_mem_alloc.cpp
-                   src/window_sdl.c)
+    add_executable(game MACOSX_BUNDLE ${SOURCES})
 else()
-    add_executable(game
-                   src/event_sdl.c
-                   src/filesystem_physfs.c
-                   src/framework.c
-                   src/graphics_vulkan.cpp
-                   src/main.c
-                   src/timer_sdl.c
-                   src/vk_mem_alloc.cpp
-                   src/window_sdl.c)
+    add_executable(game ${SOURCES})
 endif()
 
 # specify the C++ standard
