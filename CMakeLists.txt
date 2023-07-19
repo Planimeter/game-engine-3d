@@ -4,15 +4,37 @@ cmake_minimum_required(VERSION 3.21)
 project(game)
 
 # add the executable
-add_executable(game
-               src/event_sdl.c
-               src/filesystem_physfs.c
-               src/framework.c
-               src/graphics_vulkan.cpp
-               src/main.c
-               src/timer_sdl.c
-               src/vk_mem_alloc.cpp
-               src/window_sdl.c)
+if (WIN32)
+    add_executable(game WIN32
+                   src/event_sdl.c
+                   src/filesystem_physfs.c
+                   src/framework.c
+                   src/graphics_vulkan.cpp
+                   src/main.c
+                   src/timer_sdl.c
+                   src/vk_mem_alloc.cpp
+                   src/window_sdl.c)
+elseif(APPLE)
+    add_executable(game MACOSX_BUNDLE
+                   src/event_sdl.c
+                   src/filesystem_physfs.c
+                   src/framework.c
+                   src/graphics_vulkan.cpp
+                   src/main.c
+                   src/timer_sdl.c
+                   src/vk_mem_alloc.cpp
+                   src/window_sdl.c)
+else()
+    add_executable(game
+                   src/event_sdl.c
+                   src/filesystem_physfs.c
+                   src/framework.c
+                   src/graphics_vulkan.cpp
+                   src/main.c
+                   src/timer_sdl.c
+                   src/vk_mem_alloc.cpp
+                   src/window_sdl.c)
+endif()
 
 # specify the C++ standard
 set_property(TARGET game PROPERTY CXX_EXTENSIONS OFF)
