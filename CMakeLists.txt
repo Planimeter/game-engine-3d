@@ -84,8 +84,6 @@ endif()
 
 # add the Vulkan Memory Allocator library
 add_subdirectory(lib/VulkanMemoryAllocator-3.0.1)
-target_compile_definitions(VulkanMemoryAllocator PUBLIC VMA_STATIC_VULKAN_FUNCTIONS=0)
-target_compile_definitions(VulkanMemoryAllocator PUBLIC VMA_DYNAMIC_VULKAN_FUNCTIONS=0)
 
 # add the GLM library
 find_package(glm REQUIRED PATHS lib/glm/cmake)
