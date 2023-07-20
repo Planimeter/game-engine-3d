@@ -5,15 +5,15 @@ project(game)
 
 # specify the list of paths to source files
 set(SOURCES
-   src/event_sdl.c
-   src/filesystem_physfs.c
-   src/framework.c
-   src/graphics_vulkan.cpp
-   src/main.c
-   src/timer_sdl.c
-   src/vk_mem_alloc.cpp
-   src/window_sdl.c
-   )
+    src/event_sdl.c
+    src/filesystem_physfs.c
+    src/framework.c
+    src/graphics_vulkan.cpp
+    src/main.c
+    src/timer_sdl.c
+    src/vk_mem_alloc.cpp
+    src/window_sdl.c
+    )
 
 # add the executable
 if (WIN32)
@@ -101,14 +101,14 @@ target_link_libraries(game PUBLIC glm::glm)
 # add the binary tree to the search path for include files
 # so that we will find TutorialConfig.h
 target_include_directories(game PUBLIC
-                          "${PROJECT_BINARY_DIR}"
-                          PhysFS::PhysFS
-                          SDL2::SDL2
-                          SDL2::SDL2main
-                          volk::volk
-                          VulkanMemoryAllocator
-                          glm::glm
-                          )
+                           "${PROJECT_BINARY_DIR}"
+                           PhysFS::PhysFS
+                           SDL2::SDL2
+                           SDL2::SDL2main
+                           volk::volk
+                           VulkanMemoryAllocator
+                           glm::glm
+                           )
 
 if(WIN32)
 add_custom_command(TARGET game POST_BUILD
