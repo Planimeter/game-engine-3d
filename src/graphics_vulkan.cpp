@@ -81,7 +81,7 @@ static void graphics_createinstance()
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
-    char *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
+    char const *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
 
     volkInitialize();
 
