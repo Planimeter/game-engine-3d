@@ -83,7 +83,9 @@ elseif(UNIX)
 endif()
 
 # add the Vulkan Memory Allocator library
+set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
 add_subdirectory(lib/VulkanMemoryAllocator-3.0.1)
+target_compile_options(VulkanMemoryAllocator PUBLIC -Wno-nullability-completeness)
 
 # add the GLM library
 find_package(glm REQUIRED PATHS lib/glm/cmake)
