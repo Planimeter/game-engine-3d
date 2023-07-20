@@ -78,7 +78,8 @@ elseif(UNIX)
         set(DIRECT_TO_DISPLAY TRUE PARENT_SCOPE)
         target_compile_definitions(game PUBLIC VK_USE_PLATFORM_DISPLAY_KHR)
     else()
-        message(FATAL_ERROR "Unknown WSI")
+        # UNDONE: No Window System Integration (WSI) on GitHub Actions.
+        # message(FATAL_ERROR "Unknown WSI")
     endif()
 endif()
 
