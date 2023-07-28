@@ -9,7 +9,7 @@ set(SOURCES
     src/filesystem_physfs.c
     src/framework.c
     src/graphics_vulkan.cpp
-    src/main.c
+    src/main_sdl.c
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c
@@ -41,6 +41,7 @@ set(PHYSFS_BUILD_DOCS FALSE CACHE BOOL "Build doxygen based documentation")
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
+target_compile_definitions(game PUBLIC SDL_MAIN_AVAILABLE)
 find_package(SDL2 2.28.1 EXACT REQUIRED PATHS lib)
 
 # add the volk library
@@ -86,7 +87,9 @@ endif()
 # add the Vulkan Memory Allocator library
 set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
 add_subdirectory(lib/VulkanMemoryAllocator-3.0.1)
-target_compile_options(VulkanMemoryAllocator PUBLIC -Wno-nullability-completeness)
+if (APPLE)
+    target_compile_options(VulkanMemoryAllocator PUBLIC -Wno-nullability-completeness)
+endif()
 
 # add the GLM library
 find_package(glm REQUIRED PATHS lib/glm/cmake)
