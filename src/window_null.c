@@ -10,6 +10,11 @@ void window_init()
     atexit(window_shutdown);
 }
 
+Window window_getwindow()
+{
+    return NULL;
+}
+
 void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
 }

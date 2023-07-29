@@ -2,6 +2,7 @@
 
 #include "SDL.h"
 #include "SDL_vulkan.h"
+#include "window.h"
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -31,6 +32,11 @@ void window_init()
     }
 
     atexit(window_shutdown);
+}
+
+Window window_getwindow()
+{
+    return window;
 }
 
 void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)

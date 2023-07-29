@@ -7,6 +7,8 @@
 extern "C" {
 #endif
 
+typedef void *Window;
+
 /* https://github.com/libsdl-org/SDL/blob/release-2.26.3/include/SDL_vulkan.h#L39-L58 */
 /* Avoid including vulkan.h, don't define VkInstance if it's already included */
 #ifdef VULKAN_H_
@@ -29,10 +31,11 @@ VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkSurfaceKHR)
 typedef VkInstance vulkanInstance;
 typedef VkSurfaceKHR vulkanSurface; /* for compatibility with Tizen */
 
-void window_init();
-void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
-void window_vulkan_getdrawablesize(int *w, int *h);
-void window_shutdown(void);
+void   window_init();
+Window window_getwindow();
+void   window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
+void   window_vulkan_getdrawablesize(int *w, int *h);
+void   window_shutdown(void);
 
 #ifdef __cplusplus
 }
