@@ -1,10 +1,10 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include "SDL.h"
-#include "SDL_vulkan.h"
 #include "window.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include "SDL.h"
+#include "SDL_vulkan.h"
 
 SDL_Window *window;                        /* Declare a pointer  */
 

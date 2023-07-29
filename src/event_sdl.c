@@ -1,7 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include "SDL.h"
 #include "framework.h"
+#include "SDL.h"
 
 int event_poll()
 {

@@ -1,10 +1,10 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
-#include "SDL.h"
 #include "framework.h"
 #include "event.h"
 #include "timer.h"
 #include "graphics.h"
+#include "SDL.h"
 
 static void load(int argc, char *argv[])
 {
