@@ -1,13 +1,19 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "graphics.h"
+#include "window.h"
 #include <stddef.h>
 #include <stdio.h>
+#include "SDL.h"
+
+SDL_GLContext context;
 
 void graphics_init()
 {
     void graphics_shutdown(void);
 
+    Window window = window_getwindow();
+    context = SDL_GL_CreateContext(window);
     atexit(graphics_shutdown);
 }
 
