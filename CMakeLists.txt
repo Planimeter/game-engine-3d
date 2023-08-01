@@ -41,7 +41,6 @@ set(PHYSFS_BUILD_DOCS FALSE CACHE BOOL "Build doxygen based documentation")
 add_subdirectory(lib/physfs-release-3.2.0)
 
 # add the SDL2 library
-target_compile_definitions(game PUBLIC SDL_MAIN_AVAILABLE)
 find_package(SDL2 2.28.1 EXACT REQUIRED PATHS lib)
 
 # add the volk library
