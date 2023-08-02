@@ -8,7 +8,7 @@ set(SOURCES
     src/event_sdl.c
     src/filesystem_physfs.c
     src/framework.c
-    src/graphics_vulkan.cpp
+    src/graphics_opengl_sdl.c
     src/main_sdl.c
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
