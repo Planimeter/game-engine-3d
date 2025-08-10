@@ -19,7 +19,7 @@ void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
 }
 
-void window_vulkan_getdrawablesize(int *w, int *h)
+void window_getwindowsizeinpixels(int *w, int *h)
 {
 }
 

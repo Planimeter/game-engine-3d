@@ -12,13 +12,11 @@ void window_init()
 {
     void window_shutdown(void);
 
-    SDL_Init(SDL_INIT_VIDEO);              /* Initialize SDL2    */
+    SDL_Init(SDL_INIT_VIDEO);              /* Initialize SDL3    */
 
     /* Create an application window with the following settings: */
     window = SDL_CreateWindow(
-        "An SDL2 window",                  /* window title       */
-        SDL_WINDOWPOS_UNDEFINED,           /* initial x position */
-        SDL_WINDOWPOS_UNDEFINED,           /* initial y position */
+        "An SDL3 window",                  /* window title       */
         640,                               /* width, in pixels   */
         480,                               /* height, in pixels  */
         SDL_WINDOW_VULKAN                  /* flags - see below  */
@@ -41,12 +39,12 @@ Window window_getwindow()
 
 void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
-    SDL_Vulkan_CreateSurface(window, instance, surface);
+    SDL_Vulkan_CreateSurface(window, instance, NULL, surface);
 }
 
-void window_vulkan_getdrawablesize(int *w, int *h)
+void window_getwindowsizeinpixels(int *w, int *h)
 {
-    SDL_Vulkan_GetDrawableSize(window, w, h);
+    SDL_GetWindowSizeInPixels(window, w, h);
 }
 
 void window_shutdown(void)

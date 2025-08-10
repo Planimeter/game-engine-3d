@@ -15,6 +15,12 @@ typedef void *Window;
 #define NO_VULKAN_TYPEDEFS
 #endif
 #ifndef NO_VULKAN_TYPEDEFS
+
+/* Only define Vulkan types if SDL3 vulkan header hasn't already defined them */
+#ifndef NO_SDL_VULKAN_TYPEDEFS
+#define NO_SDL_VULKAN_TYPEDEFS
+#endif
+
 #define VK_DEFINE_HANDLE(object) typedef struct object##_T* object;
 
 #if defined(__LP64__) || defined(_WIN64) || defined(__x86_64__) || defined(_M_X64) || defined(__ia64) || defined (_M_IA64) || defined(__aarch64__) || defined(__powerpc64__)
@@ -24,6 +30,7 @@ typedef void *Window;
 #endif
 
 VK_DEFINE_HANDLE(VkInstance)
+VK_DEFINE_HANDLE(VkPhysicalDevice)
 VK_DEFINE_NON_DISPATCHABLE_HANDLE(VkSurfaceKHR)
 
 #endif /* !NO_VULKAN_TYPEDEFS */
@@ -34,7 +41,7 @@ typedef VkSurfaceKHR vulkanSurface; /* for compatibility with Tizen */
 void   window_init();
 Window window_getwindow();
 void   window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
-void   window_vulkan_getdrawablesize(int *w, int *h);
+void   window_getwindowsizeinpixels(int *w, int *h);
 void   window_shutdown(void);
 
 #ifdef __cplusplus

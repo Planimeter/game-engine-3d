@@ -490,7 +490,7 @@ static void graphics_createswapchain()
     VkExtent2D imageExtent;
     VkSwapchainKHR oldSwapchain;
 
-    window_vulkan_getdrawablesize(&w, &h);
+    window_getwindowsizeinpixels(&w, &h);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
     imageExtent.width  = w;
