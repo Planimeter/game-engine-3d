@@ -4,6 +4,7 @@
 #include "filesystem.h"
 #include "graphics.h"
 #include "window.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -81,40 +82,69 @@ static void graphics_createinstance()
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
-    char const *names[2] = { VK_KHR_SURFACE_EXTENSION_NAME };
 
-    volkInitialize();
+    VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to initialize Vulkan loader: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    // Check for portability enumeration extension (required for MoltenVK).
+    uint32_t extensionCount = 0;
+    vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, NULL);
+    VkExtensionProperties* availableExtensions = (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
+    vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, availableExtensions);
+    
+    bool portabilityEnumerationAvailable = false;
+    for (uint32_t i = 0; i < extensionCount; i++) {
+        if (strcmp(availableExtensions[i].extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+            portabilityEnumerationAvailable = true;
+            break;
+        }
+    }
+    free(availableExtensions);
+    
+    // Set up extensions list
+    uint32_t enabledExtensionCount = 2;
+    const char* enabledExtensions[3] = { VK_KHR_SURFACE_EXTENSION_NAME };
+    
+    if (portabilityEnumerationAvailable) {
+        enabledExtensions[enabledExtensionCount++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+        createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    }
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
-    names[1] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
-#elif defined(VK_USE_PLATFORM_WIN32_KHR)
-    names[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_METAL_EXT)
-    names[1] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
-    names[1] = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_XLIB_KHR)
-    names[1] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    names[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
 #elif defined(VK_USE_PLATFORM_DISPLAY_KHR)
-    names[1] = VK_KHR_DISPLAY_EXTENSION_NAME;
+    enabledExtensions[1] = VK_KHR_DISPLAY_EXTENSION_NAME;
 #else
     #error Platform not supported
 #endif
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkApplicationInfo */
-    app.apiVersion = VK_API_VERSION_1_3;
+    app.apiVersion = VK_API_VERSION_1_1;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.pApplicationInfo        = &app;
-    createInfo.enabledLayerCount       = 1;
-    createInfo.ppEnabledLayerNames     = enabledLayerNames;
-    createInfo.enabledExtensionCount   = 2;
-    createInfo.ppEnabledExtensionNames = names;
+    createInfo.enabledLayerCount       = 0;
+    createInfo.ppEnabledLayerNames     = NULL;
+    createInfo.enabledExtensionCount   = enabledExtensionCount;
+    createInfo.ppEnabledExtensionNames = enabledExtensions;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#vkCreateInstance */
-    vkCreateInstance(&createInfo, NULL, &instance);
+    result = vkCreateInstance(&createInfo, NULL, &instance);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create Vulkan instance: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
     volkLoadInstance(instance);
 }
 
