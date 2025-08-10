@@ -97,7 +97,6 @@ add_subdirectory(lib/glm)
 
 target_link_libraries(game PUBLIC PhysFS::PhysFS)
 target_link_libraries(game PUBLIC SDL3::SDL3)
-target_link_libraries(game PUBLIC SDL3::SDL3main)
 target_link_libraries(game PUBLIC volk::volk)
 target_link_libraries(game PUBLIC VulkanMemoryAllocator)
 target_link_libraries(game PUBLIC glm::glm)
@@ -108,7 +107,6 @@ target_include_directories(game PUBLIC
                            "${PROJECT_BINARY_DIR}"
                            PhysFS::PhysFS
                            SDL3::SDL3
-                           SDL3::SDL3main
                            volk::volk
                            VulkanMemoryAllocator
                            glm::glm
