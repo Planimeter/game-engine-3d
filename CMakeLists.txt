@@ -45,7 +45,7 @@ add_subdirectory(lib/physfs-main)
 add_subdirectory(lib/SDL3-3.2.20)
 
 # add the volk library
-add_subdirectory(lib/volk)
+add_subdirectory(lib/volk-1.4.304)
 
 # https://github.com/KhronosGroup/Vulkan-Samples/blob/3df7dba1b1f428f24cd9a242af78540a518f4b67/third_party/CMakeLists.txt#L53-L86
 if(ANDROID)
