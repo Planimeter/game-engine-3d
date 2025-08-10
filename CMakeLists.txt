@@ -40,8 +40,9 @@ set(PHYSFS_BUILD_TEST FALSE CACHE BOOL "Build stdio test program.")
 set(PHYSFS_BUILD_DOCS FALSE CACHE BOOL "Build doxygen based documentation")
 add_subdirectory(lib/physfs-main)
 
-# add the SDL2 library
-find_package(SDL2 2.28.1 EXACT REQUIRED PATHS lib)
+# add the SDL3 library
+# find_package(SDL3 3.2.20 EXACT REQUIRED PATHS lib)
+add_subdirectory(lib/SDL3-3.2.20)
 
 # add the volk library
 add_subdirectory(lib/volk)
@@ -94,8 +95,8 @@ endif()
 find_package(glm REQUIRED PATHS lib/glm/cmake)
 
 target_link_libraries(game PUBLIC PhysFS::PhysFS)
-target_link_libraries(game PUBLIC SDL2::SDL2)
-target_link_libraries(game PUBLIC SDL2::SDL2main)
+target_link_libraries(game PUBLIC SDL3::SDL3)
+target_link_libraries(game PUBLIC SDL3::SDL3main)
 target_link_libraries(game PUBLIC volk::volk)
 target_link_libraries(game PUBLIC VulkanMemoryAllocator)
 target_link_libraries(game PUBLIC glm::glm)
@@ -105,8 +106,8 @@ target_link_libraries(game PUBLIC glm::glm)
 target_include_directories(game PUBLIC
                            "${PROJECT_BINARY_DIR}"
                            PhysFS::PhysFS
-                           SDL2::SDL2
-                           SDL2::SDL2main
+                           SDL3::SDL3
+                           SDL3::SDL3main
                            volk::volk
                            VulkanMemoryAllocator
                            glm::glm
