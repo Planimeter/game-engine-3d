@@ -1,14 +1,14 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "timer.h"
-#include "SDL.h"
+#include "SDL3/SDL.h"
 
 static uint64_t dt = 0;
 static uint64_t prevtime = 0;
 
 uint64_t timer_gettime()
 {
-    return SDL_GetTicks64();
+    return SDL_GetTicks();
 }
 
 uint64_t timer_step()

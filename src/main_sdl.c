@@ -4,7 +4,7 @@
 #include "event.h"
 #include "timer.h"
 #include "graphics.h"
-#include "SDL.h"
+#include "SDL3/SDL.h"
 
 static void load(int argc, char *argv[])
 {

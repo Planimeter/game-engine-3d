@@ -4,7 +4,8 @@
 #include "window.h"
 #include <stddef.h>
 #include <stdio.h>
-#include "SDL.h"
+#include <stdlib.h>
+#include "SDL3/SDL.h"
 
 SDL_GLContext context;
 
