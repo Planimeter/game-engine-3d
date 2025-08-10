@@ -92,7 +92,8 @@ if (APPLE)
 endif()
 
 # add the GLM library
-find_package(glm REQUIRED PATHS lib/glm/cmake)
+# find_package(glm REQUIRED PATHS lib/glm/cmake)
+add_subdirectory(lib/glm)
 
 target_link_libraries(game PUBLIC PhysFS::PhysFS)
 target_link_libraries(game PUBLIC SDL3::SDL3)
