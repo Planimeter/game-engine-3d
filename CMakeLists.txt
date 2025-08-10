@@ -38,7 +38,7 @@ set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 set(PHYSFS_BUILD_STATIC FALSE CACHE BOOL "Build static library")
 set(PHYSFS_BUILD_TEST FALSE CACHE BOOL "Build stdio test program.")
 set(PHYSFS_BUILD_DOCS FALSE CACHE BOOL "Build doxygen based documentation")
-add_subdirectory(lib/physfs-release-3.2.0)
+add_subdirectory(lib/physfs-main)
 
 # add the SDL2 library
 find_package(SDL2 2.28.1 EXACT REQUIRED PATHS lib)
