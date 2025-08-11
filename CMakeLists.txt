@@ -18,7 +18,9 @@ set(SOURCES
     )
 
 # add the executable
-if(APPLE)
+if(WIN32)
+    add_executable(game WIN32 ${SOURCES})
+elseif(APPLE)
     add_executable(game MACOSX_BUNDLE ${SOURCES})
 else()
     add_executable(game ${SOURCES})
@@ -73,6 +75,7 @@ ExternalProject_Add(SDL3_external
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DSDL_TEST=OFF
         -DSDL_STATIC=ON
+        -DSDL_STATIC_PIC=ON
     BUILD_ALWAYS FALSE
 )
 
