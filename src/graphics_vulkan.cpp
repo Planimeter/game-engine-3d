@@ -131,6 +131,7 @@ static void graphics_createinstance()
             }
             
             free(availableLayers);
+            availableLayers = NULL;
         }
     }
 #endif
@@ -273,6 +274,7 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     }
     
     free(queueFamilies);
+    queueFamilies = NULL;
     
     if (selectedFamily == UINT32_MAX) {
         fprintf(stderr, "Failed to find suitable queue family\n");
@@ -309,6 +311,7 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
             availableFormats[i].colorSpace == preferredFormat.colorSpace) {
             VkSurfaceFormatKHR result = availableFormats[i];
             free(availableFormats);
+            availableFormats = NULL;
             return result;
         }
     }
@@ -320,6 +323,7 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
             availableFormats[i].colorSpace == fallbackFormat.colorSpace) {
             VkSurfaceFormatKHR result = availableFormats[i];
             free(availableFormats);
+            availableFormats = NULL;
             return result;
         }
     }
@@ -327,6 +331,7 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
     // Fall back to first available format
     VkSurfaceFormatKHR result = availableFormats[0];
     free(availableFormats);
+    availableFormats = NULL;
     return result;
 }
 
