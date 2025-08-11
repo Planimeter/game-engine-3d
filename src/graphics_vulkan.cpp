@@ -189,6 +189,17 @@ static void graphics_enumeratephysicaldevices()
     uint32_t physicalDeviceCount;
 
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
+    
+    // Validate device count
+    if (physicalDeviceCount == 0) {
+        fprintf(stderr, "No Vulkan physical devices found\n");
+        exit(EXIT_FAILURE);
+    }
+    if (physicalDeviceCount > 64) { // Reasonable upper bound
+        fprintf(stderr, "Too many physical devices: %u\n", physicalDeviceCount);
+        exit(EXIT_FAILURE);
+    }
+    
     physicalDevices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     if (!physicalDevices) {
         fprintf(stderr, "Failed to allocate memory for physical devices\n");
@@ -299,6 +310,12 @@ static void graphics_createcommandpools()
     size_t i;
     VkResult result;
 
+    // Validate swapchain image count before allocation
+    if (swapchainImageCount == 0 || swapchainImageCount > 16) {
+        fprintf(stderr, "Invalid swapchain image count for command pools: %u\n", swapchainImageCount);
+        exit(EXIT_FAILURE);
+    }
+
     commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
     if (!commandPools) {
         fprintf(stderr, "Failed to allocate memory for command pools\n");
@@ -313,6 +330,12 @@ static void graphics_createcommandpools()
         result = vkCreateCommandPool(device, &createInfo, NULL, &commandPools[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create command pool %zu: %d\n", i, result);
+            // Clean up previously created command pools
+            for (size_t j = 0; j < i; j++) {
+                vkDestroyCommandPool(device, commandPools[j], NULL);
+            }
+            free(commandPools);
+            commandPools = NULL;
             exit(EXIT_FAILURE);
         }
     }
@@ -324,6 +347,12 @@ static void graphics_allocatecommandbuffers()
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     size_t i;
     VkResult result;
+
+    // Validate swapchain image count before allocation
+    if (swapchainImageCount == 0 || swapchainImageCount > 16) {
+        fprintf(stderr, "Invalid swapchain image count for command buffers: %u\n", swapchainImageCount);
+        exit(EXIT_FAILURE);
+    }
 
     commandBuffers = (VkCommandBuffer *)malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
     if (!commandBuffers) {
@@ -342,6 +371,12 @@ static void graphics_allocatecommandbuffers()
         result = vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffers[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to allocate command buffer %zu: %d\n", i, result);
+            // Clean up previously allocated command buffers
+            for (size_t j = 0; j < i; j++) {
+                vkFreeCommandBuffers(device, commandPools[j], 1, &commandBuffers[j]);
+            }
+            free(commandBuffers);
+            commandBuffers = NULL;
             exit(EXIT_FAILURE);
         }
     }
@@ -683,8 +718,12 @@ static void graphics_getswapchainimages()
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, NULL);
     
     // Validate swapchain image count
-    if (swapchainImageCount == 0 || swapchainImageCount > 16) {
-        fprintf(stderr, "Invalid swapchain image count: %u\n", swapchainImageCount);
+    if (swapchainImageCount == 0) {
+        fprintf(stderr, "No swapchain images available\n");
+        exit(EXIT_FAILURE);
+    }
+    if (swapchainImageCount > 16) {
+        fprintf(stderr, "Too many swapchain images: %u\n", swapchainImageCount);
         exit(EXIT_FAILURE);
     }
     
