@@ -1,4 +1,5 @@
 [file "**"]
-repo = https://github.com/icculus/physfs
-commit = main
+commit = 9d18d36b5a5207b72f473f05e1b2834e347d8144
 target = lib/physfs-main
+repository = https://github.com/icculus/physfs
+branch = main
