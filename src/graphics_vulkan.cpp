@@ -264,7 +264,7 @@ static void graphics_createallocator()
     vulkanFunctions.vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements;
 #endif
 
-    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_1;
     allocatorCreateInfo.physicalDevice   = physicalDevices[0];
     allocatorCreateInfo.device           = device;
     allocatorCreateInfo.instance         = instance;
@@ -291,6 +291,10 @@ static void graphics_createcommandpools()
     VkResult result;
 
     commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
+    if (!commandPools) {
+        fprintf(stderr, "Failed to allocate memory for command pools\n");
+        exit(EXIT_FAILURE);
+    }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
     createInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -310,8 +314,13 @@ static void graphics_allocatecommandbuffers()
 {
     VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
     size_t i;
+    VkResult result;
 
     commandBuffers = (VkCommandBuffer *)malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
+    if (!commandBuffers) {
+        fprintf(stderr, "Failed to allocate memory for command buffers\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -321,7 +330,11 @@ static void graphics_allocatecommandbuffers()
         allocateInfo.commandBufferCount = 1;
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkAllocateCommandBuffers */
-        vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffers[i]);
+        result = vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffers[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to allocate command buffer %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -330,8 +343,13 @@ static void graphics_createfences()
 {
     VkFenceCreateInfo createInfo = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
     size_t i;
+    VkResult result;
 
     fences = (VkFence *)malloc(sizeof(VkFence) * swapchainImageCount);
+    if (!fences) {
+        fprintf(stderr, "Failed to allocate memory for fences\n");
+        exit(EXIT_FAILURE);
+    }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
     createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -339,7 +357,11 @@ static void graphics_createfences()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateFence */
     for (i = 0; i < swapchainImageCount; i++)
     {
-        vkCreateFence(device, &createInfo, NULL, &fences[i]);
+        result = vkCreateFence(device, &createInfo, NULL, &fences[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create fence %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -398,8 +420,13 @@ static void graphics_createframebuffers()
 {
     VkFramebufferCreateInfo createInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
     size_t i;
+    VkResult result;
 
     framebuffers = (VkFramebuffer *)malloc(sizeof(VkFramebuffer) * swapchainImageCount);
+    if (!framebuffers) {
+        fprintf(stderr, "Failed to allocate memory for framebuffers\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (i = 0; i < swapchainImageCount; i++)
     {
@@ -412,7 +439,11 @@ static void graphics_createframebuffers()
         createInfo.height          = h;
         createInfo.layers          = 1;
 
-        vkCreateFramebuffer(device, &createInfo, NULL, &framebuffers[i]);
+        result = vkCreateFramebuffer(device, &createInfo, NULL, &framebuffers[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create framebuffer %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -519,9 +550,9 @@ typedef struct Vertex {
 } Vertex;
 
 static Vertex triangle_vertices[3] = {
-    glm::vec2(0.0, -0.5), glm::vec3(1.0, 0.0, 0.0),
-    glm::vec2(0.5, 0.5),  glm::vec3(0.0, 1.0, 0.0),
-    glm::vec2(-0.5, 0.5), glm::vec3(0.0, 0.0, 1.0)
+    {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+    {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
+    {{-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
@@ -606,7 +637,19 @@ static void graphics_createswapchain()
 static void graphics_getswapchainimages()
 {
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, NULL);
+    
+    // Validate swapchain image count
+    if (swapchainImageCount == 0 || swapchainImageCount > 16) {
+        fprintf(stderr, "Invalid swapchain image count: %u\n", swapchainImageCount);
+        exit(EXIT_FAILURE);
+    }
+    
     swapchainImages = (VkImage *)malloc(sizeof(VkImage) * swapchainImageCount);
+    if (!swapchainImages) {
+        fprintf(stderr, "Failed to allocate memory for swapchain images\n");
+        exit(EXIT_FAILURE);
+    }
+    
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
 }
 
@@ -615,6 +658,7 @@ static void graphics_createimageviews()
 {
     VkImageViewCreateInfo createInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
     size_t i;
+    VkResult result;
 
     createInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
     createInfo.format                      = VK_FORMAT_B8G8R8A8_UNORM;
@@ -627,12 +671,20 @@ static void graphics_createimageviews()
     createInfo.subresourceRange.layerCount = 1;
 
     swapchainImageViews = (VkImageView *)malloc(sizeof(VkImageView) * swapchainImageCount);
+    if (!swapchainImageViews) {
+        fprintf(stderr, "Failed to allocate memory for swapchain image views\n");
+        exit(EXIT_FAILURE);
+    }
 
     for (i = 0; i < swapchainImageCount; i++)
     {
         createInfo.image = swapchainImages[i];
 
-        vkCreateImageView(device, &createInfo, NULL, &swapchainImageViews[i]);
+        result = vkCreateImageView(device, &createInfo, NULL, &swapchainImageViews[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create image view %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -724,8 +776,6 @@ static VkResult graphics_acquirenextimage()
 
 void graphics_init()
 {
-    void graphics_shutdown(void);
-
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
@@ -1004,6 +1054,11 @@ void graphics_shutdown(void)
         }
         
         vkDestroyDevice(device, NULL);
+    }
+
+    if (swapchainImages) {
+        free(swapchainImages);
+        swapchainImages = NULL;
     }
 
     if (physicalDevices) {
