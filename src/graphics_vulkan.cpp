@@ -125,6 +125,7 @@ static void graphics_createinstance()
         }
     }
     free(availableExtensions);
+    availableExtensions = NULL;
     
     // Set up extensions list
     uint32_t enabledExtensionCount = 2;
@@ -460,7 +461,9 @@ static void graphics_createshaders()
     vertShader = graphics_createshader(vertBinary, vertSize);
     fragShader = graphics_createshader(fragBinary, fragSize);
     free(fragBinary);
+    fragBinary = NULL;
     free(vertBinary);
+    vertBinary = NULL;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
@@ -699,6 +702,7 @@ static void graphics_destroyframebuffers()
         vkDestroyFramebuffer(device, framebuffers[i], NULL);
     }
     free(framebuffers);
+    framebuffers = NULL;
 }
 
 static void graphics_destroyimageviews()
@@ -710,6 +714,7 @@ static void graphics_destroyimageviews()
         vkDestroyImageView(device, swapchainImageViews[i], NULL);
     }
     free(swapchainImageViews);
+    swapchainImageViews = NULL;
 }
 
 static void graphics_destroyfences()
@@ -721,6 +726,7 @@ static void graphics_destroyfences()
         vkDestroyFence(device, fences[i], NULL);
     }
     free(fences);
+    fences = NULL;
 }
 
 static void graphics_freecommandbuffers()
@@ -732,6 +738,7 @@ static void graphics_freecommandbuffers()
         vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
     }
     free(commandBuffers);
+    commandBuffers = NULL;
 }
 
 static void graphics_destroycommandpools()
@@ -743,7 +750,7 @@ static void graphics_destroycommandpools()
         vkDestroyCommandPool(device, commandPools[i], NULL);
     }
     free(commandPools);
-
+    commandPools = NULL;
 }
 
 static void graphics_destroysemaphores()
