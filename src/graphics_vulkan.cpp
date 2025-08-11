@@ -11,9 +11,24 @@
 #define VK_NO_PROTOTYPES
 #include "volk.h"
 
+#ifndef VK_USE_PLATFORM_WIN32_KHR
+    #ifdef _WIN32
+        #define VK_USE_PLATFORM_WIN32_KHR
+    #endif
+#endif
+#ifndef VK_USE_PLATFORM_METAL_EXT
+    #ifdef __APPLE__
+        #define VK_USE_PLATFORM_METAL_EXT
+    #endif
+#endif
+
 #include "vk_mem_alloc.h"
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+
+/* Constants */
+static const uint32_t MIN_SWAPCHAIN_IMAGES = 2;
+static const float CLEAR_COLOR[4] = {0.01f, 0.01f, 0.033f, 1.0f};
 
 /* 4.2. Instances */
 static VkInstance instance;
@@ -81,7 +96,14 @@ static void graphics_createinstance()
 {
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
+
+#ifdef _DEBUG
     const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
+    uint32_t enabledLayerCount = 1;
+#else
+    const char **enabledLayerNames = NULL;
+    uint32_t enabledLayerCount = 0;
+#endif
 
     VkResult result = volkInitialize();
     if (result != VK_SUCCESS) {
@@ -97,7 +119,7 @@ static void graphics_createinstance()
     
     bool portabilityEnumerationAvailable = false;
     for (uint32_t i = 0; i < extensionCount; i++) {
-        if (strcmp(availableExtensions[i].extensionName, VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) == 0) {
+        if (strcmp(availableExtensions[i].extensionName, "VK_KHR_portability_enumeration") == 0) {
             portabilityEnumerationAvailable = true;
             break;
         }
@@ -106,27 +128,33 @@ static void graphics_createinstance()
     
     // Set up extensions list
     uint32_t enabledExtensionCount = 2;
-    const char* enabledExtensions[3] = { VK_KHR_SURFACE_EXTENSION_NAME };
+    const char* enabledExtensions[3] = { "VK_KHR_surface" };
     
     if (portabilityEnumerationAvailable) {
-        enabledExtensions[enabledExtensionCount++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+        enabledExtensions[enabledExtensionCount++] = "VK_KHR_portability_enumeration";
         createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
     }
 
 #if defined(VK_USE_PLATFORM_ANDROID_KHR)
-    enabledExtensions[1] = VK_KHR_ANDROID_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_android_surface";
 #elif defined(VK_USE_PLATFORM_METAL_EXT)
-    enabledExtensions[1] = VK_EXT_METAL_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_EXT_metal_surface";
 #elif defined(VK_USE_PLATFORM_WAYLAND_KHR)
-    enabledExtensions[1] = VK_KHR_WAYLAND_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_wayland_surface";
 #elif defined(VK_USE_PLATFORM_WIN32_KHR)
-    enabledExtensions[1] = VK_KHR_WIN32_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_win32_surface";
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
-    enabledExtensions[1] = VK_KHR_XCB_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_xcb_surface";
 #elif defined(VK_USE_PLATFORM_XLIB_KHR)
-    enabledExtensions[1] = VK_KHR_XLIB_SURFACE_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_xlib_surface";
 #elif defined(VK_USE_PLATFORM_DISPLAY_KHR)
-    enabledExtensions[1] = VK_KHR_DISPLAY_EXTENSION_NAME;
+    enabledExtensions[1] = "VK_KHR_display";
+#elif defined(_WIN32) || defined(WIN32)
+    // Fallback for Windows when VK_USE_PLATFORM_WIN32_KHR is not defined
+    enabledExtensions[1] = "VK_KHR_win32_surface";
+#elif defined(__APPLE__)
+    // Fallback for macOS when VK_USE_PLATFORM_METAL_EXT is not defined
+    enabledExtensions[1] = "VK_EXT_metal_surface";
 #else
     #error Platform not supported
 #endif
@@ -136,8 +164,8 @@ static void graphics_createinstance()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.pApplicationInfo        = &app;
-    createInfo.enabledLayerCount       = 0;
-    createInfo.ppEnabledLayerNames     = NULL;
+    createInfo.enabledLayerCount       = enabledLayerCount;
+    createInfo.ppEnabledLayerNames     = enabledLayerNames;
     createInfo.enabledExtensionCount   = enabledExtensionCount;
     createInfo.ppEnabledExtensionNames = enabledExtensions;
 
@@ -167,6 +195,7 @@ static void graphics_createdevice()
     VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     float queuePriority = 1.0f;
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    VkResult result;
 
     queueCreateInfo.queueCount       = 1;
     queueCreateInfo.pQueuePriorities = &queuePriority;
@@ -178,7 +207,11 @@ static void graphics_createdevice()
     createInfo.ppEnabledExtensionNames = &enabledExtensionNames;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
-    vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
+    result = vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create Vulkan device: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
     volkLoadDevice(device);
 }
 
@@ -237,7 +270,11 @@ static void graphics_createallocator()
     allocatorCreateInfo.instance         = instance;
     allocatorCreateInfo.pVulkanFunctions = &vulkanFunctions;
 
-    vmaCreateAllocator(&allocatorCreateInfo, &allocator);
+    VkResult result = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create VMA allocator: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
@@ -251,6 +288,7 @@ static void graphics_createcommandpools()
 {
     VkCommandPoolCreateInfo createInfo = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
     size_t i;
+    VkResult result;
 
     commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
 
@@ -259,7 +297,11 @@ static void graphics_createcommandpools()
 
     for (i = 0; i < swapchainImageCount; i++)
     {
-        vkCreateCommandPool(device, &createInfo, NULL, &commandPools[i]);
+        result = vkCreateCommandPool(device, &createInfo, NULL, &commandPools[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create command pool %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -489,7 +531,7 @@ static void graphics_createvertexbuffer()
     VmaAllocationCreateInfo allocInfo = { 0 };
     void *mappedData;
 
-    bufferInfo.size        = sizeof(triangle_vertices) * sizeof(Vertex);
+    bufferInfo.size        = sizeof(triangle_vertices);
     bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -499,7 +541,7 @@ static void graphics_createvertexbuffer()
     vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
 
     vmaMapMemory(allocator, allocation, &mappedData);
-    memcpy(mappedData, &triangle_vertices, sizeof(triangle_vertices) * sizeof(Vertex));
+    memcpy(mappedData, triangle_vertices, sizeof(triangle_vertices));
     vmaUnmapMemory(allocator, allocation);
 }
 
@@ -531,7 +573,7 @@ static void graphics_createswapchain()
     oldSwapchain = swapchain;
 
     createInfo.surface          = surface;
-    createInfo.minImageCount    = 2;
+    createInfo.minImageCount    = MIN_SWAPCHAIN_IMAGES;
     createInfo.imageFormat      = VK_FORMAT_B8G8R8A8_UNORM;
     createInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
     createInfo.imageExtent      = imageExtent;
@@ -767,7 +809,7 @@ void graphics_predraw()
     VkBuffer vertexBuffers[] = {vertexBuffer};
 
     /* 19.3. Clear Values */
-    VkClearValue clearValue = {{0.01f, 0.01f, 0.033f, 1.0f}};
+    VkClearValue clearValue = {{CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]}};
 
     /* 27.9. Controlling the Viewport */
     VkViewport viewport = { 0 };
@@ -831,7 +873,7 @@ void graphics_predraw()
     vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
-    vkCmdDraw(commandBuffers[imageIndex], sizeof(triangle_vertices), 1, 0, 0);
+    vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 }
 
 void graphics_postdraw()
@@ -927,27 +969,49 @@ void graphics_setshader(Shader _vertShader, Shader _fragShader)
 
 void graphics_shutdown(void)
 {
-    vkDeviceWaitIdle(device);
+    if (device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(device);
 
-    graphics_destroyframebuffers();
-    graphics_destroyimageviews();
+        graphics_destroyframebuffers();
+        graphics_destroyimageviews();
 
-    vkDestroySwapchainKHR(device, swapchain, NULL);
-    vkDestroySurfaceKHR(instance, surface, NULL);
-    vkDestroyPipeline(device, graphicsPipeline, NULL);
-    vkDestroyPipelineLayout(device, pipelineLayout, NULL);
-    vkDestroyRenderPass(device, renderPass, NULL);
+        if (swapchain != VK_NULL_HANDLE) {
+            vkDestroySwapchainKHR(device, swapchain, NULL);
+        }
+        if (surface != VK_NULL_HANDLE) {
+            vkDestroySurfaceKHR(instance, surface, NULL);
+        }
+        if (graphicsPipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, graphicsPipeline, NULL);
+        }
+        if (pipelineLayout != VK_NULL_HANDLE) {
+            vkDestroyPipelineLayout(device, pipelineLayout, NULL);
+        }
+        if (renderPass != VK_NULL_HANDLE) {
+            vkDestroyRenderPass(device, renderPass, NULL);
+        }
 
-    graphics_destroysemaphores();
-    graphics_destroyfences();
-    graphics_freecommandbuffers();
-    graphics_destroycommandpools();
+        graphics_destroysemaphores();
+        graphics_destroyfences();
+        graphics_freecommandbuffers();
+        graphics_destroycommandpools();
 
-    vmaDestroyBuffer(allocator, vertexBuffer, allocation);
-    vmaDestroyAllocator(allocator);
-    vkDestroyDevice(device, NULL);
+        if (vertexBuffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, vertexBuffer, allocation);
+        }
+        if (allocator != VK_NULL_HANDLE) {
+            vmaDestroyAllocator(allocator);
+        }
+        
+        vkDestroyDevice(device, NULL);
+    }
 
-    free(physicalDevices);
+    if (physicalDevices) {
+        free(physicalDevices);
+        physicalDevices = NULL;
+    }
 
-    vkDestroyInstance(instance, NULL);
+    if (instance != VK_NULL_HANDLE) {
+        vkDestroyInstance(instance, NULL);
+    }
 }
