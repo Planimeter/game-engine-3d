@@ -1,4 +1,4 @@
-RMDIR /S /Q build
+@REM RMDIR /S /Q build
 MKDIR build
 CD build
 cmake ..

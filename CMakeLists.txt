@@ -18,9 +18,7 @@ set(SOURCES
     )
 
 # add the executable
-if (WIN32)
-    add_executable(game WIN32 ${SOURCES})
-elseif(APPLE)
+if(APPLE)
     add_executable(game MACOSX_BUNDLE ${SOURCES})
 else()
     add_executable(game ${SOURCES})
@@ -54,10 +52,17 @@ file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/lib)
 
 # Create imported target for PhysFS
 add_library(PhysFS::PhysFS STATIC IMPORTED)
-set_target_properties(PhysFS::PhysFS PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.a
-    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
-)
+if(WIN32)
+    set_target_properties(PhysFS::PhysFS PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/physfs-static.lib
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
+    )
+else()
+    set_target_properties(PhysFS::PhysFS PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.a
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
+    )
+endif()
 add_dependencies(PhysFS::PhysFS PhysFS_external)
 
 # add the SDL3 library using ExternalProject
@@ -77,10 +82,17 @@ file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/lib)
 
 # Create imported target for SDL3
 add_library(SDL3::SDL3 STATIC IMPORTED)
-set_target_properties(SDL3::SDL3 PROPERTIES
-    IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.a
-    INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
-)
+if(WIN32)
+    set_target_properties(SDL3::SDL3 PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/SDL3-static.lib
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
+    )
+else()
+    set_target_properties(SDL3::SDL3 PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.a
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
+    )
+endif()
 add_dependencies(SDL3::SDL3 SDL3_external)
 
 # add the volk library
@@ -140,6 +152,27 @@ target_link_libraries(game PUBLIC volk::volk)
 target_link_libraries(game PUBLIC VulkanMemoryAllocator)
 target_link_libraries(game PUBLIC glm::glm)
 
+# Link Windows libraries
+if(WIN32)
+    target_link_libraries(game PUBLIC
+        winmm.lib
+        setupapi.lib
+        cfgmgr32.lib
+        version.lib
+        imm32.lib
+        kernel32.lib
+        user32.lib
+        gdi32.lib
+        winspool.lib
+        shell32.lib
+        ole32.lib
+        oleaut32.lib
+        uuid.lib
+        comdlg32.lib
+        advapi32.lib
+    )
+endif()
+
 # Link macOS frameworks
 if(APPLE)
     find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
@@ -189,19 +222,7 @@ target_include_directories(game PUBLIC
                            glm::glm
                            )
 
-if(WIN32)
-add_custom_command(TARGET game POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:game> $<TARGET_FILE_DIR:game>
-  COMMAND_EXPAND_LISTS
-)
-
 add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:game>/shaders
   COMMAND_EXPAND_LISTS
 )
-elseif(APPLE)
-add_custom_command(TARGET game POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:game>/shaders
-  COMMAND_EXPAND_LISTS
-)
-endif()
