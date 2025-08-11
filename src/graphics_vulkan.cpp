@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 
 #define VK_NO_PROTOTYPES
 #include "volk.h"
@@ -35,6 +36,7 @@ static VkInstance instance;
 
 /* 5. Devices and Queues */
 static VkPhysicalDevice *physicalDevices;
+static uint32_t graphicsQueueFamily;
 
 /* 5.2.1. Device Creation */
 static VkDevice device;
@@ -90,6 +92,7 @@ static VkSwapchainKHR swapchain;
 static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
 static uint32_t imageIndex;
+static VkSurfaceFormatKHR swapchainSurfaceFormat = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
 static void graphics_createinstance()
@@ -97,12 +100,39 @@ static void graphics_createinstance()
     VkInstanceCreateInfo createInfo = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     VkApplicationInfo app = { VK_STRUCTURE_TYPE_APPLICATION_INFO };
 
-#ifdef _DEBUG
-    const char *enabledLayerNames[] = { "VK_LAYER_KHRONOS_validation" };
-    uint32_t enabledLayerCount = 1;
-#else
+    const char *validationLayerName = "VK_LAYER_KHRONOS_validation";
     const char **enabledLayerNames = NULL;
     uint32_t enabledLayerCount = 0;
+
+#ifdef _DEBUG
+    // Check if validation layer is available
+    uint32_t layerCount;
+    vkEnumerateInstanceLayerProperties(&layerCount, NULL);
+    
+    if (layerCount > 0) {
+        VkLayerProperties* availableLayers = (VkLayerProperties*)malloc(layerCount * sizeof(VkLayerProperties));
+        if (availableLayers) {
+            vkEnumerateInstanceLayerProperties(&layerCount, availableLayers);
+            
+            bool validationLayerFound = false;
+            for (uint32_t i = 0; i < layerCount; i++) {
+                if (strcmp(availableLayers[i].layerName, validationLayerName) == 0) {
+                    validationLayerFound = true;
+                    break;
+                }
+            }
+            
+            if (validationLayerFound) {
+                enabledLayerNames = &validationLayerName;
+                enabledLayerCount = 1;
+                printf("Validation layer enabled\n");
+            } else {
+                printf("Validation layer not available\n");
+            }
+            
+            free(availableLayers);
+        }
+    }
 #endif
 
     VkResult result = volkInitialize();
@@ -208,6 +238,98 @@ static void graphics_enumeratephysicaldevices()
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
 
+/* Find a suitable graphics queue family */
+static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
+{
+    uint32_t queueFamilyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &queueFamilyCount, NULL);
+    
+    if (queueFamilyCount == 0) {
+        fprintf(stderr, "No queue families found\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    VkQueueFamilyProperties *queueFamilies = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * queueFamilyCount);
+    if (!queueFamilies) {
+        fprintf(stderr, "Failed to allocate memory for queue families\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &queueFamilyCount, queueFamilies);
+    
+    uint32_t selectedFamily = UINT32_MAX;
+    for (uint32_t i = 0; i < queueFamilyCount; i++) {
+        // Look for a queue family that supports graphics operations
+        if (queueFamilies[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+            // Also check if it supports presentation to our surface
+            VkBool32 presentSupport = VK_FALSE;
+            vkGetPhysicalDeviceSurfaceSupportKHR(physDevice, i, surface, &presentSupport);
+            
+            if (presentSupport) {
+                selectedFamily = i;
+                break;
+            }
+        }
+    }
+    
+    free(queueFamilies);
+    
+    if (selectedFamily == UINT32_MAX) {
+        fprintf(stderr, "Failed to find suitable queue family\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    return selectedFamily;
+}
+
+/* Choose the best available surface format */
+static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevice, VkSurfaceKHR surface)
+{
+    uint32_t formatCount;
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surface, &formatCount, NULL);
+    
+    if (formatCount == 0) {
+        fprintf(stderr, "No surface formats available\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    VkSurfaceFormatKHR *availableFormats = (VkSurfaceFormatKHR*)malloc(sizeof(VkSurfaceFormatKHR) * formatCount);
+    if (!availableFormats) {
+        fprintf(stderr, "Failed to allocate memory for surface formats\n");
+        exit(EXIT_FAILURE);
+    }
+    
+    vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surface, &formatCount, availableFormats);
+    
+    // Prefer BGRA8 SRGB
+    VkSurfaceFormatKHR preferredFormat = {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    
+    for (uint32_t i = 0; i < formatCount; i++) {
+        if (availableFormats[i].format == preferredFormat.format && 
+            availableFormats[i].colorSpace == preferredFormat.colorSpace) {
+            VkSurfaceFormatKHR result = availableFormats[i];
+            free(availableFormats);
+            return result;
+        }
+    }
+    
+    // If preferred format not available, try RGBA8
+    VkSurfaceFormatKHR fallbackFormat = {VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+    for (uint32_t i = 0; i < formatCount; i++) {
+        if (availableFormats[i].format == fallbackFormat.format && 
+            availableFormats[i].colorSpace == fallbackFormat.colorSpace) {
+            VkSurfaceFormatKHR result = availableFormats[i];
+            free(availableFormats);
+            return result;
+        }
+    }
+    
+    // Fall back to first available format
+    VkSurfaceFormatKHR result = availableFormats[0];
+    free(availableFormats);
+    return result;
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
 static void graphics_createdevice()
 {
@@ -217,6 +339,10 @@ static void graphics_createdevice()
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     VkResult result;
 
+    // Find suitable queue family first
+    graphicsQueueFamily = graphics_findqueuefamily(physicalDevices[0]);
+
+    queueCreateInfo.queueFamilyIndex = graphicsQueueFamily;
     queueCreateInfo.queueCount       = 1;
     queueCreateInfo.pQueuePriorities = &queuePriority;
 
@@ -300,7 +426,7 @@ static void graphics_createallocator()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetDeviceQueue */
 static void graphics_getqueue()
 {
-    vkGetDeviceQueue(device, 0, 0, &queue);
+    vkGetDeviceQueue(device, graphicsQueueFamily, 0, &queue);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-pools */
@@ -437,7 +563,7 @@ static void graphics_createrenderpass()
     VkAttachmentReference   colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
     VkSubpassDependency     dependency     = { 0 };
 
-    attachment.format            = VK_FORMAT_B8G8R8A8_UNORM;
+    attachment.format            = swapchainSurfaceFormat.format;
     attachment.samples           = VK_SAMPLE_COUNT_1_BIT;
     attachment.loadOp            = VK_ATTACHMENT_LOAD_OP_CLEAR;
     attachment.storeOp           = VK_ATTACHMENT_STORE_OP_STORE;
@@ -522,6 +648,33 @@ static void graphics_createshaders()
     vertBinary = NULL;
 }
 
+typedef struct Vertex {
+    glm::vec2 position;
+    glm::vec3 color;
+} Vertex;
+
+static VkVertexInputBindingDescription graphics_getvertexbindingdescription() {
+    VkVertexInputBindingDescription bindingDescription = {};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(Vertex);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    return bindingDescription;
+}
+
+static void graphics_getvertexattributedescriptions(VkVertexInputAttributeDescription* attributeDescriptions) {
+    // Position attribute
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex, position);
+    
+    // Color attribute
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, color);
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
@@ -540,6 +693,11 @@ static void graphics_creategraphicspipeline()
     const VkDynamicState                          states[]                 = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineLayoutCreateInfo                    pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 
+    // Vertex input setup
+    VkVertexInputBindingDescription bindingDescription = graphics_getvertexbindingdescription();
+    VkVertexInputAttributeDescription attributeDescriptions[2];
+    graphics_getvertexattributedescriptions(attributeDescriptions);
+
     vertShaderStage.stage                       = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module                      = (VkShaderModule)vertShader;
     vertShaderStage.pName                       = "main";
@@ -551,10 +709,10 @@ static void graphics_creategraphicspipeline()
     stages[0]                                   = vertShaderStage;
     stages[1]                                   = fragShaderStage;
 
-    vertexInput.vertexBindingDescriptionCount   = 0;
-    vertexInput.pVertexBindingDescriptions      = NULL;
-    vertexInput.vertexAttributeDescriptionCount = 0;
-    vertexInput.pVertexAttributeDescriptions    = NULL;
+    vertexInput.vertexBindingDescriptionCount   = 1;
+    vertexInput.pVertexBindingDescriptions      = &bindingDescription;
+    vertexInput.vertexAttributeDescriptionCount = 2;
+    vertexInput.pVertexAttributeDescriptions    = attributeDescriptions;
 
     inputAssembly.topology                      = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
@@ -611,11 +769,6 @@ static void graphics_creategraphicspipeline()
     fragShader = VK_NULL_HANDLE;
 }
 
-typedef struct Vertex {
-    glm::vec2 position;
-    glm::vec3 color;
-} Vertex;
-
 static Vertex triangle_vertices[3] = {
     {{ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
     {{ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}},
@@ -657,11 +810,14 @@ static void graphics_createsurface()
     window_vulkan_createsurface(instance, &surface);
 }
 
+static void graphics_destroyframebuffers();
 static void graphics_destroyimageviews();
 static void graphics_destroyfences();
 static void graphics_freecommandbuffers();
 static void graphics_destroycommandpools();
 static void graphics_destroysemaphores();
+static VkVertexInputBindingDescription graphics_getvertexbindingdescription();
+static void graphics_getvertexattributedescriptions(VkVertexInputAttributeDescription* attributeDescriptions);
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
 static void graphics_createswapchain()
@@ -672,6 +828,11 @@ static void graphics_createswapchain()
 
     window_getwindowsizeinpixels(&w, &h);
 
+    // Select surface format if not already done
+    if (swapchainSurfaceFormat.format == VK_FORMAT_UNDEFINED) {
+        swapchainSurfaceFormat = graphics_choosesurfaceformat(physicalDevices[0], surface);
+    }
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#VkSwapchainCreateInfoKHR */
     imageExtent.width  = w;
     imageExtent.height = h;
@@ -680,8 +841,8 @@ static void graphics_createswapchain()
 
     createInfo.surface          = surface;
     createInfo.minImageCount    = MIN_SWAPCHAIN_IMAGES;
-    createInfo.imageFormat      = VK_FORMAT_B8G8R8A8_UNORM;
-    createInfo.imageColorSpace  = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    createInfo.imageFormat      = swapchainSurfaceFormat.format;
+    createInfo.imageColorSpace  = swapchainSurfaceFormat.colorSpace;
     createInfo.imageExtent      = imageExtent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -744,7 +905,7 @@ static void graphics_createimageviews()
     VkResult result;
 
     createInfo.viewType                    = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format                      = VK_FORMAT_B8G8R8A8_UNORM;
+    createInfo.format                      = swapchainSurfaceFormat.format;
     createInfo.components.r                = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.g                = VK_COMPONENT_SWIZZLE_IDENTITY;
     createInfo.components.b                = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -867,6 +1028,9 @@ void graphics_init()
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_enumeratephysicaldevices();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
+    graphics_createsurface();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_createdevice();
     /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/quick_start.html */
     graphics_createallocator();
@@ -874,18 +1038,17 @@ void graphics_init()
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createsemaphores();
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
-    graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
+    graphics_createswapchain();
+    graphics_getswapchainimages();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
+    graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
     graphics_creategraphicspipeline();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
     graphics_createvertexbuffer();
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
-    graphics_createsurface();
-    graphics_createswapchain();
-    graphics_getswapchainimages();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
     graphics_createcommandpools();
     graphics_allocatecommandbuffers();
