@@ -943,60 +943,70 @@ static void graphics_destroyframebuffers()
 
     vkQueueWaitIdle(queue);
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyFramebuffer(device, framebuffers[i], NULL);
+    if (framebuffers) {
+        for (i = swapchainImageCount; i-- > 0;)
+        {
+            vkDestroyFramebuffer(device, framebuffers[i], NULL);
+        }
+        free(framebuffers);
+        framebuffers = NULL;
     }
-    free(framebuffers);
-    framebuffers = NULL;
 }
 
 static void graphics_destroyimageviews()
 {
     size_t i;
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyImageView(device, swapchainImageViews[i], NULL);
+    if (swapchainImageViews) {
+        for (i = swapchainImageCount; i-- > 0;)
+        {
+            vkDestroyImageView(device, swapchainImageViews[i], NULL);
+        }
+        free(swapchainImageViews);
+        swapchainImageViews = NULL;
     }
-    free(swapchainImageViews);
-    swapchainImageViews = NULL;
 }
 
 static void graphics_destroyfences()
 {
     size_t i;
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyFence(device, fences[i], NULL);
+    if (fences) {
+        for (i = swapchainImageCount; i-- > 0;)
+        {
+            vkDestroyFence(device, fences[i], NULL);
+        }
+        free(fences);
+        fences = NULL;
     }
-    free(fences);
-    fences = NULL;
 }
 
 static void graphics_freecommandbuffers()
 {
     size_t i;
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
+    if (commandBuffers) {
+        for (i = swapchainImageCount; i-- > 0;)
+        {
+            vkFreeCommandBuffers(device, commandPools[i], 1, &commandBuffers[i]);
+        }
+        free(commandBuffers);
+        commandBuffers = NULL;
     }
-    free(commandBuffers);
-    commandBuffers = NULL;
 }
 
 static void graphics_destroycommandpools()
 {
     size_t i;
 
-    for (i = swapchainImageCount; i-- > 0;)
-    {
-        vkDestroyCommandPool(device, commandPools[i], NULL);
+    if (commandPools) {
+        for (i = swapchainImageCount; i-- > 0;)
+        {
+            vkDestroyCommandPool(device, commandPools[i], NULL);
+        }
+        free(commandPools);
+        commandPools = NULL;
     }
-    free(commandPools);
-    commandPools = NULL;
 }
 
 static void graphics_destroysemaphores()
