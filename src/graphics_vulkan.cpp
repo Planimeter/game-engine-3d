@@ -115,6 +115,10 @@ static void graphics_createinstance()
     uint32_t extensionCount = 0;
     vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, NULL);
     VkExtensionProperties* availableExtensions = (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
+    if (!availableExtensions) {
+        fprintf(stderr, "Failed to allocate memory for extension properties\n");
+        exit(EXIT_FAILURE);
+    }
     vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, availableExtensions);
     
     bool portabilityEnumerationAvailable = false;
@@ -186,6 +190,10 @@ static void graphics_enumeratephysicaldevices()
 
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, NULL);
     physicalDevices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
+    if (!physicalDevices) {
+        fprintf(stderr, "Failed to allocate memory for physical devices\n");
+        exit(EXIT_FAILURE);
+    }
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
 
@@ -370,10 +378,19 @@ static void graphics_createfences()
 static void graphics_createsemaphores()
 {
     VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+    VkResult result;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
-    vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
-    vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
+    result = vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create acquire semaphore: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+    result = vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create release semaphore: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
@@ -413,7 +430,11 @@ static void graphics_createrenderpass()
     createInfo.pDependencies     = &dependency;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
-    vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
+    VkResult result = vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create render pass: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#_framebuffers */
@@ -519,7 +540,11 @@ static void graphics_creategraphicspipeline()
     dynamicState.dynamicStateCount              = 2;
     dynamicState.pDynamicStates                 = states;
 
-    vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
+    VkResult result = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create pipeline layout: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
     createInfo.stageCount                       = 2;
     createInfo.pStages                          = stages;
@@ -539,7 +564,11 @@ static void graphics_creategraphicspipeline()
         graphicsPipeline = VK_NULL_HANDLE;
     }
 
-    vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
+    result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create graphics pipeline: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
     graphics_destroyshader(vertShader);
     graphics_destroyshader(fragShader);
@@ -572,9 +601,17 @@ static void graphics_createvertexbuffer()
     allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
     allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
-    vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
+    VkResult result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create vertex buffer: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
-    vmaMapMemory(allocator, allocation, &mappedData);
+    result = vmaMapMemory(allocator, allocation, &mappedData);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to map vertex buffer memory: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
     memcpy(mappedData, triangle_vertices, sizeof(triangle_vertices));
     vmaUnmapMemory(allocator, allocation);
 }
@@ -621,7 +658,11 @@ static void graphics_createswapchain()
     createInfo.oldSwapchain     = oldSwapchain;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkCreateSwapchainKHR */
-    vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
+    VkResult result = vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create swapchain: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
     if (oldSwapchain != VK_NULL_HANDLE)
     {
@@ -826,7 +867,11 @@ Shader graphics_createshader(const char *shader, size_t size)
     createInfo.codeSize = size;
     createInfo.pCode    = (const uint32_t *)shader;
 
-    vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+    VkResult result = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create shader module: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
     return shaderModule;
 }
