@@ -167,38 +167,40 @@ endif()
 
 # Link macOS frameworks
 if(APPLE)
-    find_library(FOUNDATION_FRAMEWORK Foundation REQUIRED)
-    find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
-    find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
-    find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
-    find_library(METAL_FRAMEWORK Metal REQUIRED)
-    find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
-    find_library(AVFOUNDATION_FRAMEWORK AVFoundation REQUIRED)
-    find_library(GAMECONTROLLER_FRAMEWORK GameController REQUIRED)
-    find_library(COREHAPTICS_FRAMEWORK CoreHaptics REQUIRED)
-    find_library(FORCEFEEDBACK_FRAMEWORK ForceFeedback REQUIRED)
-    find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox REQUIRED)
-    find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
-    find_library(CARBON_FRAMEWORK Carbon REQUIRED)
-    find_library(UNIFORMTYPEIDENTIFIERS_FRAMEWORK UniformTypeIdentifiers REQUIRED)
-    find_library(COREMEDIA_FRAMEWORK CoreMedia REQUIRED)
-    
+    find_library(AVFOUNDATION_FRAMEWORK AVFoundation)
+    find_library(COREAUDIO_FRAMEWORK CoreAudio)
+    find_library(AUDIOTOOLBOX_FRAMEWORK AudioToolbox)
+    find_library(FOUNDATION_FRAMEWORK Foundation)
+    find_library(COREGRAPHICS_FRAMEWORK CoreGraphics)
+    find_library(COREHAPTICS_FRAMEWORK CoreHaptics)
+    find_library(COREMEDIA_FRAMEWORK CoreMedia)
+    find_library(COREVIDEO_FRAMEWORK CoreVideo)
+    find_library(FORCEFEEDBACK_FRAMEWORK ForceFeedback)
+    find_library(GAMECONTROLLER_FRAMEWORK GameController)
+    find_library(IOKIT_FRAMEWORK IOKit)
+    find_library(CARBON_FRAMEWORK Carbon)
+    find_library(METAL_FRAMEWORK Metal)
+    find_library(APPKIT_FRAMEWORK AppKit)
+    find_library(QUARTZCORE_FRAMEWORK QuartzCore)
+    find_library(UNIFORMTYPEIDENTIFIERS_FRAMEWORK UniformTypeIdentifiers)
+
     target_link_libraries(game PUBLIC
-        ${FOUNDATION_FRAMEWORK}
-        ${COCOA_FRAMEWORK}
-        ${IOKIT_FRAMEWORK}
-        ${COREVIDEO_FRAMEWORK}
-        ${METAL_FRAMEWORK}
-        ${QUARTZCORE_FRAMEWORK}
-        ${AVFOUNDATION_FRAMEWORK}
-        ${GAMECONTROLLER_FRAMEWORK}
-        ${COREHAPTICS_FRAMEWORK}
-        ${FORCEFEEDBACK_FRAMEWORK}
-        ${AUDIOTOOLBOX_FRAMEWORK}
-        ${COREAUDIO_FRAMEWORK}
-        ${CARBON_FRAMEWORK}
-        ${UNIFORMTYPEIDENTIFIERS_FRAMEWORK}
-        ${COREMEDIA_FRAMEWORK}
+        "${AVFOUNDATION_FRAMEWORK}"
+        "${COREAUDIO_FRAMEWORK}"
+        "${AUDIOTOOLBOX_FRAMEWORK}"
+        "${FOUNDATION_FRAMEWORK}"
+        "${COREGRAPHICS_FRAMEWORK}"
+        "${COREHAPTICS_FRAMEWORK}"
+        "${COREMEDIA_FRAMEWORK}"
+        "${COREVIDEO_FRAMEWORK}"
+        "${FORCEFEEDBACK_FRAMEWORK}"
+        "${GAMECONTROLLER_FRAMEWORK}"
+        "${IOKIT_FRAMEWORK}"
+        "${CARBON_FRAMEWORK}"
+        "${METAL_FRAMEWORK}"
+        "${APPKIT_FRAMEWORK}"
+        "${QUARTZCORE_FRAMEWORK}"
+        "${UNIFORMTYPEIDENTIFIERS_FRAMEWORK}"
     )
 endif()
 
