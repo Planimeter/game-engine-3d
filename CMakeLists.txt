@@ -15,6 +15,7 @@ add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
 # find_package(glm REQUIRED PATHS third_party/glm/cmake)
 add_subdirectory(third_party/glm)
 # add the Assimp library
+set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
 
 # specify the list of paths to source files
