@@ -9,6 +9,7 @@ set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 set(PHYSFS_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/physfs-main)
 # add the SDL library
+set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/SDL3-3.2.20)
 # add the volk library
