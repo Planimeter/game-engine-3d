@@ -3,8 +3,6 @@ cmake_minimum_required(VERSION 3.21)
 # set the project name
 project(game LANGUAGES C CXX)
 
-include(ExternalProject)
-
 set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/physfs-main)
 add_subdirectory(third_party/SDL3-3.2.20)
@@ -45,83 +43,6 @@ set(CMAKE_CXX_STANDARD 20)
 
 # specify the C standard
 set(CMAKE_C_STANDARD 99)
-
-# add the PhysicsFS library using ExternalProject
-ExternalProject_Add(PhysFS_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/physfs-main
-    CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/PhysFS
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DPHYSFS_BUILD_SHARED=ON
-        -DPHYSFS_BUILD_STATIC=OFF
-        -DPHYSFS_BUILD_TEST=OFF
-        -DPHYSFS_BUILD_DOCS=OFF
-    BUILD_ALWAYS FALSE
-)
-
-# Create directories first
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/include)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/lib)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/bin)
-
-# Create imported target for PhysFS
-add_library(PhysFS::PhysFS SHARED IMPORTED)
-if(WIN32)
-    set_target_properties(PhysFS::PhysFS PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/bin/physfs.dll
-        IMPORTED_IMPLIB ${CMAKE_BINARY_DIR}/external/PhysFS/lib/physfs.lib
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
-    )
-elseif(APPLE)
-    set_target_properties(PhysFS::PhysFS PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.dylib
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
-    )
-else()
-    set_target_properties(PhysFS::PhysFS PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.so
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
-    )
-endif()
-add_dependencies(PhysFS::PhysFS PhysFS_external)
-
-# add the SDL3 library using ExternalProject
-ExternalProject_Add(SDL3_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL3-3.2.20
-    CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/SDL3
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DSDL_TEST=OFF
-        -DSDL_SHARED=ON
-        -DSDL_STATIC=OFF
-    BUILD_ALWAYS FALSE
-)
-
-# Create directories first
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/include)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/lib)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/bin)
-
-# Create imported target for SDL3
-add_library(SDL3::SDL3 SHARED IMPORTED)
-if(WIN32)
-    set_target_properties(SDL3::SDL3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/bin/SDL3.dll
-        IMPORTED_IMPLIB ${CMAKE_BINARY_DIR}/external/SDL3/lib/SDL3.lib
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
-    )
-elseif(APPLE)
-    set_target_properties(SDL3::SDL3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.dylib
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
-    )
-else()
-    set_target_properties(SDL3::SDL3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.so
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
-    )
-endif()
-add_dependencies(SDL3::SDL3 SDL3_external)
 
 # https://github.com/KhronosGroup/Vulkan-Samples/blob/3df7dba1b1f428f24cd9a242af78540a518f4b67/third_party/CMakeLists.txt#L53-L86
 if(ANDROID)
@@ -165,60 +86,13 @@ if (APPLE)
     target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
 endif()
 
-# add the Assimp library using ExternalProject
-ExternalProject_Add(Assimp_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/assimp-6.0.4
-    CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/Assimp
-        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DBUILD_SHARED_LIBS=OFF
-        -DASSIMP_BUILD_TESTS=OFF
-        -DASSIMP_BUILD_ASSIMP_TOOLS=OFF
-        -DASSIMP_INSTALL_PDB=OFF
-        -DASSIMP_NO_EXPORT=ON
-    BUILD_ALWAYS FALSE
-)
-
-# Create directories first
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/Assimp/include)
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/Assimp/lib)
-
-# Create imported target for Assimp
-add_library(Assimp::Assimp STATIC IMPORTED)
-if(WIN32)
-    # Try multiple possible library names for Windows
-    if(EXISTS ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
-        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
-    elseif(EXISTS ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp.lib)
-        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp.lib)
-    else()
-        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
-    endif()
-    
-    set_target_properties(Assimp::Assimp PROPERTIES
-        IMPORTED_LOCATION ${ASSIMP_LIB_PATH}
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
-    )
-elseif(APPLE)
-    set_target_properties(Assimp::Assimp PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/Assimp/lib/libassimp.a
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
-    )
-else()
-    set_target_properties(Assimp::Assimp PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/Assimp/lib/libassimp.a
-        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
-    )
-endif()
-add_dependencies(Assimp::Assimp Assimp_external)
-
 target_link_libraries(game PUBLIC
     PhysFS::PhysFS
     SDL3::SDL3
     volk::volk
     VulkanMemoryAllocator
     glm::glm
-    Assimp::Assimp
+    assimp::assimp
 )
 
 # Link Windows libraries
