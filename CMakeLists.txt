@@ -5,6 +5,18 @@ project(game)
 
 include(ExternalProject)
 
+add_subdirectory(third_party/physfs-main)
+add_subdirectory(third_party/SDL3-3.2.20)
+# add the volk library
+add_subdirectory(third_party/volk-1.4.304)
+# add the Vulkan Memory Allocator library
+add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
+# add the GLM library
+# find_package(glm REQUIRED PATHS third_party/glm/cmake)
+add_subdirectory(third_party/glm)
+# add the Assimp library
+add_subdirectory(third_party/assimp-6.0.4)
+
 # specify the list of paths to source files
 set(SOURCES
     src/event_sdl.c
@@ -114,9 +126,6 @@ else()
 endif()
 add_dependencies(SDL3::SDL3 SDL3_external)
 
-# add the volk library
-add_subdirectory(third_party/volk-1.4.304)
-
 # https://github.com/KhronosGroup/Vulkan-Samples/blob/3df7dba1b1f428f24cd9a242af78540a518f4b67/third_party/CMakeLists.txt#L53-L86
 if(ANDROID)
     target_compile_definitions(game PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
@@ -154,16 +163,10 @@ elseif(UNIX)
     endif()
 endif()
 
-# add the Vulkan Memory Allocator library
 set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
-add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
 if (APPLE)
     target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
 endif()
-
-# add the GLM library
-# find_package(glm REQUIRED PATHS third_party/glm/cmake)
-add_subdirectory(third_party/glm)
 
 # add the Assimp library using ExternalProject
 ExternalProject_Add(Assimp_external
