@@ -8,6 +8,7 @@
 #include <assimp/cimport.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <assimp/material.h>
 
 /* Forward declarations */
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene);
@@ -125,10 +126,10 @@ static Material model_processmaterial(const struct aiMaterial *aiMat)
 {
     Material material;
 
-    struct aiColor4D ambient = {0.2f, 0.2f, 0.2f, 1.0f};
-    struct aiColor4D diffuse = {0.8f, 0.8f, 0.8f, 1.0f};
-    struct aiColor4D specular = {1.0f, 1.0f, 1.0f, 1.0f};
-    struct aiColor4D emission = {0.0f, 0.0f, 0.0f, 1.0f};
+    aiColor4D ambient = {0.2f, 0.2f, 0.2f, 1.0f};
+    aiColor4D diffuse = {0.8f, 0.8f, 0.8f, 1.0f};
+    aiColor4D specular = {1.0f, 1.0f, 1.0f, 1.0f};
+    aiColor4D emission = {0.0f, 0.0f, 0.0f, 1.0f};
 
     aiGetMaterialColor(aiMat, AI_MATKEY_COLOR_AMBIENT, &ambient);
     aiGetMaterialColor(aiMat, AI_MATKEY_COLOR_DIFFUSE, &diffuse);

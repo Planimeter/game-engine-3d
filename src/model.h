@@ -4,13 +4,11 @@
 #define MODEL_H
 
 #include <sys/types.h>
+
+#ifdef __cplusplus
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 typedef struct {
     glm::vec3 position;
@@ -49,6 +47,16 @@ typedef struct {
     uint32_t meshCount;
     char *name;
 } Model;
+#else
+typedef struct Vertex Vertex;
+typedef struct Material Material;
+typedef struct Mesh Mesh;
+typedef struct Model Model;
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /* Model loading and management */
 Model *model_load(const char *filepath);
