@@ -5,6 +5,7 @@ project(game LANGUAGES C CXX)
 
 include(ExternalProject)
 
+set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/physfs-main)
 add_subdirectory(third_party/SDL3-3.2.20)
 # add the volk library
