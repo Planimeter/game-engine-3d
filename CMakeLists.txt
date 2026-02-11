@@ -41,14 +41,10 @@ else()
 endif()
 
 # specify the C++ standard
-set_property(TARGET game PROPERTY CXX_EXTENSIONS OFF)
-set_property(TARGET game PROPERTY CXX_STANDARD 11)
-set_property(TARGET game PROPERTY CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_STANDARD 20)
 
 # specify the C standard
-set_property(TARGET game PROPERTY C_EXTENSIONS OFF)
-set_property(TARGET game PROPERTY C_STANDARD 99)
-set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 99)
 
 # add the PhysicsFS library using ExternalProject
 ExternalProject_Add(PhysFS_external
