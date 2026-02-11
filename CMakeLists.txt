@@ -294,32 +294,9 @@ add_custom_command(TARGET game POST_BUILD
 # Copy DLLs to output directory
 if(WIN32)
     add_custom_command(TARGET game POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/PhysFS/bin/physfs.dll
+        COMMAND ${CMAKE_COMMAND} -E copy
+            $<TARGET_RUNTIME_DLLS:game>
             $<TARGET_FILE_DIR:game>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/SDL3/bin/SDL3.dll
-            $<TARGET_FILE_DIR:game>
-        COMMENT "Copying DLLs to output directory"
-    )
-elseif(APPLE)
-    add_custom_command(TARGET game POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.dylib
-            $<TARGET_FILE_DIR:game>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.dylib
-            $<TARGET_FILE_DIR:game>
-        COMMENT "Copying dylibs to output directory"
-    )
-else()
-    add_custom_command(TARGET game POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.so
-            $<TARGET_FILE_DIR:game>
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.so
-            $<TARGET_FILE_DIR:game>
-        COMMENT "Copying shared libraries to output directory"
+        COMMAND_EXPAND_LISTS
     )
 endif()
