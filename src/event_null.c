@@ -4,6 +4,11 @@
 
 int event_poll()
 {
-    int game_is_still_running = 1;
+    static int game_is_still_running = 1;
+
+    if (game_is_still_running && framework_quit()) {
+        game_is_still_running = 0;
+    }
+
     return game_is_still_running;
 }

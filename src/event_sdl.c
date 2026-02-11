@@ -1,7 +1,26 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
+#include "window.h"
 #include "SDL3/SDL.h"
+
+static int clamp_int_from_float(float value)
+{
+    return (int)value;
+}
+
+static void touch_to_pixels(float norm_x, float norm_y, float norm_dx, float norm_dy,
+                            int *x, int *y, int *dx, int *dy)
+{
+    int width = 0;
+    int height = 0;
+
+    window_getwindowsizeinpixels(&width, &height);
+    *x = clamp_int_from_float(norm_x * (float)width);
+    *y = clamp_int_from_float(norm_y * (float)height);
+    *dx = clamp_int_from_float(norm_dx * (float)width);
+    *dy = clamp_int_from_float(norm_dy * (float)height);
+}
 
 int event_poll()
 {
@@ -38,19 +57,46 @@ int event_poll()
 
         /* Window events */
         case SDL_EVENT_WINDOW_SHOWN:
+            framework_visible(1);
+            break;
         case SDL_EVENT_WINDOW_HIDDEN:
+            framework_visible(0);
+            break;
         case SDL_EVENT_WINDOW_EXPOSED:
+            break;
         case SDL_EVENT_WINDOW_MOVED:
+            framework_move(event.window.data1, event.window.data2);
+            break;
         case SDL_EVENT_WINDOW_RESIZED:
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+            framework_resize(event.window.data1, event.window.data2);
+            break;
         case SDL_EVENT_WINDOW_MINIMIZED:
+            framework_minimize();
+            break;
         case SDL_EVENT_WINDOW_MAXIMIZED:
+            framework_maximize();
+            break;
         case SDL_EVENT_WINDOW_RESTORED:
+            framework_restore();
+            break;
         case SDL_EVENT_WINDOW_MOUSE_ENTER:
+            framework_mousefocus(1);
+            break;
         case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+            framework_mousefocus(0);
+            break;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            framework_focus(1);
+            break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
+            framework_focus(0);
+            break;
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+            if (framework_quit()) {
+                game_is_still_running = 0;
+            }
+            break;
         case SDL_EVENT_WINDOW_HIT_TEST:
         case SDL_EVENT_WINDOW_ICCPROF_CHANGED:
         case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
@@ -59,19 +105,56 @@ int event_poll()
         case SDL_EVENT_WINDOW_ENTER_FULLSCREEN:
         case SDL_EVENT_WINDOW_LEAVE_FULLSCREEN:
         case SDL_EVENT_WINDOW_DESTROYED:
+            break;
 
         /* Keyboard events */
-        case SDL_EVENT_KEY_DOWN:
-        case SDL_EVENT_KEY_UP:
+        case SDL_EVENT_KEY_DOWN: {
+            const char *key = SDL_GetKeyName(event.key.key);
+            const char *scancode = SDL_GetScancodeName(event.key.scancode);
+            framework_keypressed(key ? key : "", scancode ? scancode : "", event.key.repeat != 0);
+            break;
+        }
+        case SDL_EVENT_KEY_UP: {
+            const char *key = SDL_GetKeyName(event.key.key);
+            const char *scancode = SDL_GetScancodeName(event.key.scancode);
+            framework_keyreleased(key ? key : "", scancode ? scancode : "");
+            break;
+        }
         case SDL_EVENT_TEXT_EDITING:
+            framework_textedited(event.edit.text, event.edit.start, event.edit.length);
+            break;
         case SDL_EVENT_TEXT_INPUT:
+            framework_textinput(event.text.text);
+            break;
         case SDL_EVENT_KEYMAP_CHANGED:
+            break;
 
         /* Mouse events */
         case SDL_EVENT_MOUSE_MOTION:
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-        case SDL_EVENT_MOUSE_BUTTON_UP:
+            framework_mousemoved(clamp_int_from_float(event.motion.x),
+                                 clamp_int_from_float(event.motion.y),
+                                 clamp_int_from_float(event.motion.xrel),
+                                 clamp_int_from_float(event.motion.yrel),
+                                 0);
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+            const char *button = SDL_GetMouseButtonName(event.button.button);
+            framework_mousepressed(clamp_int_from_float(event.button.x),
+                                   clamp_int_from_float(event.button.y),
+                                   button ? button : "", 0);
+            break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_UP: {
+            const char *button = SDL_GetMouseButtonName(event.button.button);
+            framework_mousereleased(clamp_int_from_float(event.button.x),
+                                    clamp_int_from_float(event.button.y),
+                                    button ? button : "", 0);
+            break;
+        }
         case SDL_EVENT_MOUSE_WHEEL:
+            framework_wheelmoved(clamp_int_from_float(event.wheel.x),
+                                 clamp_int_from_float(event.wheel.y));
+            break;
 
         /* Joystick events */
         case SDL_EVENT_JOYSTICK_AXIS_MOTION:
@@ -96,9 +179,36 @@ int event_poll()
         case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
 
         /* Touch events */
-        case SDL_EVENT_FINGER_DOWN:
-        case SDL_EVENT_FINGER_UP:
-        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_DOWN: {
+            int x = 0;
+            int y = 0;
+            int dx = 0;
+            int dy = 0;
+            touch_to_pixels(event.tfinger.x, event.tfinger.y, event.tfinger.dx, event.tfinger.dy,
+                            &x, &y, &dx, &dy);
+            framework_mousepressed(x, y, "touch", 1);
+            break;
+        }
+        case SDL_EVENT_FINGER_UP: {
+            int x = 0;
+            int y = 0;
+            int dx = 0;
+            int dy = 0;
+            touch_to_pixels(event.tfinger.x, event.tfinger.y, event.tfinger.dx, event.tfinger.dy,
+                            &x, &y, &dx, &dy);
+            framework_mousereleased(x, y, "touch", 1);
+            break;
+        }
+        case SDL_EVENT_FINGER_MOTION: {
+            int x = 0;
+            int y = 0;
+            int dx = 0;
+            int dy = 0;
+            touch_to_pixels(event.tfinger.x, event.tfinger.y, event.tfinger.dx, event.tfinger.dy,
+                            &x, &y, &dx, &dy);
+            framework_mousemoved(x, y, dx, dy, 1);
+            break;
+        }
 
         /* Clipboard events */
         case SDL_EVENT_CLIPBOARD_UPDATE:
