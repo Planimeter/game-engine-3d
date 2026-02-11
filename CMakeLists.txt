@@ -42,7 +42,8 @@ ExternalProject_Add(PhysFS_external
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/PhysFS
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-        -DPHYSFS_BUILD_STATIC=ON
+        -DPHYSFS_BUILD_SHARED=ON
+        -DPHYSFS_BUILD_STATIC=OFF
         -DPHYSFS_BUILD_TEST=OFF
         -DPHYSFS_BUILD_DOCS=OFF
     BUILD_ALWAYS FALSE
@@ -51,17 +52,24 @@ ExternalProject_Add(PhysFS_external
 # Create directories first
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/include)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/lib)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/PhysFS/bin)
 
 # Create imported target for PhysFS
-add_library(PhysFS::PhysFS STATIC IMPORTED)
+add_library(PhysFS::PhysFS SHARED IMPORTED)
 if(WIN32)
     set_target_properties(PhysFS::PhysFS PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/physfs-static.lib
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/bin/physfs.dll
+        IMPORTED_IMPLIB ${CMAKE_BINARY_DIR}/external/PhysFS/lib/physfs.lib
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
+    )
+elseif(APPLE)
+    set_target_properties(PhysFS::PhysFS PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.dylib
         INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
     )
 else()
     set_target_properties(PhysFS::PhysFS PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.a
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.so
         INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/PhysFS/include
     )
 endif()
@@ -74,25 +82,32 @@ ExternalProject_Add(SDL3_external
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/SDL3
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
         -DSDL_TEST=OFF
-        -DSDL_STATIC=ON
-        -DSDL_STATIC_PIC=ON
+        -DSDL_SHARED=ON
+        -DSDL_STATIC=OFF
     BUILD_ALWAYS FALSE
 )
 
 # Create directories first
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/include)
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/lib)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/SDL3/bin)
 
 # Create imported target for SDL3
-add_library(SDL3::SDL3 STATIC IMPORTED)
+add_library(SDL3::SDL3 SHARED IMPORTED)
 if(WIN32)
     set_target_properties(SDL3::SDL3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/SDL3-static.lib
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/bin/SDL3.dll
+        IMPORTED_IMPLIB ${CMAKE_BINARY_DIR}/external/SDL3/lib/SDL3.lib
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
+    )
+elseif(APPLE)
+    set_target_properties(SDL3::SDL3 PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.dylib
         INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
     )
 else()
     set_target_properties(SDL3::SDL3 PROPERTIES
-        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.a
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.so
         INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/SDL3/include
     )
 endif()
@@ -220,3 +235,36 @@ add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:game>/shaders
   COMMAND_EXPAND_LISTS
 )
+
+# Copy DLLs to output directory
+if(WIN32)
+    add_custom_command(TARGET game POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/PhysFS/bin/physfs.dll
+            $<TARGET_FILE_DIR:game>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/SDL3/bin/SDL3.dll
+            $<TARGET_FILE_DIR:game>
+        COMMENT "Copying DLLs to output directory"
+    )
+elseif(APPLE)
+    add_custom_command(TARGET game POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.dylib
+            $<TARGET_FILE_DIR:game>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.dylib
+            $<TARGET_FILE_DIR:game>
+        COMMENT "Copying dylibs to output directory"
+    )
+else()
+    add_custom_command(TARGET game POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/PhysFS/lib/libphysfs.so
+            $<TARGET_FILE_DIR:game>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_BINARY_DIR}/external/SDL3/lib/libSDL3.so
+            $<TARGET_FILE_DIR:game>
+        COMMENT "Copying shared libraries to output directory"
+    )
+endif()
