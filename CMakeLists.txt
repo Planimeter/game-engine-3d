@@ -278,12 +278,6 @@ endif()
 target_include_directories(game PUBLIC
                            "${PROJECT_BINARY_DIR}"
                            "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
-                           PhysFS::PhysFS
-                           SDL3::SDL3
-                           volk::volk
-                           VulkanMemoryAllocator
-                           glm::glm
-                           Assimp::Assimp
                            )
 
 add_custom_command(TARGET game POST_BUILD
