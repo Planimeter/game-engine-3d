@@ -215,12 +215,14 @@ else()
 endif()
 add_dependencies(Assimp::Assimp Assimp_external)
 
-target_link_libraries(game PUBLIC PhysFS::PhysFS)
-target_link_libraries(game PUBLIC SDL3::SDL3)
-target_link_libraries(game PUBLIC volk::volk)
-target_link_libraries(game PUBLIC VulkanMemoryAllocator)
-target_link_libraries(game PUBLIC glm::glm)
-target_link_libraries(game PUBLIC Assimp::Assimp)
+target_link_libraries(game PUBLIC
+    PhysFS::PhysFS
+    SDL3::SDL3
+    volk::volk
+    VulkanMemoryAllocator
+    glm::glm
+    Assimp::Assimp
+)
 
 # Link Windows libraries
 if(WIN32)
