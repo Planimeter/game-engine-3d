@@ -4,8 +4,9 @@ cmake_minimum_required(VERSION 3.21)
 project(game LANGUAGES C CXX)
 
 # add the PhysFS library
-set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
 set(PHYSFS_BUILD_STATIC OFF CACHE BOOL "" FORCE)
+set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
+set(PHYSFS_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/physfs-main)
 # add the SDL library
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
