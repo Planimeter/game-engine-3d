@@ -39,7 +39,7 @@ set_property(TARGET game PROPERTY C_STANDARD_REQUIRED ON)
 
 # add the PhysicsFS library using ExternalProject
 ExternalProject_Add(PhysFS_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/physfs-main
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/physfs-main
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/PhysFS
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
@@ -78,7 +78,7 @@ add_dependencies(PhysFS::PhysFS PhysFS_external)
 
 # add the SDL3 library using ExternalProject
 ExternalProject_Add(SDL3_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/SDL3-3.2.20
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/SDL3-3.2.20
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/SDL3
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
@@ -115,7 +115,7 @@ endif()
 add_dependencies(SDL3::SDL3 SDL3_external)
 
 # add the volk library
-add_subdirectory(lib/volk-1.4.304)
+add_subdirectory(third_party/volk-1.4.304)
 
 # https://github.com/KhronosGroup/Vulkan-Samples/blob/3df7dba1b1f428f24cd9a242af78540a518f4b67/third_party/CMakeLists.txt#L53-L86
 if(ANDROID)
@@ -156,18 +156,18 @@ endif()
 
 # add the Vulkan Memory Allocator library
 set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
-add_subdirectory(lib/VulkanMemoryAllocator-3.3.0)
+add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
 if (APPLE)
     target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
 endif()
 
 # add the GLM library
-# find_package(glm REQUIRED PATHS lib/glm/cmake)
-add_subdirectory(lib/glm)
+# find_package(glm REQUIRED PATHS third_party/glm/cmake)
+add_subdirectory(third_party/glm)
 
 # add the Assimp library using ExternalProject
 ExternalProject_Add(Assimp_external
-    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/assimp-6.0.4
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/assimp-6.0.4
     CMAKE_ARGS
         -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/Assimp
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
@@ -272,7 +272,7 @@ endif()
 # so that we will find TutorialConfig.h
 target_include_directories(game PUBLIC
                            "${PROJECT_BINARY_DIR}"
-                           "${CMAKE_CURRENT_SOURCE_DIR}/lib"
+                           "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
                            PhysFS::PhysFS
                            SDL3::SDL3
                            volk::volk
