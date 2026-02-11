@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # set the project name
-project(game)
+project(game LANGUAGES C CXX)
 
 include(ExternalProject)
 
