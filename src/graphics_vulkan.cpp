@@ -26,6 +26,7 @@
 #include "vk_mem_alloc.h"
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
+#include "model.h"
 
 /* Constants */
 static const uint32_t MIN_SWAPCHAIN_IMAGES = 2;
@@ -74,14 +75,14 @@ static Shader fragShader;
 static VkPipelineLayout pipelineLayout;
 static VkPipeline graphicsPipeline;
 
-/* 12.1. Buffers */
-static VkBuffer vertexBuffer;
-
-/* VmaAllocation Struct */
-static VmaAllocation allocation;
-
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
+
+/* 14. Resource Descriptors */
+#define MAX_BINDLESS_RESOURCES 16384
+static VkDescriptorPool bindlessDescriptorPool;
+static VkDescriptorSetLayout bindlessDescriptorSetLayout;
+static VkDescriptorSet bindlessDescriptorSet;
 
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
@@ -196,7 +197,7 @@ static void graphics_createinstance()
 #endif
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkApplicationInfo */
-    app.apiVersion = VK_API_VERSION_1_1;
+    app.apiVersion = VK_API_VERSION_1_2;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#VkInstanceCreateInfo */
     createInfo.pApplicationInfo        = &app;
@@ -239,7 +240,7 @@ static void graphics_enumeratephysicaldevices()
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
 
-/* Find a suitable graphics queue family */
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetPhysicalDeviceQueueFamilyProperties */
 static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
 {
     uint32_t queueFamilyCount = 0;
@@ -284,7 +285,7 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     return selectedFamily;
 }
 
-/* Choose the best available surface format */
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetPhysicalDeviceSurfaceFormatsKHR */
 static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevice, VkSurfaceKHR surface)
 {
     uint32_t formatCount;
@@ -344,6 +345,16 @@ static void graphics_createdevice()
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     VkResult result;
 
+    /* Enable Vulkan 1.2 features for bindless rendering */
+    VkPhysicalDeviceVulkan12Features vulkan12Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    vulkan12Features.descriptorIndexing = VK_TRUE;
+    vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
+    vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
+    vulkan12Features.runtimeDescriptorArray = VK_TRUE;
+    vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    vulkan12Features.bufferDeviceAddress = VK_TRUE;
+
     // Find suitable queue family first
     graphicsQueueFamily = graphics_findqueuefamily(physicalDevices[0]);
 
@@ -356,6 +367,7 @@ static void graphics_createdevice()
     createInfo.pQueueCreateInfos       = &queueCreateInfo;
     createInfo.enabledExtensionCount   = 1;
     createInfo.ppEnabledExtensionNames = &enabledExtensionNames;
+    createInfo.pNext                   = &vulkan12Features;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */
     result = vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
@@ -415,7 +427,7 @@ static void graphics_createallocator()
     vulkanFunctions.vkGetDeviceImageMemoryRequirements = vkGetDeviceImageMemoryRequirements;
 #endif
 
-    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_1;
+    allocatorCreateInfo.vulkanApiVersion = VK_API_VERSION_1_2;
     allocatorCreateInfo.physicalDevice   = physicalDevices[0];
     allocatorCreateInfo.device           = device;
     allocatorCreateInfo.instance         = instance;
@@ -559,6 +571,80 @@ static void graphics_createsemaphores()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets */
+static void graphics_createbindlessdescriptors()
+{
+    VkDescriptorSetLayoutBinding binding = {};
+    VkDescriptorBindingFlags bindingFlags;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo bindingFlagsInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+    VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    VkDescriptorPoolSize poolSize = {};
+    VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    uint32_t variableDescriptorCount;
+    VkDescriptorSetVariableDescriptorCountAllocateInfo variableDescriptorCountInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO };
+    VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    VkResult result;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-setlayout */
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    binding.descriptorCount = MAX_BINDLESS_RESOURCES;
+    binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    bindingFlags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                   VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
+                   VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+
+    bindingFlagsInfo.bindingCount = 1;
+    bindingFlagsInfo.pBindingFlags = &bindingFlags;
+
+    layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &binding;
+    layoutInfo.pNext = &bindingFlagsInfo;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkCreateDescriptorSetLayout */
+    result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &bindlessDescriptorSetLayout);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create bindless descriptor set layout: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-pools */
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = MAX_BINDLESS_RESOURCES;
+
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkCreateDescriptorPool */
+    result = vkCreateDescriptorPool(device, &poolInfo, NULL, &bindlessDescriptorPool);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create bindless descriptor pool: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-allocation */
+    variableDescriptorCount = MAX_BINDLESS_RESOURCES;
+
+    variableDescriptorCountInfo.descriptorSetCount = 1;
+    variableDescriptorCountInfo.pDescriptorCounts = &variableDescriptorCount;
+
+    allocInfo.descriptorPool = bindlessDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &bindlessDescriptorSetLayout;
+    allocInfo.pNext = &variableDescriptorCountInfo;
+
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkAllocateDescriptorSets */
+    result = vkAllocateDescriptorSets(device, &allocInfo, &bindlessDescriptorSet);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to allocate bindless descriptor set: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
 static void graphics_createrenderpass()
 {
@@ -653,33 +739,6 @@ static void graphics_createshaders()
     vertBinary = NULL;
 }
 
-typedef struct Vertex {
-    glm::vec2 position;
-    glm::vec3 color;
-} Vertex;
-
-static VkVertexInputBindingDescription graphics_getvertexbindingdescription() {
-    VkVertexInputBindingDescription bindingDescription = {};
-    bindingDescription.binding = 0;
-    bindingDescription.stride = sizeof(Vertex);
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-    return bindingDescription;
-}
-
-static void graphics_getvertexattributedescriptions(VkVertexInputAttributeDescription* attributeDescriptions) {
-    // Position attribute
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Vertex, position);
-    
-    // Color attribute
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Vertex, color);
-}
-
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
@@ -698,10 +757,32 @@ static void graphics_creategraphicspipeline()
     const VkDynamicState                          states[]                 = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineLayoutCreateInfo                    pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
 
-    // Vertex input setup
-    VkVertexInputBindingDescription bindingDescription = graphics_getvertexbindingdescription();
-    VkVertexInputAttributeDescription attributeDescriptions[2];
-    graphics_getvertexattributedescriptions(attributeDescriptions);
+    VkVertexInputBindingDescription bindingDescription = {};
+    bindingDescription.binding = 0;
+    bindingDescription.stride = sizeof(Vertex);
+    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    VkVertexInputAttributeDescription attributeDescriptions[5] = {};
+    attributeDescriptions[0].binding = 0;
+    attributeDescriptions[0].location = 0;
+    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[0].offset = offsetof(Vertex, position);
+    attributeDescriptions[1].binding = 0;
+    attributeDescriptions[1].location = 1;
+    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[1].offset = offsetof(Vertex, normal);
+    attributeDescriptions[2].binding = 0;
+    attributeDescriptions[2].location = 2;
+    attributeDescriptions[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[2].offset = offsetof(Vertex, tangent);
+    attributeDescriptions[3].binding = 0;
+    attributeDescriptions[3].location = 3;
+    attributeDescriptions[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+    attributeDescriptions[3].offset = offsetof(Vertex, bitangent);
+    attributeDescriptions[4].binding = 0;
+    attributeDescriptions[4].location = 4;
+    attributeDescriptions[4].format = VK_FORMAT_R32G32_SFLOAT;
+    attributeDescriptions[4].offset = offsetof(Vertex, texCoords);
 
     vertShaderStage.stage                       = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module                      = (VkShaderModule)vertShader;
@@ -716,7 +797,7 @@ static void graphics_creategraphicspipeline()
 
     vertexInput.vertexBindingDescriptionCount   = 1;
     vertexInput.pVertexBindingDescriptions      = &bindingDescription;
-    vertexInput.vertexAttributeDescriptionCount = 2;
+    vertexInput.vertexAttributeDescriptionCount = 5;
     vertexInput.pVertexAttributeDescriptions    = attributeDescriptions;
 
     inputAssembly.topology                      = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -737,6 +818,9 @@ static void graphics_creategraphicspipeline()
 
     dynamicState.dynamicStateCount              = 2;
     dynamicState.pDynamicStates                 = states;
+
+    pipelineLayoutCreateInfo.setLayoutCount = 1;
+    pipelineLayoutCreateInfo.pSetLayouts = &bindlessDescriptorSetLayout;
 
     VkResult result = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
     if (result != VK_SUCCESS) {
@@ -774,41 +858,6 @@ static void graphics_creategraphicspipeline()
     fragShader = VK_NULL_HANDLE;
 }
 
-static Vertex triangle_vertices[3] = {
-    { glm::vec2( 0.0f, -0.5f), glm::vec3(1.0f, 0.0f, 0.0f) },
-    { glm::vec2( 0.5f,  0.5f), glm::vec3(0.0f, 1.0f, 0.0f) },
-    { glm::vec2(-0.5f,  0.5f), glm::vec3(0.0f, 0.0f, 1.0f) }
-};
-
-/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
-static void graphics_createvertexbuffer()
-{
-    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    VmaAllocationCreateInfo allocInfo = { 0 };
-    void *mappedData;
-
-    bufferInfo.size        = sizeof(triangle_vertices);
-    bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
-
-    VkResult result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &vertexBuffer, &allocation, NULL);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create vertex buffer: %d\n", result);
-        exit(EXIT_FAILURE);
-    }
-
-    result = vmaMapMemory(allocator, allocation, &mappedData);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to map vertex buffer memory: %d\n", result);
-        exit(EXIT_FAILURE);
-    }
-    memcpy(mappedData, triangle_vertices, sizeof(triangle_vertices));
-    vmaUnmapMemory(allocator, allocation);
-}
-
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
@@ -821,8 +870,6 @@ static void graphics_destroyfences();
 static void graphics_freecommandbuffers();
 static void graphics_destroycommandpools();
 static void graphics_destroysemaphores();
-static VkVertexInputBindingDescription graphics_getvertexbindingdescription();
-static void graphics_getvertexattributedescriptions(VkVertexInputAttributeDescription* attributeDescriptions);
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_swapchain */
 static void graphics_createswapchain()
@@ -937,6 +984,7 @@ static void graphics_createimageviews()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkDestroyFramebuffer */
 static void graphics_destroyframebuffers()
 {
     size_t i;
@@ -953,6 +1001,7 @@ static void graphics_destroyframebuffers()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#vkDestroyImageView */
 static void graphics_destroyimageviews()
 {
     size_t i;
@@ -967,6 +1016,7 @@ static void graphics_destroyimageviews()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkDestroyFence */
 static void graphics_destroyfences()
 {
     size_t i;
@@ -981,6 +1031,7 @@ static void graphics_destroyfences()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkFreeCommandBuffers */
 static void graphics_freecommandbuffers()
 {
     size_t i;
@@ -995,6 +1046,7 @@ static void graphics_freecommandbuffers()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkDestroyCommandPool */
 static void graphics_destroycommandpools()
 {
     size_t i;
@@ -1009,6 +1061,7 @@ static void graphics_destroycommandpools()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkDestroySemaphore */
 static void graphics_destroysemaphores()
 {
     vkDestroySemaphore(device, releaseSemaphore, NULL);
@@ -1053,6 +1106,8 @@ void graphics_init()
     graphics_getqueue();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createsemaphores();
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html */
+    graphics_createbindlessdescriptors();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
@@ -1062,8 +1117,6 @@ void graphics_init()
     graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
     graphics_creategraphicspipeline();
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
-    graphics_createvertexbuffer();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html */
     graphics_createcommandpools();
     graphics_allocatecommandbuffers();
@@ -1076,6 +1129,7 @@ void graphics_init()
     atexit(graphics_shutdown);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#vkCreateShaderModule */
 Shader graphics_createshader(const char *shader, size_t size)
 {
     VkShaderModule shaderModule;
@@ -1093,11 +1147,13 @@ Shader graphics_createshader(const char *shader, size_t size)
     return shaderModule;
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#vkDestroyShaderModule */
 void graphics_destroyshader(Shader shader)
 {
     vkDestroyShaderModule(device, (VkShaderModule)shader, NULL);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetPhysicalDeviceSurfaceCapabilitiesKHR */
 int graphics_isminimized()
 {
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -1113,19 +1169,14 @@ int graphics_isminimized()
     return 0;
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-recording */
 void graphics_predraw()
 {
-    /* 3.5. Command Syntax and Duration */
-    VkDeviceSize offsets[] = {0};
-
     /* 6.4. Command Buffer Recording */
     VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 
     /* 8.4. Render Pass Commands */
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
-
-    /* 12.1. Buffers */
-    VkBuffer vertexBuffers[] = {vertexBuffer};
 
     /* 19.3. Clear Values */
     VkClearValue clearValue = {{CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]}};
@@ -1174,6 +1225,10 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-binding */
     vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
 
+    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkCmdBindDescriptorSets */
+    vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+
     viewport.width    = w;
     viewport.height   = h;
     viewport.minDepth = 0.0f;
@@ -1187,14 +1242,211 @@ void graphics_predraw()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
     vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#vkCmdBindVertexBuffers */
-    vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, offsets);
-
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDraw */
-    vkCmdDraw(commandBuffers[imageIndex], 3, 1, 0, 0);
 }
 
+typedef struct {
+    VkBuffer *vertexBuffers;
+    VkBuffer *indexBuffers;
+    VmaAllocation *vertexAllocations;
+    VmaAllocation *indexAllocations;
+    uint32_t *indexCounts;
+    uint32_t meshCount;
+} GPUModel;
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
+static GPUModel *graphics_createmodelgpu(Model *modelData)
+{
+    if (!modelData) {
+        return NULL;
+    }
+
+    GPUModel *gpuModel = (GPUModel *)malloc(sizeof(GPUModel));
+    if (!gpuModel) {
+        fprintf(stderr, "Failed to allocate graphics model\n");
+        return NULL;
+    }
+
+    gpuModel->meshCount = modelData->meshCount;
+
+    gpuModel->vertexBuffers     = (VkBuffer *)     malloc(sizeof(VkBuffer)      * gpuModel->meshCount);
+    gpuModel->indexBuffers      = (VkBuffer *)     malloc(sizeof(VkBuffer)      * gpuModel->meshCount);
+    gpuModel->vertexAllocations = (VmaAllocation *)malloc(sizeof(VmaAllocation) * gpuModel->meshCount);
+    gpuModel->indexAllocations  = (VmaAllocation *)malloc(sizeof(VmaAllocation) * gpuModel->meshCount);
+    gpuModel->indexCounts       = (uint32_t *)     malloc(sizeof(uint32_t)      * gpuModel->meshCount);
+
+    if (!gpuModel->vertexBuffers || !gpuModel->indexBuffers || 
+        !gpuModel->vertexAllocations || !gpuModel->indexAllocations || 
+        !gpuModel->indexCounts) {
+        fprintf(stderr, "Failed to allocate buffer arrays\n");
+        free(gpuModel->vertexBuffers);
+        free(gpuModel->indexBuffers);
+        free(gpuModel->vertexAllocations);
+        free(gpuModel->indexAllocations);
+        free(gpuModel->indexCounts);
+        free(gpuModel);
+        return NULL;
+    }
+
+    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+        Mesh *mesh = &modelData->meshes[i];
+        VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        VmaAllocationCreateInfo allocInfo = { 0 };
+        VkResult result;
+
+        bufferInfo.size        = mesh->vertexCount * sizeof(Vertex);
+        bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gac72ee55598617e8eecca384e746bab51 */
+        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, 
+                                &gpuModel->vertexBuffers[i], &gpuModel->vertexAllocations[i], NULL);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create vertex buffer for mesh %d: %d\n", i, result);
+            goto cleanup;
+        }
+
+        void *mappedData;
+        result = vmaMapMemory(allocator, gpuModel->vertexAllocations[i], &mappedData);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to map vertex buffer for mesh %d: %d\n", i, result);
+            goto cleanup;
+        }
+        memcpy(mappedData, mesh->vertices, bufferInfo.size);
+        vmaUnmapMemory(allocator, gpuModel->vertexAllocations[i]);
+
+        bufferInfo.size  = mesh->indexCount * sizeof(uint32_t);
+        bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gac72ee55598617e8eecca384e746bab51 */
+        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, 
+                                &gpuModel->indexBuffers[i], &gpuModel->indexAllocations[i], NULL);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create index buffer for mesh %d: %d\n", i, result);
+            goto cleanup;
+        }
+
+        result = vmaMapMemory(allocator, gpuModel->indexAllocations[i], &mappedData);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to map index buffer for mesh %d: %d\n", i, result);
+            goto cleanup;
+        }
+        memcpy(mappedData, mesh->indices, bufferInfo.size);
+        vmaUnmapMemory(allocator, gpuModel->indexAllocations[i]);
+
+        gpuModel->indexCounts[i] = mesh->indexCount;
+    }
+
+    model_destroy(modelData);
+    return gpuModel;
+
+cleanup:
+    for (uint32_t j = 0; j < gpuModel->meshCount; j++) {
+        if (gpuModel->vertexBuffers[j] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, gpuModel->vertexBuffers[j], gpuModel->vertexAllocations[j]);
+        }
+        if (gpuModel->indexBuffers[j] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, gpuModel->indexBuffers[j], gpuModel->indexAllocations[j]);
+        }
+    }
+    free(gpuModel->indexCounts);
+    free(gpuModel->vertexBuffers);
+    free(gpuModel->indexBuffers);
+    free(gpuModel->vertexAllocations);
+    free(gpuModel->indexAllocations);
+    free(gpuModel);
+    return NULL;
+}
+
+/* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
+static void graphics_destroymodelgpu(GPUModel *gpuModel)
+{
+    if (!gpuModel) {
+        return;
+    }
+
+    vkQueueWaitIdle(queue);
+
+    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+        if (gpuModel->vertexBuffers[i] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, gpuModel->vertexBuffers[i], gpuModel->vertexAllocations[i]);
+        }
+        if (gpuModel->indexBuffers[i] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, gpuModel->indexBuffers[i], gpuModel->indexAllocations[i]);
+        }
+    }
+
+    free(gpuModel->indexCounts);
+    free(gpuModel->vertexBuffers);
+    free(gpuModel->indexBuffers);
+    free(gpuModel->vertexAllocations);
+    free(gpuModel->indexAllocations);
+    free(gpuModel);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
+Model *graphics_loadmodel(const char *filepath)
+{
+    if (!filepath) {
+        fprintf(stderr, "Invalid model filepath\n");
+        return NULL;
+    }
+
+    Model *modelData = model_load(filepath);
+    if (!modelData) {
+        fprintf(stderr, "Failed to load model: %s\n", filepath);
+        return NULL;
+    }
+
+    GPUModel *gpuModel = graphics_createmodelgpu(modelData);
+    if (!gpuModel) {
+        fprintf(stderr, "Failed to create GPU buffers for model: %s\n", filepath);
+        model_destroy(modelData);
+        return NULL;
+    }
+
+    return (Model *)gpuModel;
+}
+
+/* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
+void graphics_destroymodel(Model *model)
+{
+    if (!model) {
+        return;
+    }
+
+    graphics_destroymodelgpu((GPUModel *)model);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#drawing */
+void graphics_drawmodel(Model *model)
+{
+    if (!model || graphics_isminimized()) {
+        return;
+    }
+
+    GPUModel *gpuModel = (GPUModel *)model;
+    if (gpuModel->meshCount == 0) {
+        return;
+    }
+
+    VkDeviceSize offsets[] = {0};
+
+    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#vkCmdBindVertexBuffers */
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &gpuModel->vertexBuffers[i], offsets);
+
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdBindIndexBuffer */
+        vkCmdBindIndexBuffer(commandBuffers[imageIndex], gpuModel->indexBuffers[i], 0, VK_INDEX_TYPE_UINT32);
+
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDrawIndexed */
+        vkCmdDrawIndexed(commandBuffers[imageIndex], gpuModel->indexCounts[i], 1, 0, 0, 0);
+    }
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#commandbuffers-submission */
 void graphics_postdraw()
 {
     /* 6.5. Command Buffer Submission */
@@ -1226,6 +1478,7 @@ void graphics_postdraw()
     vkQueueSubmit(queue, 1, &submit, fences[imageIndex]);
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkQueuePresentKHR */
 void graphics_present()
 {
     VkPresentInfoKHR presentInfo = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
@@ -1250,6 +1503,7 @@ void graphics_present()
     }
 }
 
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetPhysicalDeviceSurfaceCapabilitiesKHR */
 void graphics_resize()
 {
     VkSurfaceCapabilitiesKHR surfaceCapabilities;
@@ -1309,15 +1563,18 @@ void graphics_shutdown(void)
         if (renderPass != VK_NULL_HANDLE) {
             vkDestroyRenderPass(device, renderPass, NULL);
         }
+        if (bindlessDescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, bindlessDescriptorSetLayout, NULL);
+        }
+        if (bindlessDescriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, bindlessDescriptorPool, NULL);
+        }
 
         graphics_destroysemaphores();
         graphics_destroyfences();
         graphics_freecommandbuffers();
         graphics_destroycommandpools();
 
-        if (vertexBuffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, vertexBuffer, allocation);
-        }
         if (allocator != VK_NULL_HANDLE) {
             vmaDestroyAllocator(allocator);
         }

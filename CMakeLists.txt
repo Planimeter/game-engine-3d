@@ -12,6 +12,7 @@ set(SOURCES
     src/framework.c
     src/graphics_vulkan.cpp
     src/main_sdl.c
+    src/model_assimp.cpp
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c
@@ -164,11 +165,59 @@ endif()
 # find_package(glm REQUIRED PATHS lib/glm/cmake)
 add_subdirectory(lib/glm)
 
+# add the Assimp library using ExternalProject
+ExternalProject_Add(Assimp_external
+    SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/assimp-6.0.4
+    CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${CMAKE_BINARY_DIR}/external/Assimp
+        -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+        -DBUILD_SHARED_LIBS=OFF
+        -DASSIMP_BUILD_TESTS=OFF
+        -DASSIMP_BUILD_ASSIMP_TOOLS=OFF
+        -DASSIMP_INSTALL_PDB=OFF
+        -DASSIMP_NO_EXPORT=ON
+    BUILD_ALWAYS FALSE
+)
+
+# Create directories first
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/Assimp/include)
+file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/external/Assimp/lib)
+
+# Create imported target for Assimp
+add_library(Assimp::Assimp STATIC IMPORTED)
+if(WIN32)
+    # Try multiple possible library names for Windows
+    if(EXISTS ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
+        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
+    elseif(EXISTS ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp.lib)
+        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp.lib)
+    else()
+        set(ASSIMP_LIB_PATH ${CMAKE_BINARY_DIR}/external/Assimp/lib/assimp-vc143-mt.lib)
+    endif()
+    
+    set_target_properties(Assimp::Assimp PROPERTIES
+        IMPORTED_LOCATION ${ASSIMP_LIB_PATH}
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
+    )
+elseif(APPLE)
+    set_target_properties(Assimp::Assimp PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/Assimp/lib/libassimp.a
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
+    )
+else()
+    set_target_properties(Assimp::Assimp PROPERTIES
+        IMPORTED_LOCATION ${CMAKE_BINARY_DIR}/external/Assimp/lib/libassimp.a
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_BINARY_DIR}/external/Assimp/include
+    )
+endif()
+add_dependencies(Assimp::Assimp Assimp_external)
+
 target_link_libraries(game PUBLIC PhysFS::PhysFS)
 target_link_libraries(game PUBLIC SDL3::SDL3)
 target_link_libraries(game PUBLIC volk::volk)
 target_link_libraries(game PUBLIC VulkanMemoryAllocator)
 target_link_libraries(game PUBLIC glm::glm)
+target_link_libraries(game PUBLIC Assimp::Assimp)
 
 # Link Windows libraries
 if(WIN32)
@@ -229,6 +278,7 @@ target_include_directories(game PUBLIC
                            volk::volk
                            VulkanMemoryAllocator
                            glm::glm
+                           Assimp::Assimp
                            )
 
 add_custom_command(TARGET game POST_BUILD

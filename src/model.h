@@ -1,0 +1,61 @@
+/* Copyright Planimeter. All Rights Reserved. */
+
+#ifndef MODEL_H
+#define MODEL_H
+
+#include <sys/types.h>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/vec4.hpp>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texCoords;
+    glm::vec3 tangent;
+    glm::vec3 bitangent;
+} Vertex;
+
+typedef struct {
+    glm::vec4 ambient;
+    glm::vec4 diffuse;
+    glm::vec4 specular;
+    glm::vec4 emission;
+    float shininess;
+    char *ambientTexture;
+    char *diffuseTexture;
+    char *specularTexture;
+    char *normalTexture;
+} Material;
+
+typedef struct {
+    Vertex *vertices;
+    uint32_t *indices;
+    uint32_t vertexCount;
+    uint32_t indexCount;
+    Material material;
+    void *vertexBuffer;
+    void *indexBuffer;
+    void *vertexBufferMemory;
+    void *indexBufferMemory;
+} Mesh;
+
+typedef struct {
+    Mesh *meshes;
+    uint32_t meshCount;
+    char *name;
+} Model;
+
+/* Model loading and management */
+Model *model_load(const char *filepath);
+void   model_destroy(Model *model);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* MODEL_H */
