@@ -6,37 +6,63 @@
 #include "event.h"
 #include "timer.h"
 #include "graphics.h"
+#include "job.h"
+#include <stdlib.h>
+#include <stdio.h>
 
-static void load(int argc, char *argv[])
+static JobSystem *g_jobSystem = NULL;
+
+static void job_update(void *context, uint32_t jobIndex)
 {
-    framework_init(argv[0]);
-    framework_load(argc, argv);
+    (void)context;
+    (void)jobIndex;
+    framework_update(*(uint64_t *)context);
 }
 
-static void update()
+static void job_draw(void *context, uint32_t jobIndex)
 {
-    uint64_t dt = timer_step();
-    framework_update(dt);
-}
-
-static void draw()
-{
+    (void)context;
+    (void)jobIndex;
     graphics_predraw();
     framework_draw();
     graphics_postdraw();
-    graphics_present();
 }
 
 int main(int argc, char *argv[])
 {
-    load(argc, argv);
-
+    framework_init(argv[0]);
+    framework_load(argc, argv);
+    
+    g_jobSystem = job_create(0);
+    if (!g_jobSystem) {
+        fprintf(stderr, "Failed to create job system\n");
+        return 1;
+    }
+    
     while (event_poll()) {
-        update();
-        draw();
-
+        uint64_t frameTime = timer_step();
+        
+        JobDescriptor updateJob = {
+            .function = job_update,
+            .context = &frameTime,
+            .jobCount = 1,
+            .name = "Update"
+        };
+        job_submit(g_jobSystem, &updateJob);
+        
+        JobDescriptor drawJob = {
+            .function = job_draw,
+            .context = NULL,
+            .jobCount = 1,
+            .name = "Draw"
+        };
+        job_submit(g_jobSystem, &drawJob);
+        
+        job_waitall(g_jobSystem);
+        graphics_present();
         timer_sleep(1);
     }
-
+    
+    job_destroy(g_jobSystem);
     return 0;
 }

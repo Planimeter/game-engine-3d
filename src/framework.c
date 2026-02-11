@@ -4,6 +4,7 @@
 #include "window.h"
 #include "graphics.h"
 #include <stdint.h>
+#include <stdlib.h>
 
 void framework_init(const char *argv0)
 {
@@ -16,12 +17,20 @@ void framework_load(int argc, char *argv[])
 {
 }
 
-int framework_quit()
+void framework_update(uint64_t deltaTime)
+{
+}
+
+void framework_draw(void)
+{
+}
+
+int framework_quit(void)
 {
     return 1;
 }
 
-void framework_lowmemory()
+void framework_lowmemory(void)
 {
 }
 
@@ -37,15 +46,15 @@ void framework_resize(int width, int height)
 {
 }
 
-void framework_minimize()
+void framework_minimize(void)
 {
 }
 
-void framework_maximize()
+void framework_maximize(void)
 {
 }
 
-void framework_restore()
+void framework_restore(void)
 {
 }
 
@@ -86,13 +95,5 @@ void framework_mousereleased(int x, int y, const char *button, int istouch)
 }
 
 void framework_wheelmoved(int x, int y)
-{
-}
-
-void framework_update(uint64_t dt)
-{
-}
-
-void framework_draw()
 {
 }

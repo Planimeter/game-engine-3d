@@ -4,6 +4,18 @@
 #include "window.h"
 #include "SDL3/SDL.h"
 
+static const char *get_mouse_button_name(Uint8 button)
+{
+    switch (button) {
+        case SDL_BUTTON_LEFT: return "left";
+        case SDL_BUTTON_MIDDLE: return "middle";
+        case SDL_BUTTON_RIGHT: return "right";
+        case SDL_BUTTON_X1: return "x1";
+        case SDL_BUTTON_X2: return "x2";
+        default: return "unknown";
+    }
+}
+
 static int clamp_int_from_float(float value)
 {
     return (int)value;
@@ -138,14 +150,14 @@ int event_poll()
                                  0);
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {
-            const char *button = SDL_GetMouseButtonName(event.button.button);
+            const char *button = get_mouse_button_name(event.button.button);
             framework_mousepressed(clamp_int_from_float(event.button.x),
                                    clamp_int_from_float(event.button.y),
                                    button ? button : "", 0);
             break;
         }
         case SDL_EVENT_MOUSE_BUTTON_UP: {
-            const char *button = SDL_GetMouseButtonName(event.button.button);
+            const char *button = get_mouse_button_name(event.button.button);
             framework_mousereleased(clamp_int_from_float(event.button.x),
                                     clamp_int_from_float(event.button.y),
                                     button ? button : "", 0);

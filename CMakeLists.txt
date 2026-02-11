@@ -29,6 +29,7 @@ set(SOURCES
     src/filesystem_physfs.c
     src/framework.c
     src/graphics_vulkan.cpp
+    src/job_pthread.c
     src/main_sdl.c
     src/model_assimp.cpp
     src/timer_sdl.c
@@ -93,6 +94,10 @@ if (APPLE)
     target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
 endif()
 
+if(NOT WIN32)
+    find_package(Threads REQUIRED)
+endif()
+
 target_link_libraries(game PUBLIC
     PhysFS::PhysFS
     SDL3::SDL3
@@ -101,6 +106,10 @@ target_link_libraries(game PUBLIC
     glm::glm
     assimp::assimp
 )
+
+if(NOT WIN32)
+    target_link_libraries(game PUBLIC Threads::Threads)
+endif()
 
 # Link Windows libraries
 if(WIN32)
