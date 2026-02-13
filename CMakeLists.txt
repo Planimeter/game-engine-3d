@@ -38,11 +38,13 @@ add_subdirectory(third_party/openal-soft-1.25.1)
 
 # specify the list of paths to source files
 set(SOURCES
+    src/audio_openal.c
     src/event_sdl.c
     src/filesystem_physfs.c
     src/font.c
     src/framework.c
     src/graphics_vulkan.cpp
+    src/image_stb.c
     src/job_pthread.c
     src/main_sdl.c
     src/model_assimp.cpp
@@ -50,7 +52,6 @@ set(SOURCES
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c
-    src/audio_openal.c
     )
 
 # add the executable
