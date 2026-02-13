@@ -22,6 +22,8 @@ typedef struct {
 
 typedef struct {
     unsigned char pixel[4];
+    int width;
+    int height;
 } GPUTexture;
 
 typedef struct {
@@ -170,6 +172,19 @@ void graphics_draw_instanced(Model *model,
     (void)count;
 }
 
+void graphics_draw_buffers(Buffer vertexBuffer,
+                           Buffer indexBuffer,
+                           size_t indexCount,
+                           Material mat,
+                           const float *transform4x4)
+{
+    (void)vertexBuffer;
+    (void)indexBuffer;
+    (void)indexCount;
+    (void)mat;
+    (void)transform4x4;
+}
+
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
 {
     GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
@@ -242,7 +257,59 @@ Texture graphics_createtexture(Texture src)
     texture->pixel[1] = 255;
     texture->pixel[2] = 255;
     texture->pixel[3] = 255;
+    texture->width = 1;
+    texture->height = 1;
     return texture;
+}
+
+Texture graphics_createtexture_rgba(int width,
+                                    int height,
+                                    const unsigned char *pixels)
+{
+    GPUTexture *texture;
+    size_t size;
+
+    if (width <= 0 || height <= 0) {
+        return NULL;
+    }
+
+    texture = (GPUTexture *)calloc(1, sizeof(GPUTexture));
+    if (!texture) {
+        return NULL;
+    }
+
+    texture->width = width;
+    texture->height = height;
+
+    size = (size_t)width * (size_t)height * 4;
+    if (size >= sizeof(texture->pixel)) {
+        (void)pixels;
+    } else if (pixels) {
+        memcpy(texture->pixel, pixels, size);
+    }
+
+    return texture;
+}
+
+void graphics_updatetexture(Texture tex,
+                            int x, int y,
+                            int width, int height,
+                            const unsigned char *pixels)
+{
+    GPUTexture *texture = (GPUTexture *)tex;
+    size_t size;
+
+    if (!texture || !pixels || width <= 0 || height <= 0) {
+        return;
+    }
+    if (x < 0 || y < 0 || x + width > texture->width || y + height > texture->height) {
+        return;
+    }
+
+    size = (size_t)width * (size_t)height * 4;
+    if (size <= sizeof(texture->pixel)) {
+        memcpy(texture->pixel, pixels, size);
+    }
 }
 
 void graphics_destroytexture(Texture tex)

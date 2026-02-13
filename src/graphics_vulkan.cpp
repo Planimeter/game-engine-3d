@@ -812,6 +812,13 @@ static void graphics_creategraphicspipeline()
     multisample.rasterizationSamples            = VK_SAMPLE_COUNT_1_BIT;
 
     colorBlendAttachment.colorWriteMask         = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+    colorBlendAttachment.blendEnable            = VK_TRUE;
+    colorBlendAttachment.srcColorBlendFactor    = VK_BLEND_FACTOR_SRC_ALPHA;
+    colorBlendAttachment.dstColorBlendFactor    = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.colorBlendOp           = VK_BLEND_OP_ADD;
+    colorBlendAttachment.srcAlphaBlendFactor    = VK_BLEND_FACTOR_ONE;
+    colorBlendAttachment.dstAlphaBlendFactor    = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    colorBlendAttachment.alphaBlendOp           = VK_BLEND_OP_ADD;
 
     colorBlend.attachmentCount                  = 1;
     colorBlend.pAttachments                     = &colorBlendAttachment;
