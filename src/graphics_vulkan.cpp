@@ -74,6 +74,15 @@ static Shader fragShader;
 /* 10. Pipelines */
 static VkPipelineLayout pipelineLayout;
 static VkPipeline graphicsPipeline;
+static VkPipeline currentPipeline = VK_NULL_HANDLE;
+
+typedef struct {
+	VkPipeline pipeline;
+	VkShaderModule vertShader;
+	VkShaderModule fragShader;
+	VertexFormat vertexFormat;
+	RasterState rasterState;
+} GPUPipeline;
 
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
@@ -2357,5 +2366,248 @@ void graphics_shutdown(void)
 
     if (instance != VK_NULL_HANDLE) {
         vkDestroyInstance(instance, NULL);
+    }
+}
+
+// Helper function to get vertex input state for a format
+static void graphics_get_vertex_input_state(VertexFormat format,
+                                             VkVertexInputBindingDescription *bindingDesc,
+                                             VkVertexInputAttributeDescription *attrDescs,
+                                             uint32_t *attrCount)
+{
+    bindingDesc->binding = 0;
+    bindingDesc->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    switch (format) {
+        case VERTEX_FORMAT_FULL:
+            bindingDesc->stride = sizeof(Vertex);
+            *attrCount = 5;
+            
+            // Position
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = offsetof(Vertex, position);
+            
+            // Normal
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[1].offset = offsetof(Vertex, normal);
+            
+            // Tangent
+            attrDescs[2].binding = 0;
+            attrDescs[2].location = 2;
+            attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[2].offset = offsetof(Vertex, tangent);
+            
+            // Bitangent
+            attrDescs[3].binding = 0;
+            attrDescs[3].location = 3;
+            attrDescs[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[3].offset = offsetof(Vertex, bitangent);
+            
+            // TexCoords
+            attrDescs[4].binding = 0;
+            attrDescs[4].location = 4;
+            attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
+            attrDescs[4].offset = offsetof(Vertex, texCoords);
+            break;
+
+        case VERTEX_FORMAT_POS_UV:
+            bindingDesc->stride = sizeof(float) * 5; // vec3 pos + vec2 uv
+            *attrCount = 2;
+            
+            // Position
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = 0;
+            
+            // UV
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32_SFLOAT;
+            attrDescs[1].offset = sizeof(float) * 3;
+            break;
+
+        case VERTEX_FORMAT_POS_COLOR:
+            bindingDesc->stride = sizeof(float) * 7; // vec3 pos + vec4 color
+            *attrCount = 2;
+            
+            // Position
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = 0;
+            
+            // Color
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attrDescs[1].offset = sizeof(float) * 3;
+            break;
+    }
+}
+
+// Helper function to get blend state for a blend mode
+static void graphics_get_blend_state(BlendMode blendMode, VkPipelineColorBlendAttachmentState *blendState)
+{
+    blendState->colorWriteMask = VK_COLOR_COMPONENT_R_BIT | 
+                                  VK_COLOR_COMPONENT_G_BIT | 
+                                  VK_COLOR_COMPONENT_B_BIT | 
+                                  VK_COLOR_COMPONENT_A_BIT;
+
+    switch (blendMode) {
+        case BLEND_NONE:
+            blendState->blendEnable = VK_FALSE;
+            break;
+
+        case BLEND_ALPHA:
+            blendState->blendEnable = VK_TRUE;
+            blendState->srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            blendState->dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            blendState->colorBlendOp = VK_BLEND_OP_ADD;
+            blendState->srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            blendState->alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+
+        case BLEND_ADD:
+            blendState->blendEnable = VK_TRUE;
+            blendState->srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            blendState->dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->colorBlendOp = VK_BLEND_OP_ADD;
+            blendState->srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+
+        case BLEND_PREMULT:
+            blendState->blendEnable = VK_TRUE;
+            blendState->srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            blendState->colorBlendOp = VK_BLEND_OP_ADD;
+            blendState->srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            blendState->dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            blendState->alphaBlendOp = VK_BLEND_OP_ADD;
+            break;
+    }
+}
+
+Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
+                                 VertexFormat format, RasterState state)
+{
+    GPUPipeline *pipeline = (GPUPipeline *)malloc(sizeof(GPUPipeline));
+    if (!pipeline) {
+        fprintf(stderr, "Failed to allocate pipeline\n");
+        return NULL;
+    }
+
+    pipeline->vertShader = (VkShaderModule)_vertShader;
+    pipeline->fragShader = (VkShaderModule)_fragShader;
+    pipeline->vertexFormat = format;
+    pipeline->rasterState = state;
+
+    VkGraphicsPipelineCreateInfo createInfo = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo vertShaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo fragShaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+    VkPipelineShaderStageCreateInfo stages[2];
+    VkPipelineVertexInputStateCreateInfo vertexInput = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    VkPipelineInputAssemblyStateCreateInfo inputAssembly = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    VkPipelineViewportStateCreateInfo viewport = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    VkPipelineRasterizationStateCreateInfo rasterization = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    VkPipelineMultisampleStateCreateInfo multisample = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    VkPipelineDepthStencilStateCreateInfo depthStencil = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    VkPipelineColorBlendStateCreateInfo colorBlend = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    VkPipelineColorBlendAttachmentState colorBlendAttachment = { 0 };
+    VkPipelineDynamicStateCreateInfo dynamicState = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    const VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+
+    VkVertexInputBindingDescription bindingDescription = {};
+    VkVertexInputAttributeDescription attributeDescriptions[5] = {};
+    uint32_t attributeCount = 0;
+
+    graphics_get_vertex_input_state(format, &bindingDescription, attributeDescriptions, &attributeCount);
+
+    vertShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    vertShaderStage.module = pipeline->vertShader;
+    vertShaderStage.pName = "main";
+
+    fragShaderStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragShaderStage.module = pipeline->fragShader;
+    fragShaderStage.pName = "main";
+
+    stages[0] = vertShaderStage;
+    stages[1] = fragShaderStage;
+
+    vertexInput.vertexBindingDescriptionCount = 1;
+    vertexInput.pVertexBindingDescriptions = &bindingDescription;
+    vertexInput.vertexAttributeDescriptionCount = attributeCount;
+    vertexInput.pVertexAttributeDescriptions = attributeDescriptions;
+
+    inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+    viewport.viewportCount = 1;
+    viewport.scissorCount = 1;
+
+    rasterization.cullMode = state.backfaceCulling ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
+    rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    rasterization.lineWidth = 1.0f;
+
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    depthStencil.depthTestEnable = state.depthTest ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = state.depthWrite ? VK_TRUE : VK_FALSE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+
+    graphics_get_blend_state(state.blendMode, &colorBlendAttachment);
+
+    colorBlend.attachmentCount = 1;
+    colorBlend.pAttachments = &colorBlendAttachment;
+
+    dynamicState.dynamicStateCount = 2;
+    dynamicState.pDynamicStates = dynamicStates;
+
+    createInfo.stageCount = 2;
+    createInfo.pStages = stages;
+    createInfo.pVertexInputState = &vertexInput;
+    createInfo.pInputAssemblyState = &inputAssembly;
+    createInfo.pViewportState = &viewport;
+    createInfo.pRasterizationState = &rasterization;
+    createInfo.pMultisampleState = &multisample;
+    createInfo.pDepthStencilState = &depthStencil;
+    createInfo.pColorBlendState = &colorBlend;
+    createInfo.pDynamicState = &dynamicState;
+    createInfo.layout = pipelineLayout;
+    createInfo.renderPass = renderPass;
+
+    VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &pipeline->pipeline);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create graphics pipeline: %d\n", result);
+        free(pipeline);
+        return NULL;
+    }
+
+    return (Pipeline)pipeline;
+}
+
+void graphics_bindpipeline(Pipeline pipeline)
+{
+    if (pipeline) {
+        GPUPipeline *gpuPipeline = (GPUPipeline *)pipeline;
+        currentPipeline = gpuPipeline->pipeline;
+        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, gpuPipeline->pipeline);
+    }
+}
+
+void graphics_destroypipeline(Pipeline pipeline)
+{
+    if (pipeline) {
+        GPUPipeline *gpuPipeline = (GPUPipeline *)pipeline;
+        if (gpuPipeline->pipeline != VK_NULL_HANDLE) {
+            vkDestroyPipeline(device, gpuPipeline->pipeline, NULL);
+        }
+        free(gpuPipeline);
     }
 }
