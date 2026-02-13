@@ -248,7 +248,7 @@ static Glyph *font_get_glyph(Font *font, uint32_t glyph_id)
 static void font_pixel_to_ndc(float px, float py, int w, int h, float *out_x, float *out_y)
 {
     *out_x = (px / (float)w) * 2.0f - 1.0f;
-    *out_y = 1.0f - (py / (float)h) * 2.0f;
+    *out_y = -1.0f + (py / (float)h) * 2.0f;
 }
 
 static void font_build_vertices(Font *font,
@@ -266,7 +266,7 @@ static void font_build_vertices(Font *font,
     int win_w = 0;
     int win_h = 0;
     float pen_x = origin_x;
-    float baseline = origin_y;  // origin_y is already the baseline position
+    float baseline = origin_y + font->ascent * sy;
 
     window_getwindowsizeinpixels(&win_w, &win_h);
 
@@ -295,14 +295,10 @@ static void font_build_vertices(Font *font,
         }
 
         gx = pen_x + (x_offset + glyph->bearing_x) * sx;
-        // origin_y is the top of the text; baseline is offset downward by ascent
-        gy = origin_y - glyph->bearing_y * sy - y_offset * sy;
+        gy = baseline - glyph->bearing_y * sy - y_offset * sy;
         w = glyph->width * sx;
         h = glyph->height * sy;
 
-            if (i == 0) {
-                printf("DEBUG: ascent=%d, bearing_y=%d, sy=%.2f, gy=%.2f\n", font->ascent, glyph->bearing_y, sy, gy);
-            }
         for (size_t j = 0; j < 4; j++) {
             vertices[vbase + j].position[0] = 0.0f;
             vertices[vbase + j].position[1] = 0.0f;
@@ -312,22 +308,22 @@ static void font_build_vertices(Font *font,
         }
 
         if (w > 0.0f && h > 0.0f) {
-            font_pixel_to_ndc(gx, gy + h, win_w, win_h, &x0, &y1); // top
-            font_pixel_to_ndc(gx + w, gy + h, win_w, win_h, &x1, &y1); // top right
-            font_pixel_to_ndc(gx, gy, win_w, win_h, &x0, &y0); // bottom
-            font_pixel_to_ndc(gx + w, gy, win_w, win_h, &x1, &y0); // bottom right
+            font_pixel_to_ndc(gx, gy, win_w, win_h, &x0, &y0);
+            font_pixel_to_ndc(gx + w, gy, win_w, win_h, &x1, &y0);
+            font_pixel_to_ndc(gx, gy + h, win_w, win_h, &x0, &y1);
+            font_pixel_to_ndc(gx + w, gy + h, win_w, win_h, &x1, &y1);
 
             vertices[vbase + 0].position[0] = x0;
-            vertices[vbase + 0].position[1] = y1;
+            vertices[vbase + 0].position[1] = y0;
             vertices[vbase + 0].position[2] = 0.0f;
             vertices[vbase + 1].position[0] = x1;
-            vertices[vbase + 1].position[1] = y1;
+            vertices[vbase + 1].position[1] = y0;
             vertices[vbase + 1].position[2] = 0.0f;
             vertices[vbase + 2].position[0] = x0;
-            vertices[vbase + 2].position[1] = y0;
+            vertices[vbase + 2].position[1] = y1;
             vertices[vbase + 2].position[2] = 0.0f;
             vertices[vbase + 3].position[0] = x1;
-            vertices[vbase + 3].position[1] = y0;
+            vertices[vbase + 3].position[1] = y1;
             vertices[vbase + 3].position[2] = 0.0f;
 
             vertices[vbase + 0].texCoords[0] = glyph->u0;
