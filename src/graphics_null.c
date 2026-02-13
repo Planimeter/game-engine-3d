@@ -26,6 +26,11 @@ typedef struct {
     RasterState state;
 } GPURenderPass;
 
+typedef struct {
+    VertexFormat format;
+    RasterState state;
+} GPUPipeline;
+
 void graphics_init()
 {
     void graphics_shutdown(void);
@@ -347,6 +352,32 @@ Shader graphics_get_shader_variant(Shader base,
     (void)defines;
     (void)defineCount;
     return base;
+}
+
+Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
+                                 VertexFormat format, RasterState state)
+{
+    GPUPipeline *pipeline = (GPUPipeline *)calloc(1, sizeof(GPUPipeline));
+    
+    if (!pipeline) {
+        return NULL;
+    }
+
+    pipeline->format = format;
+    pipeline->state = state;
+    (void)vertShader;
+    (void)fragShader;
+    return pipeline;
+}
+
+void graphics_bindpipeline(Pipeline pipeline)
+{
+    (void)pipeline;
+}
+
+void graphics_destroypipeline(Pipeline pipeline)
+{
+    free(pipeline);
 }
 
 void graphics_shutdown(void)
