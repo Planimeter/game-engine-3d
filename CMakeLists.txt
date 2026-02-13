@@ -23,7 +23,11 @@ add_subdirectory(third_party/freetype)
 # add the HarfBuzz library
 add_subdirectory(third_party/harfbuzz-12.3.2)
 # add the shaderc library
-add_subdirectory(third_party/shaderc-2026.1)
+# set(SHADERC_SKIP_TESTS ON CACHE BOOL "" FORCE)
+# set(SHADERC_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
+# set(SHADERC_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+# set(SHADERC_SKIP_COPYRIGHT_CHECK ON CACHE BOOL "" FORCE)
+# add_subdirectory(third_party/shaderc-2026.1)
 # add the Assimp library
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
@@ -113,7 +117,6 @@ target_link_libraries(game PUBLIC
     glm::glm
     freetype
     harfbuzz
-    shaderc
     assimp::assimp
 )
 
