@@ -32,6 +32,7 @@ add_subdirectory(third_party/harfbuzz-12.3.2)
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
 # add the OpenAL library
+set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/openal-soft-1.25.1)
 
 # specify the list of paths to source files
@@ -121,6 +122,7 @@ target_link_libraries(game PUBLIC
     freetype
     harfbuzz
     assimp::assimp
+    OpenAL
 )
 
 if(NOT WIN32)
