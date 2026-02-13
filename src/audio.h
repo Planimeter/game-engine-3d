@@ -9,8 +9,8 @@ extern "C" {
 
 #include <stdint.h>
 
-void audio_init(const char *argv0);
-void audio_quit(void);
+void  audio_init(const char *argv0);
+void  audio_quit(void);
 
 void *audio_load_sample(const char *path);
 void  audio_free_sample(void *sample);
