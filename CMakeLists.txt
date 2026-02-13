@@ -17,8 +17,9 @@ add_subdirectory(third_party/volk-1.4.304)
 # add the Vulkan Memory Allocator library
 add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
 # add the GLM library
-# find_package(glm REQUIRED PATHS third_party/glm/cmake)
 add_subdirectory(third_party/glm)
+# add the FreeType library
+add_subdirectory(third_party/freetype)
 # add the Assimp library
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
@@ -104,6 +105,7 @@ target_link_libraries(game PUBLIC
     volk::volk
     VulkanMemoryAllocator
     glm::glm
+    Freetype::Freetype
     assimp::assimp
 )
 
