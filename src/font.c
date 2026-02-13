@@ -8,7 +8,6 @@
 #include FT_FREETYPE_H
 #include <hb.h>
 #include <hb-ft.h>
-#include <shaderc/shaderc.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,78 +105,18 @@ static int font_init_freetype()
     return 1;
 }
 
-static void font_copy_spv(unsigned char **dest, size_t *dest_size, const shaderc_compilation_result_t result)
+static int font_load_text_shaders()
 {
-    const char *bytes = shaderc_result_get_bytes(result);
-    size_t size = shaderc_result_get_length(result);
-
-    if (!bytes || size == 0) {
-        *dest = NULL;
-        *dest_size = 0;
-        return;
-    }
-
-    *dest = (unsigned char *)malloc(size);
-    if (!*dest) {
-        *dest_size = 0;
-        return;
-    }
-
-    memcpy(*dest, bytes, size);
-    *dest_size = size;
-}
-
-static int font_compile_text_shaders()
-{
-    shaderc_compiler_t compiler;
-    shaderc_compile_options_t options;
-    shaderc_compilation_result_t vert_result;
-    shaderc_compilation_result_t frag_result;
-
     if (g_text_spv_ready) {
         return 1;
     }
 
-    compiler = shaderc_compiler_initialize();
-    if (!compiler) {
-        return 0;
-    }
+    // Load precompiled SPIR-V shaders
+    g_text_vert_spv_size = filesystem_fileread((void **)&g_text_vert_spv, "shaders/text.vert.spv");
+    g_text_frag_spv_size = filesystem_fileread((void **)&g_text_frag_spv, "shaders/text.frag.spv");
 
-    options = shaderc_compile_options_initialize();
-    vert_result = shaderc_compile_into_spv(compiler,
-                                           g_text_vert_source,
-                                           strlen(g_text_vert_source),
-                                           shaderc_glsl_vertex_shader,
-                                           "text.vert",
-                                           "main",
-                                           options);
-    frag_result = shaderc_compile_into_spv(compiler,
-                                           g_text_frag_source,
-                                           strlen(g_text_frag_source),
-                                           shaderc_glsl_fragment_shader,
-                                           "text.frag",
-                                           "main",
-                                           options);
-
-    if (shaderc_result_get_compilation_status(vert_result) != shaderc_compilation_status_success ||
-        shaderc_result_get_compilation_status(frag_result) != shaderc_compilation_status_success) {
-        fprintf(stderr, "Text shader compilation failed\n");
-        shaderc_result_release(vert_result);
-        shaderc_result_release(frag_result);
-        shaderc_compile_options_release(options);
-        shaderc_compiler_release(compiler);
-        return 0;
-    }
-
-    font_copy_spv(&g_text_vert_spv, &g_text_vert_spv_size, vert_result);
-    font_copy_spv(&g_text_frag_spv, &g_text_frag_spv_size, frag_result);
-
-    shaderc_result_release(vert_result);
-    shaderc_result_release(frag_result);
-    shaderc_compile_options_release(options);
-    shaderc_compiler_release(compiler);
-
-    if (!g_text_vert_spv || !g_text_frag_spv) {
+    if (g_text_vert_spv_size == 0 || g_text_frag_spv_size == 0) {
+        fprintf(stderr, "Failed to load text shaders\n");
         return 0;
     }
 
@@ -423,7 +362,7 @@ Font *font_create(const char *filepath, int size)
     if (!font_init_freetype()) {
         return NULL;
     }
-    if (!font_compile_text_shaders()) {
+    if (!font_load_text_shaders()) {
         return NULL;
     }
 
