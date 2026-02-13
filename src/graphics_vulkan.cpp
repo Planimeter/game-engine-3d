@@ -1246,6 +1246,8 @@ void graphics_predraw()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap29.html#fragops-scissor */
     vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
+
+    inPass = 1;
 }
 
 typedef struct {
@@ -1256,6 +1258,153 @@ typedef struct {
     uint32_t *indexCounts;
     uint32_t meshCount;
 } GPUModel;
+
+#define MAX_MATERIAL_FLOATS 32
+#define MAX_MATERIAL_VEC3S 16
+
+typedef struct {
+    char name[64];
+    float value;
+} MaterialFloat;
+
+typedef struct {
+    char name[64];
+    float value[3];
+} MaterialVec3;
+
+typedef struct {
+    Shader shader;
+    MaterialFloat floats[MAX_MATERIAL_FLOATS];
+    MaterialVec3 vec3s[MAX_MATERIAL_VEC3S];
+    size_t floatCount;
+    size_t vec3Count;
+    float mat4[16];
+    int hasMat4;
+} GPUMaterial;
+
+typedef struct {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    size_t size;
+} GPUBuffer;
+
+typedef struct {
+    VkImage image;
+    VkImageView view;
+    VkSampler sampler;
+    VmaAllocation allocation;
+} GPUTexture;
+
+typedef struct {
+    RasterState state;
+} GPURenderPass;
+
+static GPUMaterial *currentMaterial;
+static int inPass;
+
+static void graphics_copy_name(char *dst, size_t dstSize, const char *src)
+{
+    if (!dst || dstSize == 0) {
+        return;
+    }
+
+    if (!src) {
+        dst[0] = '\0';
+        return;
+    }
+
+    strncpy(dst, src, dstSize - 1);
+    dst[dstSize - 1] = '\0';
+}
+
+static VkCommandPool graphics_get_upload_pool()
+{
+    if (!commandPools || swapchainImageCount == 0) {
+        return VK_NULL_HANDLE;
+    }
+
+    return commandPools[0];
+}
+
+static VkCommandBuffer graphics_begin_one_time_commands()
+{
+    VkCommandBufferAllocateInfo allocateInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    VkCommandBufferBeginInfo beginInfo = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    VkCommandBuffer commandBuffer = VK_NULL_HANDLE;
+    VkCommandPool pool = graphics_get_upload_pool();
+
+    if (pool == VK_NULL_HANDLE) {
+        return VK_NULL_HANDLE;
+    }
+
+    allocateInfo.commandPool = pool;
+    allocateInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocateInfo.commandBufferCount = 1;
+
+    if (vkAllocateCommandBuffers(device, &allocateInfo, &commandBuffer) != VK_SUCCESS) {
+        return VK_NULL_HANDLE;
+    }
+
+    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+        vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+        return VK_NULL_HANDLE;
+    }
+
+    return commandBuffer;
+}
+
+static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
+{
+    VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
+    VkCommandPool pool = graphics_get_upload_pool();
+
+    if (commandBuffer == VK_NULL_HANDLE || pool == VK_NULL_HANDLE) {
+        return;
+    }
+
+    vkEndCommandBuffer(commandBuffer);
+
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &commandBuffer;
+
+    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(queue);
+
+    vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
+}
+
+static void graphics_transition_image(VkCommandBuffer commandBuffer,
+                                      VkImage image,
+                                      VkImageLayout oldLayout,
+                                      VkImageLayout newLayout)
+{
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    }
+
+    vkCmdPipelineBarrier(commandBuffer,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         0, 0, NULL, 0, NULL, 1, &barrier);
+}
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
 static GPUModel *graphics_createmodelgpu(Model *modelData)
@@ -1427,7 +1576,9 @@ void graphics_destroymodel(Model *model)
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#drawing */
 void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
 {
-    (void)mat;
+    if (mat) {
+        graphics_setmaterial(mat);
+    }
     (void)transform4x4;
 
     if (!model || graphics_isminimized()) {
@@ -1458,121 +1609,463 @@ void graphics_draw_instanced(Model *model,
                              const float *transforms4x4,
                              size_t count)
 {
+    if (mat) {
+        graphics_setmaterial(mat);
+    }
     (void)transforms4x4;
-    (void)count;
 
-    graphics_drawmodel(model, mat, NULL);
+    if (!model || graphics_isminimized()) {
+        return;
+    }
+
+    GPUModel *gpuModel = (GPUModel *)model;
+    if (gpuModel->meshCount == 0) {
+        return;
+    }
+
+    VkDeviceSize offsets[] = {0};
+    uint32_t instanceCount = count == 0 ? 1 : (uint32_t)count;
+
+    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &gpuModel->vertexBuffers[i], offsets);
+        vkCmdBindIndexBuffer(commandBuffers[imageIndex], gpuModel->indexBuffers[i], 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commandBuffers[imageIndex], gpuModel->indexCounts[i], instanceCount, 0, 0, 0);
+    }
 }
 
 Material graphics_creatematerial(Shader shader)
 {
-    return shader;
+    GPUMaterial *material = (GPUMaterial *)calloc(1, sizeof(GPUMaterial));
+    if (!material) {
+        return NULL;
+    }
+
+    material->shader = shader;
+    return material;
 }
 
 void graphics_destroymaterial(Material mat)
 {
-    (void)mat;
+    if (!mat) {
+        return;
+    }
+
+    free(mat);
 }
 
 void graphics_material_set_texture(Material mat, const char *name, Texture tex)
 {
-    (void)mat;
     (void)name;
-    (void)tex;
+
+    if (!mat || !tex) {
+        return;
+    }
+
+    graphics_bindtexture(tex, 0);
 }
 
 void graphics_material_set_float(Material mat, const char *name, float value)
 {
-    (void)mat;
-    (void)name;
-    (void)value;
+    GPUMaterial *material = (GPUMaterial *)mat;
+    if (!material || !name) {
+        return;
+    }
+
+    for (size_t i = 0; i < material->floatCount; i++) {
+        if (strcmp(material->floats[i].name, name) == 0) {
+            material->floats[i].value = value;
+            return;
+        }
+    }
+
+    if (material->floatCount < MAX_MATERIAL_FLOATS) {
+        MaterialFloat *entry = &material->floats[material->floatCount++];
+        graphics_copy_name(entry->name, sizeof(entry->name), name);
+        entry->value = value;
+    }
 }
 
 void graphics_material_set_vec3(Material mat, const char *name,
                                 float x, float y, float z)
 {
-    (void)mat;
-    (void)name;
-    (void)x;
-    (void)y;
-    (void)z;
+    GPUMaterial *material = (GPUMaterial *)mat;
+    if (!material || !name) {
+        return;
+    }
+
+    for (size_t i = 0; i < material->vec3Count; i++) {
+        if (strcmp(material->vec3s[i].name, name) == 0) {
+            material->vec3s[i].value[0] = x;
+            material->vec3s[i].value[1] = y;
+            material->vec3s[i].value[2] = z;
+            return;
+        }
+    }
+
+    if (material->vec3Count < MAX_MATERIAL_VEC3S) {
+        MaterialVec3 *entry = &material->vec3s[material->vec3Count++];
+        graphics_copy_name(entry->name, sizeof(entry->name), name);
+        entry->value[0] = x;
+        entry->value[1] = y;
+        entry->value[2] = z;
+    }
 }
 
 void graphics_material_set_mat4(Material mat, const float *matrix4x4)
 {
-    (void)mat;
-    (void)matrix4x4;
+    GPUMaterial *material = (GPUMaterial *)mat;
+    if (!material || !matrix4x4) {
+        return;
+    }
+
+    memcpy(material->mat4, matrix4x4, sizeof(material->mat4));
+    material->hasMat4 = 1;
 }
 
 void graphics_setmaterial(Material mat)
 {
-    (void)mat;
+    currentMaterial = (GPUMaterial *)mat;
 }
 
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
 {
-    (void)data;
-    (void)size;
-    return NULL;
+    GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VkResult result;
+
+    if (!buffer || size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer->buffer, &buffer->allocation, NULL);
+    if (result != VK_SUCCESS) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer->size = size;
+
+    if (data) {
+        graphics_updatebuffer(buffer, data, size);
+    }
+
+    return buffer;
 }
 
 Buffer graphics_createindexbuffer(const void *data, size_t size)
 {
-    (void)data;
-    (void)size;
-    return NULL;
+    GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VkResult result;
+
+    if (!buffer || size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer->buffer, &buffer->allocation, NULL);
+    if (result != VK_SUCCESS) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer->size = size;
+
+    if (data) {
+        graphics_updatebuffer(buffer, data, size);
+    }
+
+    return buffer;
 }
 
 Buffer graphics_createuniformbuffer(size_t size)
 {
-    (void)size;
-    return NULL;
+    GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VkResult result;
+
+    if (!buffer || size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer->buffer, &buffer->allocation, NULL);
+    if (result != VK_SUCCESS) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer->size = size;
+    return buffer;
 }
 
 void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
 {
-    (void)buf;
-    (void)data;
-    (void)size;
+    GPUBuffer *buffer = (GPUBuffer *)buf;
+    void *mappedData;
+    VkResult result;
+    size_t copySize;
+
+    if (!buffer || !data || size == 0) {
+        return;
+    }
+
+    copySize = size < buffer->size ? size : buffer->size;
+    result = vmaMapMemory(allocator, buffer->allocation, &mappedData);
+    if (result != VK_SUCCESS) {
+        return;
+    }
+
+    memcpy(mappedData, data, copySize);
+    vmaUnmapMemory(allocator, buffer->allocation);
 }
 
 void graphics_destroybuffer(Buffer buf)
 {
-    (void)buf;
+    GPUBuffer *buffer = (GPUBuffer *)buf;
+    if (!buffer) {
+        return;
+    }
+
+    if (buffer->buffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, buffer->buffer, buffer->allocation);
+    }
+
+    free(buffer);
 }
 
 Texture graphics_createtexture(Texture src)
 {
-    (void)src;
-    return NULL;
+    GPUTexture *texture;
+    VkImageCreateInfo imageInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    VkSamplerCreateInfo samplerInfo = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer;
+    VkBufferImageCopy region = { 0 };
+    VkResult result;
+    uint32_t pixel = 0xffffffff;
+    void *mappedData = NULL;
+
+    if (src) {
+        return src;
+    }
+
+    texture = (GPUTexture *)calloc(1, sizeof(GPUTexture));
+    if (!texture) {
+        return NULL;
+    }
+
+    bufferInfo.size = sizeof(pixel);
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, NULL);
+    if (result != VK_SUCCESS) {
+        free(texture);
+        return NULL;
+    }
+
+    if (vmaMapMemory(allocator, stagingAllocation, &mappedData) != VK_SUCCESS) {
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        free(texture);
+        return NULL;
+    }
+
+    memcpy(mappedData, &pixel, sizeof(pixel));
+    vmaUnmapMemory(allocator, stagingAllocation);
+
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = 1;
+    imageInfo.extent.height = 1;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = 0;
+
+    result = vmaCreateImage(allocator, &imageInfo, &allocInfo, &texture->image, &texture->allocation, NULL);
+    if (result != VK_SUCCESS) {
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        free(texture);
+        return NULL;
+    }
+
+    commandBuffer = graphics_begin_one_time_commands();
+    if (commandBuffer == VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, texture->image, texture->allocation);
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        free(texture);
+        return NULL;
+    }
+
+    graphics_transition_image(commandBuffer, texture->image,
+                              VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent.width = 1;
+    region.imageExtent.height = 1;
+    region.imageExtent.depth = 1;
+
+    vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    graphics_transition_image(commandBuffer, texture->image,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    graphics_end_one_time_commands(commandBuffer);
+
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+
+    viewInfo.image = texture->image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    result = vkCreateImageView(device, &viewInfo, NULL, &texture->view);
+    if (result != VK_SUCCESS) {
+        vmaDestroyImage(allocator, texture->image, texture->allocation);
+        free(texture);
+        return NULL;
+    }
+
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.maxAnisotropy = 1.0f;
+
+    result = vkCreateSampler(device, &samplerInfo, NULL, &texture->sampler);
+    if (result != VK_SUCCESS) {
+        vkDestroyImageView(device, texture->view, NULL);
+        vmaDestroyImage(allocator, texture->image, texture->allocation);
+        free(texture);
+        return NULL;
+    }
+
+    return texture;
 }
 
 void graphics_destroytexture(Texture tex)
 {
-    (void)tex;
+    GPUTexture *texture = (GPUTexture *)tex;
+    if (!texture) {
+        return;
+    }
+
+    if (texture->sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, texture->sampler, NULL);
+    }
+    if (texture->view != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, texture->view, NULL);
+    }
+    if (texture->image != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, texture->image, texture->allocation);
+    }
+
+    free(texture);
 }
 
 void graphics_bindtexture(Texture tex, unsigned slot)
 {
-    (void)tex;
-    (void)slot;
+    GPUTexture *texture = (GPUTexture *)tex;
+    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    VkDescriptorImageInfo imageInfo;
+
+    if (!texture || slot >= MAX_BINDLESS_RESOURCES) {
+        return;
+    }
+
+    imageInfo.sampler = texture->sampler;
+    imageInfo.imageView = texture->view;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    write.dstSet = bindlessDescriptorSet;
+    write.dstBinding = 0;
+    write.dstArrayElement = slot;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
 }
 
 RenderPass graphics_createpass(const char *name, RasterState state)
 {
+    GPURenderPass *pass = (GPURenderPass *)calloc(1, sizeof(GPURenderPass));
+    if (!pass) {
+        return NULL;
+    }
+
     (void)name;
-    (void)state;
-    return NULL;
+    pass->state = state;
+    return pass;
 }
 
 void graphics_beginpass(RenderPass pass)
 {
     (void)pass;
+
+    if (!inPass) {
+        graphics_predraw();
+    }
 }
 
 void graphics_endpass(RenderPass pass)
 {
     (void)pass;
+
+    if (inPass) {
+        graphics_postdraw();
+    }
 }
 
 Shader graphics_get_shader_variant(Shader base,
@@ -1597,6 +2090,8 @@ void graphics_postdraw()
     {
         return;
     }
+
+    inPass = 0;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCmdEndRenderPass */
     vkCmdEndRenderPass(commandBuffers[imageIndex]);
