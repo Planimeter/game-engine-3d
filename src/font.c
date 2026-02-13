@@ -266,7 +266,7 @@ static void font_build_vertices(Font *font,
     int win_w = 0;
     int win_h = 0;
     float pen_x = origin_x;
-    float baseline = origin_y + font->ascent * sy;
+    float baseline = origin_y;  // origin_y is already the baseline position
 
     window_getwindowsizeinpixels(&win_w, &win_h);
 
@@ -325,13 +325,13 @@ static void font_build_vertices(Font *font,
             vertices[vbase + 3].position[2] = 0.0f;
 
             vertices[vbase + 0].texCoords[0] = glyph->u0;
-            vertices[vbase + 0].texCoords[1] = glyph->v1;
+            vertices[vbase + 0].texCoords[1] = glyph->v0;
             vertices[vbase + 1].texCoords[0] = glyph->u1;
-            vertices[vbase + 1].texCoords[1] = glyph->v1;
+            vertices[vbase + 1].texCoords[1] = glyph->v0;
             vertices[vbase + 2].texCoords[0] = glyph->u0;
-            vertices[vbase + 2].texCoords[1] = glyph->v0;
+            vertices[vbase + 2].texCoords[1] = glyph->v1;
             vertices[vbase + 3].texCoords[0] = glyph->u1;
-            vertices[vbase + 3].texCoords[1] = glyph->v0;
+            vertices[vbase + 3].texCoords[1] = glyph->v1;
         }
 
         indices[ibase + 0] = (uint32_t)(vbase + 0);

@@ -3,8 +3,13 @@
 #include "filesystem.h"
 #include "window.h"
 #include "graphics.h"
+#include "font.h"
+#include "text.h"
 #include <stdint.h>
 #include <stdlib.h>
+
+static Font *g_testFont = NULL;
+static Text *g_testText = NULL;
 
 void framework_init(const char *argv0)
 {
@@ -15,14 +20,28 @@ void framework_init(const char *argv0)
 
 void framework_load(int argc, char *argv[])
 {
+    (void)argc;
+    (void)argv;
+    
+    // Create test font and text
+    g_testFont = font_create("fonts/Vera.ttf", 48);
+    if (g_testFont) {
+        g_testText = text_create(g_testFont, "Hello, World!");
+    }
 }
 
 void framework_update(uint64_t deltaTime)
 {
+    (void)deltaTime;
 }
 
 void framework_draw(void)
 {
+    if (g_testText) {
+        // Text coordinates are in pixels, not NDC
+        // Draw near top-left at (50, 100)
+        text_draw(g_testText, 50.0f, 100.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
 }
 
 int framework_quit(void)
