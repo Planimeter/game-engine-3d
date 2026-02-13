@@ -31,6 +31,8 @@ add_subdirectory(third_party/harfbuzz-12.3.2)
 # add the Assimp library
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
+# add the OpenAL library
+add_subdirectory(third_party/openal-soft-1.25.1)
 
 # specify the list of paths to source files
 set(SOURCES
@@ -46,6 +48,7 @@ set(SOURCES
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c
+    src/audio_openal.c
     )
 
 # add the executable
