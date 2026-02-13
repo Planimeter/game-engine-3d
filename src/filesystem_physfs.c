@@ -10,6 +10,9 @@ void filesystem_init(const char *argv0)
 
     PHYSFS_init(argv0);
     PHYSFS_mount(".", NULL, 1);
+#ifdef _WIN32
+    PHYSFS_mount("C:/Windows/Fonts", "Fonts", 0);
+#endif
 
     atexit(filesystem_shutdown);
 }
