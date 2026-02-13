@@ -75,6 +75,7 @@ static Shader fragShader;
 static VkPipelineLayout pipelineLayout;
 static VkPipeline graphicsPipeline;
 static VkPipeline currentPipeline = VK_NULL_HANDLE;
+static int inPass;
 
 typedef struct {
 	VkPipeline pipeline;
@@ -1315,7 +1316,6 @@ typedef struct {
 } GPURenderPass;
 
 static GPUMaterial *currentMaterial;
-static int inPass;
 
 static void graphics_copy_name(char *dst, size_t dstSize, const char *src)
 {
