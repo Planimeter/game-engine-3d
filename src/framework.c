@@ -68,7 +68,7 @@ void framework_draw(void)
 
     font_begin_batch(g_testFont);
     text_draw(g_testText, 10.0f, 10.0f, 0.0f,
-                1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+              1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     font_end_batch(g_testFont);
 }
 
