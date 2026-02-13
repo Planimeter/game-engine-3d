@@ -28,14 +28,14 @@ typedef struct {
     char *diffuseTexture;
     char *specularTexture;
     char *normalTexture;
-} Material;
+} MaterialData;
 
 typedef struct {
     Vertex *vertices;
     uint32_t *indices;
     uint32_t vertexCount;
     uint32_t indexCount;
-    Material material;
+    MaterialData material;
     void *vertexBuffer;
     void *indexBuffer;
     void *vertexBufferMemory;
@@ -49,7 +49,7 @@ typedef struct {
 } Model;
 #else
 typedef struct Vertex Vertex;
-typedef struct Material Material;
+typedef struct MaterialData MaterialData;
 typedef struct Mesh Mesh;
 typedef struct Model Model;
 #endif

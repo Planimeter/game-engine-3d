@@ -12,7 +12,7 @@
 
 /* Forward declarations */
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene);
-static Material model_processmaterial(const struct aiMaterial *aiMat);
+static MaterialData model_processmaterial(const struct aiMaterial *aiMat);
 
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene)
 {
@@ -122,9 +122,9 @@ static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene
     return mesh;
 }
 
-static Material model_processmaterial(const struct aiMaterial *aiMat)
+static MaterialData model_processmaterial(const struct aiMaterial *aiMat)
 {
-    Material material;
+    MaterialData material;
 
     aiColor4D ambient = {0.2f, 0.2f, 0.2f, 1.0f};
     aiColor4D diffuse = {0.8f, 0.8f, 0.8f, 1.0f};
