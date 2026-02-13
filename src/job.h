@@ -6,6 +6,35 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#if defined(__cplusplus)
+    #include <atomic>
+    typedef std::atomic<uint64_t> job_atomic_u64;
+    static inline uint64_t job_atomic_load_u64(job_atomic_u64 *value) {
+        return value->load(std::memory_order_acquire);
+    }
+    static inline uint64_t job_atomic_fetch_add_u64(job_atomic_u64 *value, uint64_t add) {
+        return value->fetch_add(add, std::memory_order_acq_rel);
+    }
+#elif defined(_WIN32)
+    #include <windows.h>
+    typedef volatile LONG64 job_atomic_u64;
+    static inline uint64_t job_atomic_load_u64(job_atomic_u64 *value) {
+        return (uint64_t)InterlockedCompareExchange64((LONG64 *)value, 0, 0);
+    }
+    static inline uint64_t job_atomic_fetch_add_u64(job_atomic_u64 *value, uint64_t add) {
+        return (uint64_t)InterlockedExchangeAdd64((LONG64 *)value, (LONG64)add);
+    }
+#else
+    #include <stdatomic.h>
+    typedef _Atomic(uint64_t) job_atomic_u64;
+    static inline uint64_t job_atomic_load_u64(job_atomic_u64 *value) {
+        return atomic_load(value);
+    }
+    static inline uint64_t job_atomic_fetch_add_u64(job_atomic_u64 *value, uint64_t add) {
+        return atomic_fetch_add(value, add);
+    }
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,7 +63,7 @@ int         job_isfinished(JobSystem *jobSystem, JobHandle handle);
 uint32_t    job_getworkercount(JobSystem *jobSystem);
 
 typedef struct {
-    uint64_t counter;
+    job_atomic_u64 counter;
 } JobCounter;
 
 JobCounter  job_createcounter(void);

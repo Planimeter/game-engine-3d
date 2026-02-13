@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <limits.h>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -64,25 +65,15 @@
 
 static void *job_worker(void *arg);
 
-#ifdef _WIN32
-    #include <windows.h>
-    #define pthread_sleep_np(ms) Sleep(ms)
-#else
-    #include <unistd.h>
-    static inline void pthread_sleep_np(uint32_t milliseconds) {
-        usleep(milliseconds * 1000);
-    }
-#endif
-
 typedef struct {
     JobFunction function;
     void        *context;
     uint32_t     jobCount;
-    uint32_t     completedCount;
-    uint32_t     currentIndex;
-    JobHandle    handle;
+    atomic_uint32 completedCount;
+    atomic_uint32 currentIndex;
     const char  *name;
     atomic_int   refCount;
+    atomic_uint64 handleId;
 } Job;
 
 typedef struct {
@@ -104,7 +95,7 @@ struct JobSystem {
     atomic_int             running;
     atomic_uint64          nextJobId;
     Job                    jobs[MAX_JOBS];
-    atomic_uint32          jobCount;
+    atomic_int             jobCount;
     pthread_mutex_t        jobPoolMutex;
 };
 
@@ -143,12 +134,15 @@ static void *job_worker(void *arg)
         }
         
         if (job) {
-            uint32_t myJobIndex = atomic_fetch_add((uint32_t *)&job->currentIndex, 1);
+            uint32_t myJobIndex = atomic_fetch_add_32(&job->currentIndex, 1);
             if (myJobIndex < job->jobCount) {
                 job->function(job->context, myJobIndex);
-                atomic_fetch_add(&job->completedCount, 1);
+                atomic_fetch_add_32(&job->completedCount, 1);
             }
-            atomic_fetch_add(&job->refCount, -1);
+            if (atomic_fetch_add(&job->refCount, -1) == 1) {
+                atomic_store_64(&job->handleId, 0);
+                atomic_fetch_add(&sys->jobCount, -1);
+            }
         } else {
             pthread_sleep_np(1);
         }
@@ -226,33 +220,60 @@ JobHandle job_submit(JobSystem *jobSystem, const JobDescriptor *descriptor)
     if (descriptor->jobCount == 0) {
         return (JobHandle){0};
     }
-    
-    uint32_t jobIndex = atomic_fetch_add_32(&jobSystem->jobCount, 1) % MAX_JOBS;
-    Job *job = &jobSystem->jobs[jobIndex];
+
+    if (descriptor->jobCount > (uint32_t)INT_MAX) {
+        return (JobHandle){0};
+    }
+
+    if (descriptor->jobCount > MAX_JOB_QUEUE * jobSystem->workerCount) {
+        return (JobHandle){0};
+    }
+
+    Job *job = NULL;
+    pthread_mutex_lock(&jobSystem->jobPoolMutex);
+    for (uint32_t i = 0; i < MAX_JOBS; i++) {
+        Job *candidate = &jobSystem->jobs[i];
+        if (atomic_load(&candidate->refCount) == 0 && atomic_load_64(&candidate->handleId) == 0) {
+            job = candidate;
+            break;
+        }
+    }
+    if (!job) {
+        pthread_mutex_unlock(&jobSystem->jobPoolMutex);
+        return (JobHandle){0};
+    }
     
     job->function = descriptor->function;
     job->context = descriptor->context;
     job->jobCount = descriptor->jobCount;
-    job->completedCount = 0;
-    job->currentIndex = 0;
+    atomic_store(&job->completedCount, 0);
+    atomic_store(&job->currentIndex, 0);
     job->name = descriptor->name;
-    job->handle.id = atomic_fetch_add_64(&jobSystem->nextJobId, 1);
+    uint64_t handleId = atomic_fetch_add_64(&jobSystem->nextJobId, 1);
+    atomic_store_64(&job->handleId, handleId);
     atomic_store(&job->refCount, (int)descriptor->jobCount);
+    atomic_fetch_add(&jobSystem->jobCount, 1);
+    pthread_mutex_unlock(&jobSystem->jobPoolMutex);
     
     uint32_t queueIndex = 0;
     for (uint32_t i = 0; i < descriptor->jobCount; i++) {
         JobQueue *queue = &jobSystem->queues[queueIndex % jobSystem->workerCount];
         
-        pthread_mutex_lock(&queue->mutex);
-        if (queue->tail - queue->head < MAX_JOB_QUEUE) {
-            queue->jobs[queue->tail++ % MAX_JOB_QUEUE] = job;
+        for (;;) {
+            pthread_mutex_lock(&queue->mutex);
+            if (queue->tail - queue->head < MAX_JOB_QUEUE) {
+                queue->jobs[queue->tail++ % MAX_JOB_QUEUE] = job;
+                pthread_mutex_unlock(&queue->mutex);
+                break;
+            }
+            pthread_mutex_unlock(&queue->mutex);
+            pthread_sleep_np(1);
         }
-        pthread_mutex_unlock(&queue->mutex);
         
         queueIndex++;
     }
     
-    return job->handle;
+    return (JobHandle){handleId};
 }
 
 void job_wait(JobSystem *jobSystem, JobHandle handle)
@@ -260,7 +281,7 @@ void job_wait(JobSystem *jobSystem, JobHandle handle)
     if (!jobSystem || handle.id == 0) return;
     
     for (uint32_t i = 0; i < MAX_JOBS; i++) {
-        if (jobSystem->jobs[i].handle.id == handle.id) {
+        if (atomic_load_64(&jobSystem->jobs[i].handleId) == handle.id) {
             Job *job = &jobSystem->jobs[i];
             while (atomic_load(&job->refCount) > 0) {
                 pthread_sleep_np(0);
@@ -292,7 +313,7 @@ int job_isfinished(JobSystem *jobSystem, JobHandle handle)
     if (!jobSystem || handle.id == 0) return 1;
     
     for (uint32_t i = 0; i < MAX_JOBS; i++) {
-        if (jobSystem->jobs[i].handle.id == handle.id) {
+        if (atomic_load_64(&jobSystem->jobs[i].handleId) == handle.id) {
             return atomic_load(&jobSystem->jobs[i].refCount) == 0;
         }
     }
@@ -312,7 +333,7 @@ JobCounter job_createcounter(void)
 void job_incrementcounter(JobCounter *counter)
 {
     if (counter) {
-        atomic_fetch_add(&counter->counter, 1);
+        job_atomic_fetch_add_u64(&counter->counter, 1);
     }
 }
 
@@ -320,7 +341,7 @@ void job_waitcounter(JobSystem *jobSystem, JobCounter *counter, uint64_t targetV
 {
     if (!jobSystem || !counter) return;
     
-    while (atomic_load(&counter->counter) < targetValue) {
+    while (job_atomic_load_u64(&counter->counter) < targetValue) {
         pthread_sleep_np(0);
     }
 }

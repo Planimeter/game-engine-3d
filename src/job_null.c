@@ -65,7 +65,7 @@ JobCounter job_createcounter(void)
 void job_incrementcounter(JobCounter *counter)
 {
     if (counter) {
-        counter->counter++;
+        job_atomic_fetch_add_u64(&counter->counter, 1);
     }
 }
 
