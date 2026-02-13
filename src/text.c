@@ -74,9 +74,22 @@ void text_draw(Text *text,
                float ox, float oy,
                float kx, float ky)
 {
+    (void)r;
+    (void)ox;
+    (void)oy;
+    (void)kx;
+    (void)ky;
+
     if (!text || !text->font) {
         return;
     }
 
-    font_print(text->font, text->textstring ? text->textstring : "", x, y, r, sx, sy, ox, oy, kx, ky);
+    if (sx == 0.0f) {
+        sx = 1.0f;
+    }
+    if (sy == 0.0f) {
+        sy = 1.0f;
+    }
+
+    font_batch_print(text->font, text->textstring ? text->textstring : "", x, y, sx, sy);
 }

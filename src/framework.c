@@ -15,7 +15,7 @@ static Text *g_testText = NULL;
 static uint64_t g_accumMs = 0;
 static uint32_t g_frameCount = 0;
 static int g_displayFps = 0;
-static const uint64_t g_fpsUpdateIntervalMs = 250; /* update displayed FPS every 250ms */
+static const uint64_t g_fpsUpdateIntervalMs = 250;
 
 void framework_init(const char *argv0)
 {
@@ -38,7 +38,6 @@ void framework_load(int argc, char *argv[])
 
 void framework_update(uint64_t deltaTime)
 {
-    /* Accumulate time and frame count, update displayed FPS only at interval */
     g_accumMs += deltaTime;
     g_frameCount += 1;
 
@@ -65,9 +64,10 @@ void framework_draw(void)
         return;
     }
 
-    /* Draw the last computed/displayed FPS (updated every g_fpsUpdateIntervalMs) */
+    font_begin_batch(g_testFont);
     text_draw(g_testText, 10.0f, 10.0f, 0.0f,
-              1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+                1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    font_end_batch(g_testFont);
 }
 
 int framework_quit(void)

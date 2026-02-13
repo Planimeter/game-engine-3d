@@ -48,7 +48,8 @@ int main(int argc, char *argv[])
             .jobCount = 1,
             .name = "Update"
         };
-        job_submit(g_jobSystem, &updateJob);
+        JobHandle updateHandle = job_submit(g_jobSystem, &updateJob);
+        job_wait(g_jobSystem, updateHandle);
         
         JobDescriptor drawJob = {
             .function = job_draw,
@@ -56,11 +57,10 @@ int main(int argc, char *argv[])
             .jobCount = 1,
             .name = "Draw"
         };
-        job_submit(g_jobSystem, &drawJob);
+        JobHandle drawHandle = job_submit(g_jobSystem, &drawJob);
+        job_wait(g_jobSystem, drawHandle);
         
-        job_waitall(g_jobSystem);
         graphics_present();
-        timer_sleep(1);
     }
     
     job_destroy(g_jobSystem);
