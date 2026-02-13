@@ -1242,9 +1242,6 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
     vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-binding */
-    vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkCmdBindDescriptorSets */
     vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
                            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
@@ -1608,6 +1605,12 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
         return;
     }
 
+    // Bind default 3D pipeline if no custom pipeline is bound
+    if (currentPipeline != graphicsPipeline) {
+        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+        currentPipeline = graphicsPipeline;
+    }
+
     VkDeviceSize offsets[] = {0};
 
     for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
@@ -1639,6 +1642,12 @@ void graphics_draw_instanced(Model *model,
     GPUModel *gpuModel = (GPUModel *)model;
     if (gpuModel->meshCount == 0) {
         return;
+    }
+
+    // Bind default 3D pipeline if no custom pipeline is bound
+    if (currentPipeline != graphicsPipeline) {
+        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+        currentPipeline = graphicsPipeline;
     }
 
     VkDeviceSize offsets[] = {0};
