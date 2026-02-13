@@ -105,7 +105,7 @@ target_link_libraries(game PUBLIC
     volk::volk
     VulkanMemoryAllocator
     glm::glm
-    Freetype::Freetype
+    freetype
     assimp::assimp
 )
 
