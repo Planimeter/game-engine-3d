@@ -21,7 +21,7 @@ add_subdirectory(third_party/glm)
 # add the FreeType library
 add_subdirectory(third_party/freetype)
 # add the HarfBuzz library
-add_subdirectory(third_party/harfbuzz)
+add_subdirectory(third_party/harfbuzz-12.3.2)
 # add the shaderc library
 add_subdirectory(third_party/shaderc)
 # add the Assimp library
