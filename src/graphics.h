@@ -15,6 +15,7 @@ typedef void *Texture;
 typedef void *Material;
 typedef void *Buffer;
 typedef void *RenderPass;
+typedef void *Pipeline;
 
 typedef enum {
 	BLEND_NONE,
@@ -22,6 +23,12 @@ typedef enum {
 	BLEND_ADD,
 	BLEND_PREMULT
 } BlendMode;
+
+typedef enum {
+	VERTEX_FORMAT_FULL,     // Position, Normal, UV, Tangent, Bitangent
+	VERTEX_FORMAT_POS_UV,   // Position, UV only (for text/UI)
+	VERTEX_FORMAT_POS_COLOR // Position, Color only (for debug)
+} VertexFormat;
 
 typedef struct {
 	int depthWrite;
@@ -93,6 +100,13 @@ void        graphics_bindtexture(Texture tex, unsigned slot);
 RenderPass  graphics_createpass(const char *name, RasterState state);
 void        graphics_beginpass(RenderPass pass);
 void        graphics_endpass(RenderPass pass);
+
+Pipeline    graphics_createpipeline(Shader vertShader,
+                                    Shader fragShader,
+                                    VertexFormat format,
+                                    RasterState state);
+void        graphics_bindpipeline(Pipeline pipeline);
+void        graphics_destroypipeline(Pipeline pipeline);
 
 Shader      graphics_get_shader_variant(Shader base,
                                         const char **defines,
