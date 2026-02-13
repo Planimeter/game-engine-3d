@@ -23,8 +23,16 @@ void framework_load(int argc, char *argv[])
     (void)argc;
     (void)argv;
     
-    // Create test font and text
+    // Try to load Vera.ttf, fallback to Windows system font if missing
     g_testFont = font_create("fonts/Vera.ttf", 48);
+    if (!g_testFont) {
+        // Try loading Arial from Windows Fonts (correct casing)
+        g_testFont = font_create("Fonts/arial.ttf", 48);
+    }
+    if (!g_testFont) {
+        // Try loading Segoe UI as another fallback
+        g_testFont = font_create("Fonts/segoeui.ttf", 48);
+    }
     if (g_testFont) {
         g_testText = text_create(g_testFont, "Hello, World!");
     }
@@ -37,10 +45,16 @@ void framework_update(uint64_t deltaTime)
 
 void framework_draw(void)
 {
-    if (g_testText) {
+    if (g_testText && g_testFont) {
         // Text coordinates are in pixels, not NDC
-        // Draw near top-left at (50, 100)
-        text_draw(g_testText, 50.0f, 100.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+        // Draw near bottom-left at (50, 100)
+        // (0,0) is bottom-left in pixel space for this API
+        int win_w = 0, win_h = 0;
+        window_getwindowsizeinpixels(&win_w, &win_h);
+        float y = 100.0f + font_get_ascent(g_testFont);
+        printf("DEBUG: win_h=%d, y=%.2f\n", win_h, y);
+        // Draw 100 pixels from the top, baseline adjusted
+        text_draw(g_testText, 50.0f, y, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     }
 }
 

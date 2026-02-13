@@ -8,6 +8,7 @@ extern "C" {
 #endif
 
 typedef struct Font Font;
+int   font_get_ascent(Font *font);
 
 Font *font_create(const char *filepath, int size);
 void  font_destroy(Font *font);

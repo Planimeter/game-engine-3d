@@ -295,10 +295,14 @@ static void font_build_vertices(Font *font,
         }
 
         gx = pen_x + (x_offset + glyph->bearing_x) * sx;
-        gy = baseline - (glyph->bearing_y + y_offset) * sy;
+        // origin_y is the top of the text; baseline is offset downward by ascent
+        gy = origin_y - glyph->bearing_y * sy - y_offset * sy;
         w = glyph->width * sx;
         h = glyph->height * sy;
 
+            if (i == 0) {
+                printf("DEBUG: ascent=%d, bearing_y=%d, sy=%.2f, gy=%.2f\n", font->ascent, glyph->bearing_y, sy, gy);
+            }
         for (size_t j = 0; j < 4; j++) {
             vertices[vbase + j].position[0] = 0.0f;
             vertices[vbase + j].position[1] = 0.0f;
@@ -308,8 +312,10 @@ static void font_build_vertices(Font *font,
         }
 
         if (w > 0.0f && h > 0.0f) {
-            font_pixel_to_ndc(gx, gy, win_w, win_h, &x0, &y0);
-            font_pixel_to_ndc(gx + w, gy + h, win_w, win_h, &x1, &y1);
+            font_pixel_to_ndc(gx, gy + h, win_w, win_h, &x0, &y1); // top
+            font_pixel_to_ndc(gx + w, gy + h, win_w, win_h, &x1, &y1); // top right
+            font_pixel_to_ndc(gx, gy, win_w, win_h, &x0, &y0); // bottom
+            font_pixel_to_ndc(gx + w, gy, win_w, win_h, &x1, &y0); // bottom right
 
             vertices[vbase + 0].position[0] = x0;
             vertices[vbase + 0].position[1] = y1;
@@ -348,6 +354,11 @@ static void font_build_vertices(Font *font,
     *out_index_count = count * 6;
 }
 
+int font_get_ascent(Font *font) {
+    if (!font) return 0;
+    return font->ascent;
+}
+
 Font *font_create(const char *filepath, int size)
 {
     Font *font;
@@ -357,12 +368,15 @@ Font *font_create(const char *filepath, int size)
     unsigned char *atlas_pixels;
 
     if (!filepath || size <= 0) {
+        fprintf(stderr, "font_create: invalid filepath or size\n");
         return NULL;
     }
     if (!font_init_freetype()) {
+        fprintf(stderr, "font_create: failed to initialize FreeType\n");
         return NULL;
     }
     if (!font_load_text_shaders()) {
+        fprintf(stderr, "font_create: failed to load text shaders\n");
         return NULL;
     }
 
@@ -373,6 +387,7 @@ Font *font_create(const char *filepath, int size)
 
     file_size = filesystem_fileread(&file_data, filepath);
     if (file_size == 0 || !file_data) {
+        fprintf(stderr, "font_create: failed to read font file '%s'\n", filepath);
         free(font);
         return NULL;
     }
@@ -382,6 +397,7 @@ Font *font_create(const char *filepath, int size)
     pixel_size = size;
 
     if (FT_New_Memory_Face(g_ft_library, font->file_data, (FT_Long)font->file_size, 0, &font->face) != 0) {
+        fprintf(stderr, "font_create: FreeType failed to load font '%s'\n", filepath);
         free(font->file_data);
         free(font);
         return NULL;
