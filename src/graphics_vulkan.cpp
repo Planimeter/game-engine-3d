@@ -1293,6 +1293,8 @@ typedef struct {
     VkImageView view;
     VkSampler sampler;
     VmaAllocation allocation;
+    int width;
+    int height;
 } GPUTexture;
 
 typedef struct {
@@ -1633,6 +1635,30 @@ void graphics_draw_instanced(Model *model,
     }
 }
 
+void graphics_draw_buffers(Buffer vertexBuffer,
+                           Buffer indexBuffer,
+                           size_t indexCount,
+                           Material mat,
+                           const float *transform4x4)
+{
+    GPUBuffer *vertex = (GPUBuffer *)vertexBuffer;
+    GPUBuffer *index = (GPUBuffer *)indexBuffer;
+    VkDeviceSize offsets[] = {0};
+
+    (void)transform4x4;
+
+    if (mat) {
+        graphics_setmaterial(mat);
+    }
+    if (!vertex || !index || indexCount == 0 || graphics_isminimized()) {
+        return;
+    }
+
+    vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertex->buffer, offsets);
+    vkCmdBindIndexBuffer(commandBuffers[imageIndex], index->buffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(commandBuffers[imageIndex], (uint32_t)indexCount, 1, 0, 0, 0);
+}
+
 Material graphics_creatematerial(Shader shader)
 {
     GPUMaterial *material = (GPUMaterial *)calloc(1, sizeof(GPUMaterial));
@@ -1861,6 +1887,19 @@ void graphics_destroybuffer(Buffer buf)
 
 Texture graphics_createtexture(Texture src)
 {
+    unsigned char pixel[4] = { 255, 255, 255, 255 };
+
+    if (src) {
+        return src;
+    }
+
+    return graphics_createtexture_rgba(1, 1, pixel);
+}
+
+Texture graphics_createtexture_rgba(int width,
+                                    int height,
+                                    const unsigned char *pixels)
+{
     GPUTexture *texture;
     VkImageCreateInfo imageInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
@@ -1872,11 +1911,11 @@ Texture graphics_createtexture(Texture src)
     VkCommandBuffer commandBuffer;
     VkBufferImageCopy region = { 0 };
     VkResult result;
-    uint32_t pixel = 0xffffffff;
+    size_t pixelSize;
     void *mappedData = NULL;
 
-    if (src) {
-        return src;
+    if (width <= 0 || height <= 0) {
+        return NULL;
     }
 
     texture = (GPUTexture *)calloc(1, sizeof(GPUTexture));
@@ -1884,7 +1923,11 @@ Texture graphics_createtexture(Texture src)
         return NULL;
     }
 
-    bufferInfo.size = sizeof(pixel);
+    texture->width = width;
+    texture->height = height;
+
+    pixelSize = (size_t)width * (size_t)height * 4;
+    bufferInfo.size = pixelSize;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1903,12 +1946,16 @@ Texture graphics_createtexture(Texture src)
         return NULL;
     }
 
-    memcpy(mappedData, &pixel, sizeof(pixel));
+    if (pixels) {
+        memcpy(mappedData, pixels, pixelSize);
+    } else {
+        memset(mappedData, 0, pixelSize);
+    }
     vmaUnmapMemory(allocator, stagingAllocation);
 
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = 1;
-    imageInfo.extent.height = 1;
+    imageInfo.extent.width = (uint32_t)width;
+    imageInfo.extent.height = (uint32_t)height;
     imageInfo.extent.depth = 1;
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 1;
@@ -1945,8 +1992,8 @@ Texture graphics_createtexture(Texture src)
     region.imageSubresource.mipLevel = 0;
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
-    region.imageExtent.width = 1;
-    region.imageExtent.height = 1;
+    region.imageExtent.width = (uint32_t)width;
+    region.imageExtent.height = (uint32_t)height;
     region.imageExtent.depth = 1;
 
     vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
@@ -1992,6 +2039,82 @@ Texture graphics_createtexture(Texture src)
     }
 
     return texture;
+}
+
+void graphics_updatetexture(Texture tex,
+                            int x, int y,
+                            int width, int height,
+                            const unsigned char *pixels)
+{
+    GPUTexture *texture = (GPUTexture *)tex;
+    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
+    VkBuffer stagingBuffer = VK_NULL_HANDLE;
+    VkCommandBuffer commandBuffer;
+    VkBufferImageCopy region = { 0 };
+    VkResult result;
+    size_t pixelSize;
+    void *mappedData = NULL;
+
+    if (!texture || !pixels || width <= 0 || height <= 0) {
+        return;
+    }
+    if (x < 0 || y < 0 || x + width > texture->width || y + height > texture->height) {
+        return;
+    }
+
+    pixelSize = (size_t)width * (size_t)height * 4;
+    bufferInfo.size = pixelSize;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, NULL);
+    if (result != VK_SUCCESS) {
+        return;
+    }
+
+    if (vmaMapMemory(allocator, stagingAllocation, &mappedData) != VK_SUCCESS) {
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        return;
+    }
+
+    memcpy(mappedData, pixels, pixelSize);
+    vmaUnmapMemory(allocator, stagingAllocation);
+
+    commandBuffer = graphics_begin_one_time_commands();
+    if (commandBuffer == VK_NULL_HANDLE) {
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        return;
+    }
+
+    graphics_transition_image(commandBuffer, texture->image,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageOffset.x = x;
+    region.imageOffset.y = y;
+    region.imageExtent.width = (uint32_t)width;
+    region.imageExtent.height = (uint32_t)height;
+    region.imageExtent.depth = 1;
+
+    vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    graphics_transition_image(commandBuffer, texture->image,
+                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    graphics_end_one_time_commands(commandBuffer);
+
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 }
 
 void graphics_destroytexture(Texture tex)
