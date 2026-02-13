@@ -3,6 +3,7 @@
 #include "filesystem.h"
 #include "window.h"
 #include "graphics.h"
+#include "audio.h"
 #include "font.h"
 #include "text.h"
 #include <stdint.h>
@@ -21,6 +22,7 @@ void framework_init(const char *argv0)
 {
     filesystem_init(argv0);
     window_init();
+    audio_init(argv0);
     graphics_init();
 }
 
@@ -72,6 +74,7 @@ void framework_draw(void)
 
 int framework_quit(void)
 {
+    audio_quit();
     return 1;
 }
 
