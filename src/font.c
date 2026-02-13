@@ -366,6 +366,23 @@ static void font_build_vertices(Font *font,
         w = glyph->width * sx;
         h = glyph->height * sy;
 
+        for (size_t j = 0; j < 4; j++) {
+            vertices[vbase + j].position[0] = 0.0f;
+            vertices[vbase + j].position[1] = 0.0f;
+            vertices[vbase + j].position[2] = 0.0f;
+            vertices[vbase + j].normal[0] = 1.0f;
+            vertices[vbase + j].normal[1] = 1.0f;
+            vertices[vbase + j].normal[2] = 1.0f;
+            vertices[vbase + j].texCoords[0] = 0.0f;
+            vertices[vbase + j].texCoords[1] = 0.0f;
+            vertices[vbase + j].tangent[0] = 0.0f;
+            vertices[vbase + j].tangent[1] = 0.0f;
+            vertices[vbase + j].tangent[2] = 0.0f;
+            vertices[vbase + j].bitangent[0] = 0.0f;
+            vertices[vbase + j].bitangent[1] = 0.0f;
+            vertices[vbase + j].bitangent[2] = 0.0f;
+        }
+
         if (w > 0.0f && h > 0.0f) {
             font_pixel_to_ndc(gx, gy, win_w, win_h, &x0, &y0);
             font_pixel_to_ndc(gx + w, gy + h, win_w, win_h, &x1, &y1);
@@ -383,18 +400,6 @@ static void font_build_vertices(Font *font,
             vertices[vbase + 3].position[1] = y0;
             vertices[vbase + 3].position[2] = 0.0f;
 
-            for (size_t j = 0; j < 4; j++) {
-                vertices[vbase + j].normal[0] = 1.0f;
-                vertices[vbase + j].normal[1] = 1.0f;
-                vertices[vbase + j].normal[2] = 1.0f;
-                vertices[vbase + j].tangent[0] = 0.0f;
-                vertices[vbase + j].tangent[1] = 0.0f;
-                vertices[vbase + j].tangent[2] = 0.0f;
-                vertices[vbase + j].bitangent[0] = 0.0f;
-                vertices[vbase + j].bitangent[1] = 0.0f;
-                vertices[vbase + j].bitangent[2] = 0.0f;
-            }
-
             vertices[vbase + 0].texCoords[0] = glyph->u0;
             vertices[vbase + 0].texCoords[1] = glyph->v1;
             vertices[vbase + 1].texCoords[0] = glyph->u1;
@@ -403,34 +408,20 @@ static void font_build_vertices(Font *font,
             vertices[vbase + 2].texCoords[1] = glyph->v0;
             vertices[vbase + 3].texCoords[0] = glyph->u1;
             vertices[vbase + 3].texCoords[1] = glyph->v0;
-
-            indices[ibase + 0] = (uint32_t)(vbase + 0);
-            indices[ibase + 1] = (uint32_t)(vbase + 1);
-            indices[ibase + 2] = (uint32_t)(vbase + 2);
-            indices[ibase + 3] = (uint32_t)(vbase + 2);
-            indices[ibase + 4] = (uint32_t)(vbase + 1);
-            indices[ibase + 5] = (uint32_t)(vbase + 3);
         }
+
+        indices[ibase + 0] = (uint32_t)(vbase + 0);
+        indices[ibase + 1] = (uint32_t)(vbase + 1);
+        indices[ibase + 2] = (uint32_t)(vbase + 2);
+        indices[ibase + 3] = (uint32_t)(vbase + 2);
+        indices[ibase + 4] = (uint32_t)(vbase + 1);
+        indices[ibase + 5] = (uint32_t)(vbase + 3);
 
         pen_x += x_advance * sx;
         baseline += y_advance * sy;
     }
 
     *out_index_count = count * 6;
-}
-
-static size_t font_shape_line(Font *font,
-                              const char *text,
-                              size_t text_len,
-                              hb_glyph_info_t **out_infos,
-                              hb_glyph_position_t **out_positions)
-{
-    hb_buffer_clear_contents(font->hb_buffer);
-    hb_buffer_add_utf8(font->hb_buffer, text, (int)text_len, 0, (int)text_len);
-    hb_buffer_guess_segment_properties(font->hb_buffer);
-    hb_shape(font->hb_font, font->hb_buffer, NULL, 0);
-
-    return hb_buffer_get_length(font->hb_buffer);
 }
 
 Font *font_create(const char *filepath, int size)
