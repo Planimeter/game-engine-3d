@@ -4,6 +4,7 @@
 #include "filesystem.h"
 #include "graphics.h"
 #include "window.h"
+#include "job.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <hb.h>
@@ -13,8 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+extern JobSystem *g_jobSystem;
+
 #define FONT_ATLAS_SIZE 1024
 #define FONT_GLYPH_PADDING 1
+#define INITIAL_BATCH_CAPACITY 64
+#define MAX_LINES_PER_TEXT 256
 
 typedef struct {
     uint32_t glyph_id;
@@ -35,6 +40,32 @@ typedef struct {
     float position[3];
     float texCoords[2];
 } TextVertex;
+
+typedef struct {
+    const char *text;
+    size_t text_len;
+    hb_glyph_info_t *infos;
+    hb_glyph_position_t *positions;
+    unsigned int glyph_count;
+    float origin_x;
+    float origin_y;
+    float sx;
+    float sy;
+} ShapedLine;
+
+typedef struct {
+    char *text;
+    float x;
+    float y;
+    float sx;
+    float sy;
+} TextDrawCommand;
+
+typedef struct {
+    TextDrawCommand *commands;
+    size_t count;
+    size_t capacity;
+} TextBatch;
 
 struct Font {
     FT_Face face;
@@ -60,6 +91,17 @@ struct Font {
     size_t vertex_capacity;
     size_t index_capacity;
     Pipeline pipeline;
+    
+    /* Batching system */
+    TextBatch batch;
+    TextVertex *batch_vertices;
+    uint32_t *batch_indices;
+    size_t batch_vertex_capacity;
+    size_t batch_index_capacity;
+    
+    /* Thread-local HarfBuzz buffers */
+    hb_buffer_t **worker_hb_buffers;
+    size_t worker_buffer_count;
 };
 
 static FT_Library g_ft_library;
@@ -111,7 +153,6 @@ static int font_load_text_shaders()
         return 1;
     }
 
-    // Load precompiled SPIR-V shaders
     g_text_vert_spv_size = filesystem_fileread((void **)&g_text_vert_spv, "shaders/text.vert.spv");
     g_text_frag_spv_size = filesystem_fileread((void **)&g_text_frag_spv, "shaders/text.frag.spv");
 
@@ -429,7 +470,6 @@ Font *font_create(const char *filepath, int size)
         return NULL;
     }
 
-    // Create text pipeline
     if (g_text_spv_ready) {
         Shader vert = graphics_createshader((const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
         Shader frag = graphics_createshader((const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
@@ -479,6 +519,22 @@ void font_destroy(Font *font)
 
     if (font->face) {
         FT_Done_Face(font->face);
+    }
+
+    for (size_t i = 0; i < font->batch.count; i++) {
+        free(font->batch.commands[i].text);
+    }
+    free(font->batch.commands);
+    free(font->batch_vertices);
+    free(font->batch_indices);
+    
+    if (font->worker_hb_buffers) {
+        for (size_t i = 0; i < font->worker_buffer_count; i++) {
+            if (font->worker_hb_buffers[i]) {
+                hb_buffer_destroy(font->worker_hb_buffers[i]);
+            }
+        }
+        free(font->worker_hb_buffers);
     }
 
     free(font->glyphs);
@@ -659,4 +715,352 @@ void font_print(Font *font,
             break;
         }
     }
+}
+
+void font_begin_batch(Font *font)
+{
+    if (!font) {
+        return;
+    }
+    
+    for (size_t i = 0; i < font->batch.count; i++) {
+        free(font->batch.commands[i].text);
+    }
+    
+    font->batch.count = 0;
+}
+
+void font_batch_print(Font *font,
+                      const char *text,
+                      float x, float y,
+                      float sx, float sy)
+{
+    if (!font || !text) {
+        return;
+    }
+    
+    if (font->batch.count >= font->batch.capacity) {
+        size_t new_capacity = font->batch.capacity == 0 ? INITIAL_BATCH_CAPACITY : font->batch.capacity * 2;
+        TextDrawCommand *new_commands = (TextDrawCommand *)realloc(
+            font->batch.commands,
+            new_capacity * sizeof(TextDrawCommand)
+        );
+        if (!new_commands) {
+            return;
+        }
+        font->batch.commands = new_commands;
+        font->batch.capacity = new_capacity;
+    }
+    
+    TextDrawCommand *cmd = &font->batch.commands[font->batch.count++];
+    cmd->text = strdup(text);
+    cmd->x = x;
+    cmd->y = y;
+    cmd->sx = (sx == 0.0f) ? 1.0f : sx;
+    cmd->sy = (sy == 0.0f) ? 1.0f : sy;
+}
+
+typedef struct {
+    Font *font;
+    ShapedLine *lines;
+    size_t line_count;
+} ShapeJobContext;
+
+static void shape_text_job(void *context, uint32_t jobIndex)
+{
+    ShapeJobContext *ctx = (ShapeJobContext *)context;
+    ShapedLine *line = &ctx->lines[jobIndex];
+    hb_buffer_t *buffer = line->infos ? (hb_buffer_t *)line->infos : NULL;
+    
+    if (!buffer) {
+        return;
+    }
+    
+    hb_buffer_clear_contents(buffer);
+    hb_buffer_add_utf8(buffer, line->text, (int)line->text_len, 0, (int)line->text_len);
+    hb_buffer_guess_segment_properties(buffer);
+    hb_shape(ctx->font->hb_font, buffer, NULL, 0);
+    
+    line->infos = hb_buffer_get_glyph_infos(buffer, &line->glyph_count);
+    line->positions = hb_buffer_get_glyph_positions(buffer, &line->glyph_count);
+}
+
+typedef struct {
+    Font *font;
+    ShapedLine *lines;
+    TextVertex *vertices;
+    uint32_t *indices;
+    size_t *vertex_offsets;
+    size_t *index_offsets;
+    size_t vertex_base;
+} VertexBuildContext;
+
+static void build_vertices_job(void *context, uint32_t jobIndex)
+{
+    VertexBuildContext *ctx = (VertexBuildContext *)context;
+    ShapedLine *line = &ctx->lines[jobIndex];
+    
+    if (line->glyph_count == 0) {
+        return;
+    }
+    
+    size_t v_offset = ctx->vertex_offsets[jobIndex];
+    size_t i_offset = ctx->index_offsets[jobIndex];
+    size_t index_count;
+    
+    font_build_vertices(ctx->font,
+                       line->infos,
+                       line->positions,
+                       line->glyph_count,
+                       line->origin_x,
+                       line->origin_y,
+                       line->sx,
+                       line->sy,
+                       &ctx->vertices[v_offset],
+                       &ctx->indices[i_offset],
+                       &index_count);
+    
+    for (size_t i = 0; i < index_count; i++) {
+        ctx->indices[i_offset + i] += (uint32_t)(ctx->vertex_base + v_offset);
+    }
+}
+
+void font_end_batch(Font *font)
+{
+    JobSystem *job_system = g_jobSystem;
+    
+    if (!font || font->batch.count == 0) {
+        return;
+    }
+    
+    size_t total_lines = 0;
+    for (size_t i = 0; i < font->batch.count; i++) {
+        const char *text = font->batch.commands[i].text;
+        const char *p = text;
+        size_t lines = 1;
+        while (*p) {
+            if (*p == '\n') {
+                lines++;
+            }
+            p++;
+        }
+        total_lines += lines;
+    }
+    
+    if (total_lines == 0) {
+        return;
+    }
+    
+    ShapedLine *shaped_lines = (ShapedLine *)calloc(total_lines, sizeof(ShapedLine));
+    if (!shaped_lines) {
+        return;
+    }
+    
+    if (job_system) {
+        if (!font->worker_hb_buffers) {
+            uint32_t worker_count = job_getworkercount(job_system);
+            font->worker_hb_buffers = (hb_buffer_t **)calloc(worker_count, sizeof(hb_buffer_t *));
+            if (font->worker_hb_buffers) {
+                for (uint32_t i = 0; i < worker_count; i++) {
+                    font->worker_hb_buffers[i] = hb_buffer_create();
+                }
+                font->worker_buffer_count = worker_count;
+            }
+        }
+    }
+    
+    size_t line_idx = 0;
+    for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
+        TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
+        const char *line_start = cmd->text;
+        float cursor_y = cmd->y;
+        
+        while (*line_start) {
+            const char *line_end = strchr(line_start, '\n');
+            if (!line_end) {
+                line_end = line_start + strlen(line_start);
+            }
+            
+            ShapedLine *line = &shaped_lines[line_idx++];
+            line->text = line_start;
+            line->text_len = (size_t)(line_end - line_start);
+            line->origin_x = cmd->x;
+            line->origin_y = cursor_y;
+            line->sx = cmd->sx;
+            line->sy = cmd->sy;
+            
+            if (job_system && font->worker_hb_buffers) {
+                line->infos = (hb_glyph_info_t *)font->worker_hb_buffers[line_idx % font->worker_buffer_count];
+            } else {
+                line->infos = (hb_glyph_info_t *)font->hb_buffer;
+            }
+            
+            if (*line_end == '\n') {
+                line_start = line_end + 1;
+                cursor_y += font->height * cmd->sy;
+            } else {
+                break;
+            }
+        }
+    }
+    
+    if (job_system && total_lines > 1) {
+        ShapeJobContext shape_ctx = {
+            .font = font,
+            .lines = shaped_lines,
+            .line_count = total_lines
+        };
+        
+        JobDescriptor shape_desc = {
+            .function = shape_text_job,
+            .context = &shape_ctx,
+            .jobCount = (uint32_t)total_lines,
+            .name = "ShapeText"
+        };
+        
+        JobHandle shape_handle = job_submit(job_system, &shape_desc);
+        job_wait(job_system, shape_handle);
+    } else {
+        for (size_t i = 0; i < total_lines; i++) {
+            ShapedLine *line = &shaped_lines[i];
+            hb_buffer_t *buffer = (hb_buffer_t *)line->infos;
+            
+            hb_buffer_clear_contents(buffer);
+            hb_buffer_add_utf8(buffer, line->text, (int)line->text_len, 0, (int)line->text_len);
+            hb_buffer_guess_segment_properties(buffer);
+            hb_shape(font->hb_font, buffer, NULL, 0);
+            
+            line->infos = hb_buffer_get_glyph_infos(buffer, &line->glyph_count);
+            line->positions = hb_buffer_get_glyph_positions(buffer, &line->glyph_count);
+        }
+    }
+    
+    size_t total_vertices = 0;
+    size_t total_indices = 0;
+    size_t *vertex_offsets = (size_t *)malloc(total_lines * sizeof(size_t));
+    size_t *index_offsets = (size_t *)malloc(total_lines * sizeof(size_t));
+    
+    if (!vertex_offsets || !index_offsets) {
+        free(vertex_offsets);
+        free(index_offsets);
+        free(shaped_lines);
+        return;
+    }
+    
+    for (size_t i = 0; i < total_lines; i++) {
+        vertex_offsets[i] = total_vertices;
+        index_offsets[i] = total_indices;
+        total_vertices += shaped_lines[i].glyph_count * 4;
+        total_indices += shaped_lines[i].glyph_count * 6;
+    }
+    
+    if (total_vertices == 0) {
+        free(vertex_offsets);
+        free(index_offsets);
+        free(shaped_lines);
+        return;
+    }
+    
+    size_t vertex_bytes = total_vertices * sizeof(TextVertex);
+    size_t index_bytes = total_indices * sizeof(uint32_t);
+    
+    if (vertex_bytes > font->batch_vertex_capacity) {
+        font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, vertex_bytes);
+        font->batch_vertex_capacity = vertex_bytes;
+    }
+    if (index_bytes > font->batch_index_capacity) {
+        font->batch_indices = (uint32_t *)realloc(font->batch_indices, index_bytes);
+        font->batch_index_capacity = index_bytes;
+    }
+    
+    if (!font->batch_vertices || !font->batch_indices) {
+        free(vertex_offsets);
+        free(index_offsets);
+        free(shaped_lines);
+        return;
+    }
+    
+    if (job_system && total_lines > 1) {
+        VertexBuildContext vert_ctx = {
+            .font = font,
+            .lines = shaped_lines,
+            .vertices = font->batch_vertices,
+            .indices = font->batch_indices,
+            .vertex_offsets = vertex_offsets,
+            .index_offsets = index_offsets,
+            .vertex_base = 0
+        };
+        
+        JobDescriptor vert_desc = {
+            .function = build_vertices_job,
+            .context = &vert_ctx,
+            .jobCount = (uint32_t)total_lines,
+            .name = "BuildVertices"
+        };
+        
+        JobHandle vert_handle = job_submit(job_system, &vert_desc);
+        job_wait(job_system, vert_handle);
+    } else {
+        for (size_t i = 0; i < total_lines; i++) {
+            ShapedLine *line = &shaped_lines[i];
+            if (line->glyph_count == 0) {
+                continue;
+            }
+            
+            size_t v_offset = vertex_offsets[i];
+            size_t i_offset = index_offsets[i];
+            size_t index_count;
+            
+            font_build_vertices(font,
+                               line->infos,
+                               line->positions,
+                               line->glyph_count,
+                               line->origin_x,
+                               line->origin_y,
+                               line->sx,
+                               line->sy,
+                               &font->batch_vertices[v_offset],
+                               &font->batch_indices[i_offset],
+                               &index_count);
+            
+            for (size_t j = 0; j < index_count; j++) {
+                font->batch_indices[i_offset + j] += (uint32_t)v_offset;
+            }
+        }
+    }
+    
+    if (!font->vertex_buffer || vertex_bytes > font->vertex_capacity) {
+        if (font->vertex_buffer) {
+            graphics_destroybuffer(font->vertex_buffer);
+        }
+        font->vertex_buffer = graphics_createvertexbuffer(NULL, vertex_bytes);
+        font->vertex_capacity = vertex_bytes;
+    }
+    if (!font->index_buffer || index_bytes > font->index_capacity) {
+        if (font->index_buffer) {
+            graphics_destroybuffer(font->index_buffer);
+        }
+        font->index_buffer = graphics_createindexbuffer(NULL, index_bytes);
+        font->index_capacity = index_bytes;
+    }
+    
+    if (!font->vertex_buffer || !font->index_buffer) {
+        free(vertex_offsets);
+        free(index_offsets);
+        free(shaped_lines);
+        return;
+    }
+    
+    graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, vertex_bytes);
+    graphics_updatebuffer(font->index_buffer, font->batch_indices, index_bytes);
+    
+    if (font->pipeline) {
+        graphics_bindpipeline(font->pipeline);
+    }
+    graphics_bindtexture(font->atlas, 0);
+    graphics_draw_buffers(font->vertex_buffer, font->index_buffer, total_indices, NULL, NULL);
+    
+    free(vertex_offsets);
+    free(index_offsets);
+    free(shaped_lines);
 }

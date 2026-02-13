@@ -54,6 +54,10 @@ typedef struct {
     const char  *name;
 } JobDescriptor;
 
+extern JobSystem *g_jobSystem;
+
+JobSystem  *job_get_system(void);
+
 JobSystem  *job_create(uint32_t workerThreadCount);
 void        job_destroy(JobSystem *jobSystem);
 JobHandle   job_submit(JobSystem *jobSystem, const JobDescriptor *descriptor);
