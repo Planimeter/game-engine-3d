@@ -38,6 +38,8 @@ void        graphics_predraw();
 void        graphics_postdraw();
 void        graphics_present();
 
+void        graphics_setshader(Shader vertShader, Shader fragShader);
+
 Shader      graphics_createshader(const char *source, size_t size,
                                   const char **defines, size_t defineCount);
 void        graphics_destroyshader(Shader shader);
