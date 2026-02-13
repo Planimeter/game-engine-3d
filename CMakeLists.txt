@@ -33,6 +33,7 @@ set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
 # add the OpenAL library
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
+set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/openal-soft-1.25.1)
 
 # specify the list of paths to source files
