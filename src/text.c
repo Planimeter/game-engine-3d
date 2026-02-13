@@ -4,10 +4,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
+struct Text {
     Font *font;
     char *textstring;
-} Text;
+};
 
 Text *text_create(Font *font, const char *textstring)
 {
