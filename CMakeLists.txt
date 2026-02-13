@@ -3,6 +3,77 @@ cmake_minimum_required(VERSION 3.21)
 # set the project name
 project(game LANGUAGES C CXX)
 
+# Download and extract CEF if not already present
+set(CEF_VERSION "145.0.22+g0fa8d1b+chromium-145.0.7632.45")
+if(WIN32)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(CEF_PLATFORM "windows64")
+    else()
+        set(CEF_PLATFORM "windows32")
+    endif()
+elseif(APPLE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+        set(CEF_PLATFORM "macosarm64")
+    else()
+        set(CEF_PLATFORM "macosx64")
+    endif()
+elseif(UNIX)
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(CEF_PLATFORM "linux64")
+    else()
+        set(CEF_PLATFORM "linuxarm")
+    endif()
+endif()
+
+# URL encode the + signs in the version string
+string(REPLACE "+" "%2B" CEF_VERSION_ENCODED "${CEF_VERSION}")
+set(CEF_DOWNLOAD_URL "https://cef-builds.spotifycdn.com/cef_binary_${CEF_VERSION_ENCODED}_${CEF_PLATFORM}.tar.bz2")
+
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}")
+    set(CEF_ARCHIVE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}.tar.bz2")
+    
+    if(NOT EXISTS "${CEF_ARCHIVE}")
+        message(STATUS "Downloading CEF from ${CEF_DOWNLOAD_URL}")
+        
+        file(DOWNLOAD
+            "${CEF_DOWNLOAD_URL}"
+            "${CEF_ARCHIVE}"
+            SHOW_PROGRESS
+            STATUS DOWNLOAD_STATUS
+            TLS_VERIFY ON
+            TIMEOUT 600
+        )
+        
+        list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+        list(GET DOWNLOAD_STATUS 1 STATUS_MESSAGE)
+        
+        if(NOT STATUS_CODE EQUAL 0)
+            file(REMOVE "${CEF_ARCHIVE}")
+            message(FATAL_ERROR 
+                "Failed to download CEF: ${STATUS_MESSAGE}\n"
+                "URL: ${CEF_DOWNLOAD_URL}\n"
+                "Download manually from https://cef-builds.spotifycdn.com/index.html and place at:\n"
+                "${CEF_ARCHIVE}"
+            )
+        endif()
+    endif()
+    
+    message(STATUS "Extracting CEF to third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}")
+    
+    file(ARCHIVE_EXTRACT
+        INPUT "${CEF_ARCHIVE}"
+        DESTINATION "${CMAKE_CURRENT_SOURCE_DIR}/third_party"
+    )
+    
+    if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}")
+        message(FATAL_ERROR "CEF extraction failed - directory not found")
+    endif()
+    
+    file(REMOVE "${CEF_ARCHIVE}")
+else()
+    message(STATUS "Using existing CEF installation")
+endif()
+
 # add the PhysFS library
 set(PHYSFS_BUILD_STATIC OFF CACHE BOOL "" FORCE)
 set(PHYSFS_BUILD_TEST OFF CACHE BOOL "" FORCE)
@@ -35,6 +106,46 @@ add_subdirectory(third_party/assimp-6.0.4)
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
 set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/openal-soft-1.25.1)
+# add the CEF library
+set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}")
+
+# Disable building CEF test targets by default (mirrors other third-party option usage)
+set(CEF_BUILD_TESTS OFF CACHE BOOL "Do not build CEF test targets" FORCE)
+
+# Ensure the CEF wrapper is built as a static library regardless of the
+# global BUILD_SHARED_LIBS setting. The CEF distribution expects the
+# libcef_dll_wrapper to be a static wrapper; building it as a shared
+# library (when BUILD_SHARED_LIBS is ON) causes unresolved externals.
+if(DEFINED BUILD_SHARED_LIBS)
+    set(_OLD_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+else()
+    set(_OLD_BUILD_SHARED_LIBS)
+endif()
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "Temporarily disable shared builds for CEF wrapper" FORCE)
+add_subdirectory(third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM})
+# Restore previous BUILD_SHARED_LIBS value (remove from cache if it wasn't set).
+if(_OLD_BUILD_SHARED_LIBS)
+    set(BUILD_SHARED_LIBS "${_OLD_BUILD_SHARED_LIBS}" CACHE BOOL "" FORCE)
+else()
+    unset(BUILD_SHARED_LIBS CACHE)
+endif()
+
+# Ensure an imported target for the libcef logical library exists so
+# `target_link_libraries(game PUBLIC libcef_lib ...)` will find the
+# correct import library even if the CEF package didn't create a CMake
+# target named `libcef_lib`.
+if(NOT TARGET libcef_lib)
+    add_library(libcef_lib STATIC IMPORTED)
+    set(_CEF_LIB_DEBUG "${CEF_ROOT}/Debug/libcef.lib")
+    set(_CEF_LIB_RELEASE "${CEF_ROOT}/Release/libcef.lib")
+    set_target_properties(libcef_lib PROPERTIES
+        IMPORTED_LOCATION_DEBUG "${_CEF_LIB_DEBUG}"
+        IMPORTED_LOCATION_RELEASE "${_CEF_LIB_RELEASE}"
+        IMPORTED_LOCATION_RELWITHDEBINFO "${_CEF_LIB_RELEASE}"
+        IMPORTED_LOCATION_MINSIZEREL "${_CEF_LIB_RELEASE}"
+        IMPORTED_LOCATION "${_CEF_LIB_RELEASE}"
+    )
+endif()
 
 # specify the list of paths to source files
 set(SOURCES
@@ -125,6 +236,8 @@ target_link_libraries(game PUBLIC
     harfbuzz
     assimp::assimp
     OpenAL
+    libcef_lib
+    libcef_dll_wrapper
 )
 
 if(NOT WIN32)
@@ -138,6 +251,8 @@ if(WIN32)
         setupapi.lib
         version.lib
         imm32.lib
+        crypt32.lib
+        wintrust.lib
     )
 endif()
 
@@ -190,6 +305,17 @@ target_include_directories(game PUBLIC
 add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:game>/shaders
   COMMAND_EXPAND_LISTS
+)
+
+# Copy CEF binaries to output directory
+add_custom_command(TARGET game POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}/Release"
+        $<TARGET_FILE_DIR:game>
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}/Resources"
+        $<TARGET_FILE_DIR:game>
+    COMMAND_EXPAND_LISTS
 )
 
 # Copy DLLs to output directory
