@@ -34,10 +34,7 @@ typedef struct {
 
 typedef struct {
     float position[3];
-    float normal[3];
     float texCoords[2];
-    float tangent[3];
-    float bitangent[3];
 } TextVertex;
 
 struct Font {
@@ -63,6 +60,7 @@ struct Font {
     Buffer index_buffer;
     size_t vertex_capacity;
     size_t index_capacity;
+    Pipeline pipeline;
 };
 
 static FT_Library g_ft_library;
@@ -77,25 +75,21 @@ static int g_text_spv_ready;
 static const char *g_text_vert_source =
     "#version 450\n"
     "layout(location = 0) in vec3 in_position;\n"
-    "layout(location = 1) in vec3 in_color;\n"
-    "layout(location = 4) in vec2 in_texcoord;\n"
-    "layout(location = 0) out vec3 v_color;\n"
-    "layout(location = 1) out vec2 v_texcoord;\n"
+    "layout(location = 1) in vec2 in_texcoord;\n"
+    "layout(location = 0) out vec2 v_texcoord;\n"
     "void main() {\n"
     "    gl_Position = vec4(in_position, 1.0);\n"
-    "    v_color = in_color;\n"
     "    v_texcoord = in_texcoord;\n"
     "}\n";
 
 static const char *g_text_frag_source =
     "#version 450\n"
     "layout(set = 0, binding = 0) uniform sampler2D tex[];\n"
-    "layout(location = 0) in vec3 v_color;\n"
-    "layout(location = 1) in vec2 v_texcoord;\n"
+    "layout(location = 0) in vec2 v_texcoord;\n"
     "layout(location = 0) out vec4 out_color;\n"
     "void main() {\n"
     "    vec4 sample = texture(tex[0], v_texcoord);\n"
-    "    out_color = vec4(v_color, 1.0) * sample;\n"
+    "    out_color = vec4(1.0, 1.0, 1.0, sample.r);\n"
     "}\n";
 
 static int font_init_freetype()
@@ -370,17 +364,8 @@ static void font_build_vertices(Font *font,
             vertices[vbase + j].position[0] = 0.0f;
             vertices[vbase + j].position[1] = 0.0f;
             vertices[vbase + j].position[2] = 0.0f;
-            vertices[vbase + j].normal[0] = 1.0f;
-            vertices[vbase + j].normal[1] = 1.0f;
-            vertices[vbase + j].normal[2] = 1.0f;
             vertices[vbase + j].texCoords[0] = 0.0f;
             vertices[vbase + j].texCoords[1] = 0.0f;
-            vertices[vbase + j].tangent[0] = 0.0f;
-            vertices[vbase + j].tangent[1] = 0.0f;
-            vertices[vbase + j].tangent[2] = 0.0f;
-            vertices[vbase + j].bitangent[0] = 0.0f;
-            vertices[vbase + j].bitangent[1] = 0.0f;
-            vertices[vbase + j].bitangent[2] = 0.0f;
         }
 
         if (w > 0.0f && h > 0.0f) {
@@ -493,6 +478,25 @@ Font *font_create(const char *filepath, int size)
         return NULL;
     }
 
+    // Create text pipeline
+    if (g_text_spv_ready) {
+        Shader vert = graphics_createshader((const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
+        Shader frag = graphics_createshader((const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
+        
+        if (vert && frag) {
+            RasterState state = {0};
+            state.depthWrite = 0;
+            state.depthTest = 0;
+            state.backfaceCulling = 0;
+            state.blendMode = BLEND_ALPHA;
+            
+            font->pipeline = graphics_createpipeline(vert, frag, VERTEX_FORMAT_POS_UV, state);
+        }
+        
+        graphics_destroyshader(vert);
+        graphics_destroyshader(frag);
+    }
+
     return font;
 }
 
@@ -502,6 +506,9 @@ void font_destroy(Font *font)
         return;
     }
 
+    if (font->pipeline) {
+        graphics_destroypipeline(font->pipeline);
+    }
     if (font->vertex_buffer) {
         graphics_destroybuffer(font->vertex_buffer);
     }
@@ -687,10 +694,8 @@ void font_print(Font *font,
         free(vertices);
         free(indices);
 
-        if (g_text_spv_ready) {
-            Shader vert = graphics_createshader((const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
-            Shader frag = graphics_createshader((const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
-            graphics_setshader(vert, frag);
+        if (font->pipeline) {
+            graphics_bindpipeline(font->pipeline);
         }
 
         graphics_bindtexture(font->atlas, 0);
