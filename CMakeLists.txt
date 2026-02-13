@@ -20,6 +20,10 @@ add_subdirectory(third_party/VulkanMemoryAllocator-3.3.0)
 add_subdirectory(third_party/glm)
 # add the FreeType library
 add_subdirectory(third_party/freetype)
+# add the HarfBuzz library
+add_subdirectory(third_party/harfbuzz)
+# add the shaderc library
+add_subdirectory(third_party/shaderc)
 # add the Assimp library
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
@@ -28,11 +32,13 @@ add_subdirectory(third_party/assimp-6.0.4)
 set(SOURCES
     src/event_sdl.c
     src/filesystem_physfs.c
+    src/font.c
     src/framework.c
     src/graphics_vulkan.cpp
     src/job_pthread.c
     src/main_sdl.c
     src/model_assimp.cpp
+    src/text.c
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c
@@ -106,6 +112,8 @@ target_link_libraries(game PUBLIC
     VulkanMemoryAllocator
     glm::glm
     freetype
+    harfbuzz
+    shaderc
     assimp::assimp
 )
 
