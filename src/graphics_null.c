@@ -3,6 +3,26 @@
 #include "graphics.h"
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct {
+    float mat4[16];
+    int hasMat4;
+} GPUMaterial;
+
+typedef struct {
+    void *data;
+    size_t size;
+} GPUBuffer;
+
+typedef struct {
+    unsigned char pixel[4];
+} GPUTexture;
+
+typedef struct {
+    RasterState state;
+} GPURenderPass;
 
 void graphics_init()
 {
@@ -16,6 +36,8 @@ Shader graphics_createshader(const char *shader, size_t size,
 {
     (void)defines;
     (void)defineCount;
+    (void)shader;
+    (void)size;
     return NULL;
 }
 
@@ -58,17 +80,20 @@ void graphics_resize()
 
 void graphics_setshader(Shader vertShader, Shader fragShader)
 {
+    (void)vertShader;
+    (void)fragShader;
 }
 
 Material graphics_creatematerial(Shader shader)
 {
+    GPUMaterial *material = (GPUMaterial *)calloc(1, sizeof(GPUMaterial));
     (void)shader;
-    return NULL;
+    return material;
 }
 
 void graphics_destroymaterial(Material mat)
 {
-    (void)mat;
+    free(mat);
 }
 
 void graphics_material_set_texture(Material mat, const char *name, Texture tex)
@@ -97,8 +122,13 @@ void graphics_material_set_vec3(Material mat, const char *name,
 
 void graphics_material_set_mat4(Material mat, const float *matrix4x4)
 {
-    (void)mat;
-    (void)matrix4x4;
+    GPUMaterial *material = (GPUMaterial *)mat;
+    if (!material || !matrix4x4) {
+        return;
+    }
+
+    memcpy(material->mat4, matrix4x4, sizeof(material->mat4));
+    material->hasMat4 = 1;
 }
 
 void graphics_setmaterial(Material mat)
@@ -108,13 +138,12 @@ void graphics_setmaterial(Material mat)
 
 Model *graphics_loadmodel(const char *filepath)
 {
-    (void)filepath;
-    return NULL;
+    return model_load(filepath);
 }
 
 void graphics_destroymodel(Model *model)
 {
-    (void)model;
+    model_destroy(model);
 }
 
 void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
@@ -137,45 +166,82 @@ void graphics_draw_instanced(Model *model,
 
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
 {
-    (void)data;
-    (void)size;
-    return NULL;
+    GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
+    if (!buffer || size == 0) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer->data = malloc(size);
+    if (!buffer->data) {
+        free(buffer);
+        return NULL;
+    }
+
+    buffer->size = size;
+    if (data) {
+        memcpy(buffer->data, data, size);
+    }
+    return buffer;
 }
 
 Buffer graphics_createindexbuffer(const void *data, size_t size)
 {
-    (void)data;
-    (void)size;
-    return NULL;
+    return graphics_createvertexbuffer(data, size);
 }
 
 Buffer graphics_createuniformbuffer(size_t size)
 {
-    (void)size;
-    return NULL;
+    return graphics_createvertexbuffer(NULL, size);
 }
 
 void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
 {
-    (void)buf;
-    (void)data;
-    (void)size;
+    GPUBuffer *buffer = (GPUBuffer *)buf;
+    size_t copySize;
+
+    if (!buffer || !buffer->data || !data) {
+        return;
+    }
+
+    copySize = size < buffer->size ? size : buffer->size;
+    memcpy(buffer->data, data, copySize);
 }
 
 void graphics_destroybuffer(Buffer buf)
 {
-    (void)buf;
+    GPUBuffer *buffer = (GPUBuffer *)buf;
+    if (!buffer) {
+        return;
+    }
+
+    free(buffer->data);
+    free(buffer);
 }
 
 Texture graphics_createtexture(Texture src)
 {
-    (void)src;
-    return NULL;
+    GPUTexture *texture;
+
+    if (src) {
+        return src;
+    }
+
+    texture = (GPUTexture *)calloc(1, sizeof(GPUTexture));
+    if (!texture) {
+        return NULL;
+    }
+
+    texture->pixel[0] = 255;
+    texture->pixel[1] = 255;
+    texture->pixel[2] = 255;
+    texture->pixel[3] = 255;
+    return texture;
 }
 
 void graphics_destroytexture(Texture tex)
 {
-    (void)tex;
+    free(tex);
 }
 
 void graphics_bindtexture(Texture tex, unsigned slot)
@@ -186,9 +252,15 @@ void graphics_bindtexture(Texture tex, unsigned slot)
 
 RenderPass graphics_createpass(const char *name, RasterState state)
 {
+    GPURenderPass *pass = (GPURenderPass *)calloc(1, sizeof(GPURenderPass));
     (void)name;
-    (void)state;
-    return NULL;
+
+    if (!pass) {
+        return NULL;
+    }
+
+    pass->state = state;
+    return pass;
 }
 
 void graphics_beginpass(RenderPass pass)
