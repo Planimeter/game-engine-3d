@@ -16,7 +16,7 @@ static Text *g_testText = NULL;
 static uint64_t g_accumMs = 0;
 static uint32_t g_frameCount = 0;
 static int g_displayFps = 0;
-static const uint64_t g_fpsUpdateIntervalMs = 250;
+static const uint64_t g_fpsUpdateIntervalMs = 1000;
 
 void framework_init(const char *argv0)
 {
@@ -31,7 +31,7 @@ void framework_load(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-    g_testFont = font_create("Fonts/segoeui.ttf", 24);
+    g_testFont = font_create("Fonts/segoeui.ttf", 16);
 
     if (g_testFont) {
         g_testText = text_create(g_testFont, "FPS: 0");
@@ -67,7 +67,7 @@ void framework_draw(void)
     }
 
     font_begin_batch(g_testFont);
-    text_draw(g_testText, 10.0f, 10.0f, 0.0f,
+    text_draw(g_testText, 8.0f, 8.0f, 0.0f,
               1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     font_end_batch(g_testFont);
 }
