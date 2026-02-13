@@ -46,15 +46,8 @@ void framework_update(uint64_t deltaTime)
 void framework_draw(void)
 {
     if (g_testText && g_testFont) {
-        // Text coordinates are in pixels, not NDC
-        // Draw near bottom-left at (50, 100)
-        // (0,0) is bottom-left in pixel space for this API
-        int win_w = 0, win_h = 0;
-        window_getwindowsizeinpixels(&win_w, &win_h);
-        float y = 100.0f + font_get_ascent(g_testFont);
-        printf("DEBUG: win_h=%d, y=%.2f\n", win_h, y);
-        // Draw 100 pixels from the top, baseline adjusted
-        text_draw(g_testText, 50.0f, y, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+
+        text_draw(g_testText, 50.0f, 100.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     }
 }
 
