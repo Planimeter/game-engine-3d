@@ -65,6 +65,11 @@ void        graphics_draw_instanced(Model *model,
                                     Material mat,
                                     const float *transforms4x4,
                                     size_t count);
+void        graphics_draw_buffers(Buffer vertexBuffer,
+                                  Buffer indexBuffer,
+                                  size_t indexCount,
+                                  Material mat,
+                                  const float *transform4x4);
 
 Buffer      graphics_createvertexbuffer(const void *data, size_t size);
 Buffer      graphics_createindexbuffer(const void *data, size_t size);
@@ -73,6 +78,13 @@ void        graphics_updatebuffer(Buffer buf, const void *data, size_t size);
 void        graphics_destroybuffer(Buffer buf);
 
 Texture     graphics_createtexture(Texture src);
+Texture     graphics_createtexture_rgba(int width,
+                                        int height,
+                                        const unsigned char *pixels);
+void        graphics_updatetexture(Texture tex,
+                                   int x, int y,
+                                   int width, int height,
+                                   const unsigned char *pixels);
 void        graphics_destroytexture(Texture tex);
 void        graphics_bindtexture(Texture tex, unsigned slot);
 
