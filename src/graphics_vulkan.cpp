@@ -85,6 +85,12 @@ typedef struct {
 	RasterState rasterState;
 } GPUPipeline;
 
+/* 12.2. Images */
+static VkFormat depthFormat = VK_FORMAT_UNDEFINED;
+static VkImage depthImage = VK_NULL_HANDLE;
+static VkImageView depthImageView = VK_NULL_HANDLE;
+static VmaAllocation depthAllocation = VK_NULL_HANDLE;
+
 /* 12.5. Image Views */
 static VkImageView *swapchainImageViews;
 
@@ -344,6 +350,27 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
     free(availableFormats);
     availableFormats = NULL;
     return result;
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkGetPhysicalDeviceFormatProperties */
+static VkFormat graphics_finddepthformat(VkPhysicalDevice physDevice)
+{
+    const VkFormat candidates[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+        VK_FORMAT_D16_UNORM
+    };
+
+    for (size_t i = 0; i < sizeof(candidates)/sizeof(candidates[0]); i++) {
+        VkFormatProperties props;
+        vkGetPhysicalDeviceFormatProperties(physDevice, candidates[i], &props);
+        if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return candidates[i];
+        }
+    }
+
+    fprintf(stderr, "Failed to find supported depth format\n");
+    exit(EXIT_FAILURE);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
@@ -659,37 +686,59 @@ static void graphics_createbindlessdescriptors()
 static void graphics_createrenderpass()
 {
     VkRenderPassCreateInfo  createInfo     = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
-    VkAttachmentDescription attachment     = { 0 };
+    VkAttachmentDescription attachments[2] = { {0}, {0} };
     VkSubpassDescription    subpass        = { 0 };
     VkAttachmentReference   colorReference = { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
-    VkSubpassDependency     dependency     = { 0 };
+    VkAttachmentReference   depthReference = { 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+    VkSubpassDependency     dependencies[2] = { {0}, {0} };
 
-    attachment.format            = swapchainSurfaceFormat.format;
-    attachment.samples           = VK_SAMPLE_COUNT_1_BIT;
-    attachment.loadOp            = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    attachment.storeOp           = VK_ATTACHMENT_STORE_OP_STORE;
-    attachment.stencilLoadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    attachment.stencilStoreOp    = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    attachment.initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachment.finalLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    /* Color attachment (index 0) */
+    attachments[0].format            = swapchainSurfaceFormat.format;
+    attachments[0].samples           = VK_SAMPLE_COUNT_1_BIT;
+    attachments[0].loadOp            = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[0].storeOp           = VK_ATTACHMENT_STORE_OP_STORE;
+    attachments[0].stencilLoadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[0].stencilStoreOp    = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[0].initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[0].finalLayout       = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments    = &colorReference;
+    /* Depth attachment (index 1) */
+    attachments[1].format            = depthFormat;
+    attachments[1].samples           = VK_SAMPLE_COUNT_1_BIT;
+    attachments[1].loadOp            = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    attachments[1].storeOp           = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].stencilLoadOp     = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    attachments[1].stencilStoreOp    = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    attachments[1].initialLayout     = VK_IMAGE_LAYOUT_UNDEFINED;
+    attachments[1].finalLayout       = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    dependency.srcSubpass        = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass        = 0;
-    dependency.srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask     = 0;
-    dependency.dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    subpass.pipelineBindPoint         = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount      = 1;
+    subpass.pColorAttachments         = &colorReference;
+    subpass.pDepthStencilAttachment   = &depthReference;
 
-    createInfo.attachmentCount   = 1;
-    createInfo.pAttachments      = &attachment;
+    /* Dependency for color attachment */
+    dependencies[0].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass        = 0;
+    dependencies[0].srcStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].dstStageMask      = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[0].srcAccessMask     = 0;
+    dependencies[0].dstAccessMask     = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    /* Dependency for depth attachment */
+    dependencies[1].srcSubpass        = VK_SUBPASS_EXTERNAL;
+    dependencies[1].dstSubpass        = 0;
+    dependencies[1].srcStageMask      = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].dstStageMask      = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].srcAccessMask     = 0;
+    dependencies[1].dstAccessMask     = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    createInfo.attachmentCount   = 2;
+    createInfo.pAttachments      = attachments;
     createInfo.subpassCount      = 1;
     createInfo.pSubpasses        = &subpass;
-    createInfo.dependencyCount   = 1;
-    createInfo.pDependencies     = &dependency;
+    createInfo.dependencyCount   = 2;
+    createInfo.pDependencies     = dependencies;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
     VkResult result = vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
@@ -714,10 +763,10 @@ static void graphics_createframebuffers()
 
     for (i = 0; i < swapchainImageCount; i++)
     {
-        VkImageView attachments[] = { swapchainImageViews[i] };
+        VkImageView attachments[] = { swapchainImageViews[i], depthImageView };
 
         createInfo.renderPass      = renderPass;
-        createInfo.attachmentCount = 1;
+        createInfo.attachmentCount = 2;
         createInfo.pAttachments    = attachments;
         createInfo.width           = w;
         createInfo.height          = h;
@@ -883,6 +932,7 @@ static void graphics_createsurface()
 
 static void graphics_destroyframebuffers();
 static void graphics_destroyimageviews();
+static void graphics_destroydepthresources();
 static void graphics_destroyfences();
 static void graphics_freecommandbuffers();
 static void graphics_destroycommandpools();
@@ -964,6 +1014,72 @@ static void graphics_getswapchainimages()
     }
     
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-images */
+static void graphics_createdepthresources()
+{
+    VkImageCreateInfo imageInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    VmaAllocationCreateInfo allocInfo = { 0 };
+    VkImageViewCreateInfo viewInfo = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    VkResult result;
+
+    /* Select depth format once */
+    if (depthFormat == VK_FORMAT_UNDEFINED) {
+        depthFormat = graphics_finddepthformat(physicalDevices[0]);
+    }
+
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent.width = (uint32_t)w;
+    imageInfo.extent.height = (uint32_t)h;
+    imageInfo.extent.depth = 1;
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = depthFormat;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+    allocInfo.flags = 0;
+
+    result = vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthAllocation, NULL);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create depth image: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    viewInfo.image = depthImage;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = depthFormat;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+
+    result = vkCreateImageView(device, &viewInfo, NULL, &depthImageView);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create depth image view: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void graphics_destroydepthresources()
+{
+    vkQueueWaitIdle(queue);
+
+    if (depthImageView != VK_NULL_HANDLE) {
+        vkDestroyImageView(device, depthImageView, NULL);
+        depthImageView = VK_NULL_HANDLE;
+    }
+    if (depthImage != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, depthImage, depthAllocation);
+        depthImage = VK_NULL_HANDLE;
+        depthAllocation = VK_NULL_HANDLE;
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-image-views */
@@ -1130,6 +1246,8 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createswapchain();
     graphics_getswapchainimages();
+    /* Create depth image resources */
+    graphics_createdepthresources();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
     graphics_createrenderpass();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html */
@@ -1200,7 +1318,13 @@ void graphics_predraw()
     VkRenderPassBeginInfo renderPassBegin = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
 
     /* 19.3. Clear Values */
-    VkClearValue clearValue = {{CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]}};
+    VkClearValue clearValues[2];
+    clearValues[0].color.float32[0] = CLEAR_COLOR[0];
+    clearValues[0].color.float32[1] = CLEAR_COLOR[1];
+    clearValues[0].color.float32[2] = CLEAR_COLOR[2];
+    clearValues[0].color.float32[3] = CLEAR_COLOR[3];
+    clearValues[1].depthStencil.depth = 1.0f;
+    clearValues[1].depthStencil.stencil = 0;
 
     /* 27.9. Controlling the Viewport */
     VkViewport viewport = { 0 };
@@ -1237,8 +1361,8 @@ void graphics_predraw()
     renderPassBegin.framebuffer              = framebuffers[imageIndex];
     renderPassBegin.renderArea.extent.width  = w;
     renderPassBegin.renderArea.extent.height = h;
-    renderPassBegin.clearValueCount          = 1;
-    renderPassBegin.pClearValues             = &clearValue;
+    renderPassBegin.clearValueCount          = 2;
+    renderPassBegin.pClearValues             = clearValues;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
     vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
@@ -2304,9 +2428,11 @@ void graphics_resize()
 
     vkDeviceWaitIdle(device);
 
+    graphics_destroydepthresources();
     graphics_destroyframebuffers();
     graphics_createswapchain();
     graphics_getswapchainimages();
+    graphics_createdepthresources();
     graphics_createcommandpools();
     graphics_allocatecommandbuffers();
     graphics_createfences();
@@ -2326,6 +2452,7 @@ void graphics_shutdown(void)
     if (device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(device);
 
+        graphics_destroydepthresources();
         graphics_destroyframebuffers();
         graphics_destroyimageviews();
 
