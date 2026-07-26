@@ -44,12 +44,8 @@ void framework_update(uint64_t deltaTime)
     g_frameCount += 1;
 
     if (g_accumMs >= g_fpsUpdateIntervalMs) {
-        if (g_accumMs > 0) {
-            g_displayFps = (int)((g_frameCount * 1000ULL) / g_accumMs);
-        } else {
-            g_displayFps = 0;
-        }
-        g_accumMs = 0;
+        g_displayFps = (int)((g_frameCount * 1000ULL) / g_accumMs);
+        g_accumMs -= g_fpsUpdateIntervalMs;
         g_frameCount = 0;
 
         if (g_testText) {
