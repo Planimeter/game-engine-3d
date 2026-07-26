@@ -31,26 +31,34 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 
 ---
 
+## Fixed Issues
+
+### ✅ P0 #1 — Audio Source Leak (FIXED)
+- **Commit:** cf5065e7
+- **Fix:** Added `audio_stop_source(int source)` and `audio_get_source_state(int source)` to all audio backends. Sources are now properly stoppable and freeable, preventing OpenAL source exhaustion.
+
+### ✅ P0 #2 — Timer Unit Mismatch (RETRACTED)
+- **Commit:** 110d0a19
+- **Resolution:** Original assessment was incorrect — timer units are consistent throughout (milliseconds). No bug exists. Applied trivial SDL3 best-practice fix: `SDL_GetTicks()` → `SDL_GetTicks64()`.
+
+---
+
 ## Critical Issues Found
 
-### P0 — Must Fix Before Production
-1. **Audio Source Leak** — `audio_play_sample()` creates OpenAL sources that are never freed or stopped. Every call leaks a source. Add `audio_stop_sample(int)` and `audio_free_source(int)` APIs.
-2. **Timer Unit Mismatch** — `timer_step()` returns milliseconds (`SDL_GetTicks()`) but the API contract treats it as microseconds. FPS counter compensates with `* 1000` but units are inconsistent. Fix: use `SDL_GetPerformanceCounter()` or remove the multiplier.
-
 ### P1 — High Priority
-3. **No Uniform Buffer Upload API** — Graphics material system only stores one mat4 locally. No mechanism to bind uniform buffers for per-frame data (view/projection matrices, lights). Add `graphics_binduniformbuffer(slot, Buffer)`.
-4. **Font `font_print()` Allocation Pattern** — malloc/free vertex/index buffers on every call. Pre-allocate and resize incrementally.
-5. **Batching System Re-shapes Text** — `font_end_batch()` recomputes all glyph shaping even though it was done during `font_batch_print()`. Cache shaped results instead.
+1. **No Uniform Buffer Upload API** — Graphics material system only stores one mat4 locally. No mechanism to bind uniform buffers for per-frame data (view/projection matrices, lights). Add `graphics_binduniformbuffer(slot, Buffer)`.
+2. **Font `font_print()` Allocation Pattern** — malloc/free vertex/index buffers on every call. Pre-allocate and resize incrementally.
+3. **Batching System Re-shapes Text** — `font_end_batch()` recomputes all glyph shaping even though it was done during `font_batch_print()`. Cache shaped results instead.
 
 ### P2 — Medium Priority
-6. **No Render Target / Framebuffer Abstraction** — Hardcoded to swapchain image only. No post-processing, shadow maps, or deferred rendering possible.
-7. **No Skeletal Animation in Model Loader** — Assimp provides full animation data (`mAnimations`, `mBones`) but it's ignored. Only static meshes load.
-8. **Font Atlas Can't Grow** — 1024×1024 atlas is fixed size. Once full, new glyphs silently fail.
+4. **No Render Target / Framebuffer Abstraction** — Hardcoded to swapchain image only. No post-processing, shadow maps, or deferred rendering possible.
+5. **No Skeletal Animation in Model Loader** — Assimp provides full animation data (`mAnimations`, `mBones`) but it's ignored. Only static meshes load.
+6. **Font Atlas Can't Grow** — 1024×1024 atlas is fixed size. Once full, new glyphs silently fail.
 
 ### P3 — Low Priority / Nice-to-Have
-9. **Global `g_jobSystem`** — Makes multi-window and editor+game co-existence difficult. Consider per-engine instances.
-10. **No Memory Tracking** — Engine has no allocator wrapper or leak detection.
-11. **No Install Target in CMake** — Missing `install()` rules.
+7. **Global `g_jobSystem`** — Makes multi-window and editor+game co-existence difficult. Consider per-engine instances.
+8. **No Memory Tracking** — Engine has no allocator wrapper or leak detection.
+9. **No Install Target in CMake** — Missing `install()` rules.
 
 ---
 
