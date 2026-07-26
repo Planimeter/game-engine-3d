@@ -142,3 +142,18 @@ int audio_play_sample(void *sample, int loop)
     alSourcePlay(src);
     return (int)src;
 }
+
+void audio_stop_source(int source)
+{
+    if (source < 0) return;
+    alSourceStop((ALuint)source);
+    alDeleteSources(1, (const ALuint*)&source);
+}
+
+int audio_get_source_state(int source)
+{
+    if (source < 0) return 0;
+    ALint state = AL_STOPPED;
+    alGetSourcei((ALuint)source, AL_SOURCE_STATE, &state);
+    return (state == AL_PLAYING) ? 1 : 0;
+}

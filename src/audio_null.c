@@ -29,3 +29,14 @@ int audio_play_sample(void *sample, int loop)
     (void)loop;
     return -1;
 }
+
+void audio_stop_source(int source)
+{
+    (void)source;
+}
+
+int audio_get_source_state(int source)
+{
+    (void)source;
+    return 0;
+}

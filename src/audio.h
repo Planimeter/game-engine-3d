@@ -15,6 +15,8 @@ void  audio_quit(void);
 void *audio_load_sample(const char *path);
 void  audio_free_sample(void *sample);
 int   audio_play_sample(void *sample, int loop);
+void  audio_stop_source(int source);
+int   audio_get_source_state(int source);
 
 #ifdef __cplusplus
 }
