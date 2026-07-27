@@ -122,13 +122,13 @@ typedef struct {
     JobFunction    function;
     void          *context;
     uint32_t       jobCount;
-    uint32_t       completedCount;   /* atomic — for statistics */
-    uint32_t       currentIndex;     /* atomic — next work item to claim */
+    _Atomic(uint32_t) completedCount;   /* atomic — for statistics */
+    _Atomic(uint32_t) currentIndex;     /* atomic — next work item to claim */
     const char    *name;
-    uint32_t       unfinishedJobs;   /* atomic — counts remaining work items */
-    uint64_t       handleId;         /* atomic — generation for slot recycling (0 = free) */
-    uint64_t       parentHandleId;   /* atomic — handle of parent job (0 = none) */
-    JobSystem     *parentSystem;     /* non-atomic, set once at submission */
+    _Atomic(uint32_t) unfinishedJobs;   /* atomic — counts remaining work items */
+    _Atomic(uint64_t) handleId;         /* atomic — generation for slot recycling (0 = free) */
+    _Atomic(uint64_t) parentHandleId;   /* atomic — handle of parent job (0 = none) */
+    JobSystem     *parentSystem;        /* non-atomic, set once at submission */
 } Job;
 
 typedef struct {
@@ -148,11 +148,11 @@ struct JobSystem {
     JobQueue               queues[MAX_WORKERS];
     pthread_t              threads[MAX_WORKERS];
     uint32_t               workerCount;
-    int                    running;         /* atomic */
-    uint64_t               nextJobId;       /* atomic */
-    uint64_t               nextSlotHint;    /* atomic — ring buffer allocator hint */
+    _Atomic(int)            running;         /* atomic */
+    _Atomic(uint64_t)       nextJobId;       /* atomic */
+    _Atomic(uint64_t)       nextSlotHint;    /* atomic — ring buffer allocator hint */
     Job                    jobs[MAX_JOBS];
-    int                    jobCount;        /* atomic — total live jobs */
+    _Atomic(int)            jobCount;        /* atomic — total live jobs */
     pthread_mutex_t        jobPoolMutex;
 };
 

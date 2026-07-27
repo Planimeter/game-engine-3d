@@ -31,7 +31,17 @@ void framework_load(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
+#if defined(__APPLE__)
+    /* Try SFNS first (macOS native), fall back to Geneva if SIP blocks access */
+    g_testFont = font_create("/System/Library/Fonts/SFNS.ttf", 16);
+    if (!g_testFont) {
+        g_testFont = font_create("/System/Library/Fonts/Geneva.ttf", 16);
+    }
+#elif defined(_WIN32)
     g_testFont = font_create("Fonts/segoeui.ttf", 16);
+#else
+    g_testFont = font_create("Fonts/segoeui.ttf", 16);
+#endif
 
     if (g_testFont) {
         g_testText = text_create(g_testFont, "FPS: 0");

@@ -530,8 +530,27 @@ Font *font_create(const char *filepath, int size)
             font->pipeline = graphics_createpipeline(vert, frag, VERTEX_FORMAT_POS_UV, state);
         }
         
-        graphics_destroyshader(vert);
-        graphics_destroyshader(frag);
+        if (vert) graphics_destroyshader(vert);
+        if (frag) graphics_destroyshader(frag);
+    }
+
+    /* Fallback to embedded MSL shaders when SPIR-V unavailable */
+    if (!font->pipeline) {
+        Shader vert = NULL, frag = NULL;
+        graphics_get_text_shaders(&vert, &frag);
+        
+        if (vert && frag) {
+            RasterState state = {0};
+            state.depthWrite = 0;
+            state.depthTest = 0;
+            state.backfaceCulling = 0;
+            state.blendMode = BLEND_ALPHA;
+            
+            font->pipeline = graphics_createpipeline(vert, frag, VERTEX_FORMAT_POS_UV, state);
+        }
+        
+        if (vert) graphics_destroyshader(vert);
+        if (frag) graphics_destroyshader(frag);
     }
 
     return font;

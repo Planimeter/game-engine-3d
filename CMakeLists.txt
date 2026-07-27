@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.21)
 
 # set the project name
-project(game LANGUAGES C CXX)
+project(game LANGUAGES C CXX OBJC OBJCXX)
 
 # Download and extract CEF if not already present
 set(CEF_VERSION "145.0.22+g0fa8d1b+chromium-145.0.7632.45")
@@ -109,8 +109,14 @@ add_subdirectory(third_party/openal-soft-1.25.1)
 # add the CEF library
 set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef_binary_${CEF_VERSION}_${CEF_PLATFORM}")
 
-# Disable building CEF test targets by default (mirrors other third-party option usage)
-set(CEF_BUILD_TESTS OFF CACHE BOOL "Do not build CEF test targets" FORCE)
+# Disable building CEF test targets by removing the tests directory before
+# add_subdirectory is called. The CEF binary distribution's CMakeLists.txt
+# unconditionally adds test subdirectories if they exist, with no variable
+# to control this behavior. Removing them here prevents compilation errors
+# from C++20-incompatible headers in newer toolchains.
+if(EXISTS "${CEF_ROOT}/tests")
+    file(REMOVE_RECURSE "${CEF_ROOT}/tests")
+endif()
 
 # Ensure the CEF wrapper is built as a static library regardless of the
 # global BUILD_SHARED_LIBS setting. The CEF distribution expects the
@@ -154,7 +160,6 @@ set(SOURCES
     src/filesystem_physfs.c
     src/font.c
     src/framework.c
-    src/graphics_vulkan.cpp
     src/image_stb.c
     src/job_pthread.c
     src/main_sdl.c
@@ -164,6 +169,13 @@ set(SOURCES
     src/vk_mem_alloc.cpp
     src/window_sdl.c
     )
+
+# Graphics backend: Metal on macOS, Vulkan elsewhere
+if(APPLE)
+    list(APPEND SOURCES src/graphics_metal.mm)
+else()
+    list(APPEND SOURCES src/graphics_vulkan.cpp)
+endif()
 
 # add the executable
 if(WIN32)

@@ -44,6 +44,12 @@ int    window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
 void   window_getwindowsizeinpixels(int *w, int *h);
 void   window_shutdown(void);
 
+#ifdef __APPLE__
+/* Metal backend accessors */
+void*  window_get_sdl(void);
+void*  window_get_metal_view(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

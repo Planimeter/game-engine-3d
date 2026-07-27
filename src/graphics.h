@@ -112,6 +112,9 @@ Shader      graphics_get_shader_variant(Shader base,
                                         const char **defines,
                                         size_t defineCount);
 
+/* Metal backend: returns embedded MSL text shaders when SPIR-V unavailable */
+void        graphics_get_text_shaders(Shader *out_vert, Shader *out_frag);
+
 #ifdef __cplusplus
 }
 #endif
