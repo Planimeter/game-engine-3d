@@ -84,10 +84,14 @@ void *audio_load_sample(const char *path)
             if (size < 16) break;
             uint16_t audioFormat = 0;
             memcpy(&audioFormat, p, 2);
+            if (audioFormat != 1) { /* WAVE_FORMAT_PCM */
+                fprintf(stderr, "audio_load_sample: only PCM WAV files supported (format=%u)\n", audioFormat);
+                free(fileData);
+                return NULL;
+            }
             memcpy(&channels, p + 2, 2);
             memcpy(&sampleRate, p + 4, 4);
             memcpy(&bitsPerSample, p + 14, 2);
-            (void)audioFormat;
         } else if (memcmp(chunkId, "data", 4) == 0) {
             dataSize = (uint32_t)size;
             data = (uint8_t*)malloc(dataSize);
