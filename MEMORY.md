@@ -43,21 +43,20 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ### P1 — High Priority
 4. **`font_print()` Malloc/Free on Every Call** — Allocates and frees temporary vertex/index buffers every call, despite having pre-allocated GPU buffers. Causes heap churn.
 5. **Batching System Re-shapes Text Twice** — `font_end_batch()` shapes all glyphs in pass 1 (to count vertices) then shapes them all over again in pass 2 (to build geometry). Cache shaped results.
-6. **`graphics_material_set_texture` Ignores Texture Name** — The `name` parameter is cast to `(void)`. Always binds to slot 0. Makes multi-texture materials impossible.
-7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
+6. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
 
 ### P2 — Medium Priority
-8. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
-9. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
-10. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
-11. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
-12. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
+7. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
+8. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
+9. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
+10. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
+11. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
 
 ### P3 — Low Priority
-13. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-14. **No Memory Tracking** — No allocator wrapper or leak detection.
-15. **No CMake Install Target** — Missing `install()` rules.
-16. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
+12. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+13. **No Memory Tracking** — No allocator wrapper or leak detection.
+14. **No CMake Install Target** — Missing `install()` rules.
+15. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 
