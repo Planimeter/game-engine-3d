@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-JobSystem *g_jobSystem = NULL;
+static JobSystem *g_jobSystem = NULL;
 
 static void job_update(void *context, uint32_t jobIndex)
 {

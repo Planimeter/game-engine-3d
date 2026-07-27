@@ -4,7 +4,6 @@
 #include "filesystem.h"
 #include "graphics.h"
 #include "window.h"
-#include "job.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <hb.h>
@@ -13,8 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern JobSystem *g_jobSystem;
 
 #define FONT_ATLAS_SIZE 1024
 #define MAX_ATLAS_COUNT 4

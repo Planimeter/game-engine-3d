@@ -569,11 +569,6 @@ uint32_t job_getworkercount(JobSystem *jobSystem)
     return jobSystem ? jobSystem->workerCount : 0;
 }
 
-JobSystem *job_get_system(void)
-{
-    return g_jobSystem;
-}
-
 /* ---------------------------------------------------------------------------
  * Counter API (used for manual synchronization points)
  * ------------------------------------------------------------------------- */
