@@ -58,9 +58,8 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 14. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
 15. **No Memory Tracking** — No allocator wrapper or leak detection.
 16. **No CMake Install Target** — Missing `install()` rules.
-17. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
-18. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
-19. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
+17. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
+18. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 
