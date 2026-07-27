@@ -41,18 +41,16 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 3. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
 
 ### P1 — High Priority
-4. **`font_print()` Malloc/Free on Every Call** — Allocates and frees temporary vertex/index buffers every call, despite having pre-allocated GPU buffers. Causes heap churn.
-5. **Batching System Re-shapes Text Twice** — `font_end_batch()` shapes all glyphs in pass 1 (to count vertices) then shapes them all over again in pass 2 (to build geometry). Cache shaped results.
-6. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
+4. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
 
 ### P2 — Medium Priority
-7. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
-8. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
-9. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
+5. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
+6. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
+7. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
 
 ### P3 — Low Priority
-10. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-11. **No Memory Tracking** — No allocator wrapper or leak detection.
+8. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+9. **No Memory Tracking** — No allocator wrapper or leak detection.
 
 ---
 
