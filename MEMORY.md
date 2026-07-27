@@ -47,7 +47,15 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 
 ---
 
-## 🔴 NEW Critical Issues (Discovered 2026-07-27)
+## Fixed Issues (2026-07-27)
+
+### ✅ P3 #22 — SDL_Vulkan_CreateSurface Error Check (FIXED)
+- **Commit:** 0d0853b6
+- **Fix:** Changed `window_vulkan_createsurface()` return type from `void` to `int`. The SDL function return value is now checked with `SDL_GetError()` on failure. The Vulkan backend (`graphics_createsurface()`) aborts with an error message if surface creation fails. The null stub was updated to match the new signature.
+
+---
+
+## 🔴 Remaining Critical Issues (Discovered 2026-07-27)
 
 ### P0 — Blocker (Rendering Broken)
 1. **Model Transform Matrices Ignored** — `graphics_drawmodel()` and `graphics_draw_instanced()` both cast `transform4x4` to `(void)`. The matrix is never uploaded to the GPU. Every model renders at origin with identity transform.
@@ -77,7 +85,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 19. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
 20. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
 21. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
-22. **No Error Check on `SDL_Vulkan_CreateSurface`** — Return value not validated; subsequent Vulkan calls will crash on failure.
 
 ---
 
