@@ -1415,8 +1415,9 @@ typedef struct {
     uint32_t meshCount;
 } GPUModel;
 
-#define MAX_MATERIAL_FLOATS 32
-#define MAX_MATERIAL_VEC3S 16
+#define MAX_MATERIAL_FLOATS    32
+#define MAX_MATERIAL_VEC3S     16
+#define MAX_MATERIAL_TEXTURES   8
 
 typedef struct {
     char name[64];
@@ -1429,11 +1430,18 @@ typedef struct {
 } MaterialVec3;
 
 typedef struct {
+    char name[64];
+    Texture texture;
+} MaterialTexture;
+
+typedef struct {
     Shader shader;
     MaterialFloat floats[MAX_MATERIAL_FLOATS];
     MaterialVec3 vec3s[MAX_MATERIAL_VEC3S];
+    MaterialTexture textures[MAX_MATERIAL_TEXTURES];
     size_t floatCount;
     size_t vec3Count;
+    size_t textureCount;
     float mat4[16];
     int hasMat4;
 } GPUMaterial;
@@ -1848,13 +1856,23 @@ void graphics_destroymaterial(Material mat)
 
 void graphics_material_set_texture(Material mat, const char *name, Texture tex)
 {
-    (void)name;
-
-    if (!mat || !tex) {
+    GPUMaterial *material = (GPUMaterial *)mat;
+    if (!material || !name || !tex) {
         return;
     }
 
-    graphics_bindtexture(tex, 0);
+    for (size_t i = 0; i < material->textureCount; i++) {
+        if (strcmp(material->textures[i].name, name) == 0) {
+            material->textures[i].texture = tex;
+            return;
+        }
+    }
+
+    if (material->textureCount < MAX_MATERIAL_TEXTURES) {
+        MaterialTexture *entry = &material->textures[material->textureCount++];
+        graphics_copy_name(entry->name, sizeof(entry->name), name);
+        entry->texture = tex;
+    }
 }
 
 void graphics_material_set_float(Material mat, const char *name, float value)
@@ -1917,7 +1935,14 @@ void graphics_material_set_mat4(Material mat, const float *matrix4x4)
 
 void graphics_setmaterial(Material mat)
 {
-    currentMaterial = (GPUMaterial *)mat;
+    GPUMaterial *material = (GPUMaterial *)mat;
+    currentMaterial = material;
+
+    if (material) {
+        for (size_t i = 0; i < material->textureCount; i++) {
+            graphics_bindtexture(material->textures[i].texture, (unsigned)i);
+        }
+    }
 }
 
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
