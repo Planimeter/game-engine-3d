@@ -47,20 +47,20 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
 
 ### P2 — Medium Priority
-9. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
-10. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
-11. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
-12. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
-13. **Swapchain Recreation Gap** — `graphics_resize()` doesn't re-create render pass or pipelines on swapchain rebuild.
-14. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
+8. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
+9. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
+10. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
+11. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
+12. **Swapchain Recreation Gap** — `graphics_resize()` doesn't re-create render pass or pipelines on swapchain rebuild.
+13. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
 
 ### P3 — Low Priority
-15. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-16. **No Memory Tracking** — No allocator wrapper or leak detection.
-17. **No CMake Install Target** — Missing `install()` rules.
-18. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
-19. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
-20. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
+14. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+15. **No Memory Tracking** — No allocator wrapper or leak detection.
+16. **No CMake Install Target** — Missing `install()` rules.
+17. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
+18. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
+19. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 
