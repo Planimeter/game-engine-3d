@@ -50,8 +50,12 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ## Fixed Issues (2026-07-27)
 
 ### ✅ P3 #22 — SDL_Vulkan_CreateSurface Error Check (FIXED)
-- **Commit:** 0d0853b6
+- **Commit:** e3125902
 - **Fix:** Changed `window_vulkan_createsurface()` return type from `void` to `int`. The SDL function return value is now checked with `SDL_GetError()` on failure. The Vulkan backend (`graphics_createsurface()`) aborts with an error message if surface creation fails. The null stub was updated to match the new signature.
+
+### ✅ P1 #8 — WAV Audio Format Validation (FIXED)
+- **Commit:** 74f63dfb
+- **Fix:** Added validation check for `audioFormat == 1` (WAVE_FORMAT_PCM) in the WAV `fmt ` chunk parser. Non-PCM formats are now rejected with an error message instead of being processed as raw PCM data, which would produce garbage audio. Removed the `(void)audioFormat` cast that was discarding the format field.
 
 ---
 
@@ -67,7 +71,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 5. **Batching System Re-shapes Text Twice** — `font_end_batch()` shapes all glyphs in pass 1 (to count vertices) then shapes them all over again in pass 2 (to build geometry). Cache shaped results.
 6. **`graphics_material_set_texture` Ignores Texture Name** — The `name` parameter is cast to `(void)`. Always binds to slot 0. Makes multi-texture materials impossible.
 7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
-8. **WAV Parser Ignores audioFormat** — The `audioFormat` field from the WAV `fmt ` chunk is read but cast to `(void)`. Non-PCM formats (ADPCM, IEEE float) are processed as raw PCM, producing garbage.
 
 ### P2 — Medium Priority
 9. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
