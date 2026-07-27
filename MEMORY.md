@@ -47,9 +47,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 5. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
 6. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
 
-### P3 — Low Priority
-7. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-
 ---
 
 ## Job System Design Notes
