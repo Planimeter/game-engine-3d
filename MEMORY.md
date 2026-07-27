@@ -33,33 +33,7 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
            → job_submit(draw)  → job_wait(draw)  → graphics_present()
 ```
 
----
-
-## Fixed Issues
-
-### ✅ P0 #1 — Audio Source Leak (FIXED)
-- **Commit:** cf5065e7
-- **Fix:** Added `audio_stop_source(int source)` and `audio_get_source_state(int source)` to all audio backends. Sources are now properly stoppable and freeable, preventing OpenAL source exhaustion.
-
-### ✅ P0 #2 — Timer Unit Mismatch (RETRACTED)
-- **Commit:** 110d0a19
-- **Resolution:** Original assessment was incorrect — timer units are consistent throughout (milliseconds). No bug exists. Applied trivial SDL3 best-practice fix: `SDL_GetTicks()` → `SDL_GetTicks64()`.
-
----
-
-## Fixed Issues (2026-07-27)
-
-### ✅ P3 #22 — SDL_Vulkan_CreateSurface Error Check (FIXED)
-- **Commit:** e3125902
-- **Fix:** Changed `window_vulkan_createsurface()` return type from `void` to `int`. The SDL function return value is now checked with `SDL_GetError()` on failure. The Vulkan backend (`graphics_createsurface()`) aborts with an error message if surface creation fails. The null stub was updated to match the new signature.
-
-### ✅ P1 #8 — WAV Audio Format Validation (FIXED)
-- **Commit:** 74f63dfb
-- **Fix:** Added validation check for `audioFormat == 1` (WAVE_FORMAT_PCM) in the WAV `fmt ` chunk parser. Non-PCM formats are now rejected with an error message instead of being processed as raw PCM data, which would produce garbage audio. Removed the `(void)audioFormat` cast that was discarding the format field.
-
----
-
-## 🔴 Remaining Critical Issues (Discovered 2026-07-27)
+## 🔴 Critical Issues
 
 ### P0 — Blocker (Rendering Broken)
 1. **Model Transform Matrices Ignored** — `graphics_drawmodel()` and `graphics_draw_instanced()` both cast `transform4x4` to `(void)`. The matrix is never uploaded to the GPU. Every model renders at origin with identity transform.
@@ -77,17 +51,16 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 10. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
 11. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
 12. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
-13. **Semaphore Destroy Missing Null-Out** — `graphics_destroysemaphores()` doesn't reset handles to `VK_NULL_HANDLE` after destruction (defensive best practice).
-14. **Swapchain Recreation Gap** — `graphics_resize()` doesn't re-create render pass or pipelines on swapchain rebuild.
-15. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
+13. **Swapchain Recreation Gap** — `graphics_resize()` doesn't re-create render pass or pipelines on swapchain rebuild.
+14. **Joystick/Game Controller Events Unhandled** — All joystick/gamepad event cases fall through to `default: break;` with no processing.
 
 ### P3 — Low Priority
-16. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-17. **No Memory Tracking** — No allocator wrapper or leak detection.
-18. **No CMake Install Target** — Missing `install()` rules.
-19. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
-20. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
-21. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
+15. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+16. **No Memory Tracking** — No allocator wrapper or leak detection.
+17. **No CMake Install Target** — Missing `install()` rules.
+18. **`audio_play_sample()` Leaks on Error** — If `alGenSources` returns 0 or subsequent calls fail, the already-created source is leaked.
+19. **Fragile Stack Pointer in Main Loop** — `job_update` receives a pointer to `frameTime` on the main thread's stack. Works because `job_wait()` executes inline, but would UAF with true async.
+20. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 

@@ -1200,8 +1200,14 @@ static void graphics_destroycommandpools()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkDestroySemaphore */
 static void graphics_destroysemaphores()
 {
-    vkDestroySemaphore(device, releaseSemaphore, NULL);
-    vkDestroySemaphore(device, acquireSemaphore, NULL);
+    if (releaseSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(device, releaseSemaphore, NULL);
+        releaseSemaphore = VK_NULL_HANDLE;
+    }
+    if (acquireSemaphore != VK_NULL_HANDLE) {
+        vkDestroySemaphore(device, acquireSemaphore, NULL);
+        acquireSemaphore = VK_NULL_HANDLE;
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkAcquireNextImageKHR */
