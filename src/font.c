@@ -17,12 +17,23 @@
 extern JobSystem *g_jobSystem;
 
 #define FONT_ATLAS_SIZE 1024
+#define MAX_ATLAS_COUNT 4
 #define FONT_GLYPH_PADDING 1
 #define INITIAL_BATCH_CAPACITY 64
 #define MAX_LINES_PER_TEXT 256
 
 typedef struct {
+    Texture texture;
+    int width;
+    int height;
+    int pen_x;
+    int pen_y;
+    int row_height;
+} Atlas;
+
+typedef struct {
     uint32_t glyph_id;
+    int atlas_index;
     int x;
     int y;
     int width;
@@ -77,12 +88,8 @@ struct Font {
     int ascent;
     int descent;
     int height;
-    int atlas_width;
-    int atlas_height;
-    int pen_x;
-    int pen_y;
-    int row_height;
-    Texture atlas;
+    Atlas atlases[MAX_ATLAS_COUNT];
+    int atlas_count;
     Glyph *glyphs;
     size_t glyph_count;
     size_t glyph_capacity;
@@ -191,32 +198,63 @@ static Glyph *font_add_glyph(Font *font, uint32_t glyph_id)
     return &font->glyphs[font->glyph_count++];
 }
 
-static int font_pack_glyph(Font *font, int width, int height, int *out_x, int *out_y)
+static int font_pack_glyph(Font *font, int atlas_index, int width, int height, int *out_x, int *out_y)
 {
+    Atlas *atlas = &font->atlases[atlas_index];
+
     if (width == 0 || height == 0) {
-        *out_x = font->pen_x;
-        *out_y = font->pen_y;
+        *out_x = atlas->pen_x;
+        *out_y = atlas->pen_y;
         return 1;
     }
 
-    if (font->pen_x + width + FONT_GLYPH_PADDING > font->atlas_width) {
-        font->pen_x = FONT_GLYPH_PADDING;
-        font->pen_y += font->row_height + FONT_GLYPH_PADDING;
-        font->row_height = 0;
+    if (atlas->pen_x + width + FONT_GLYPH_PADDING > atlas->width) {
+        atlas->pen_x = FONT_GLYPH_PADDING;
+        atlas->pen_y += atlas->row_height + FONT_GLYPH_PADDING;
+        atlas->row_height = 0;
     }
 
-    if (font->pen_y + height + FONT_GLYPH_PADDING > font->atlas_height) {
+    if (atlas->pen_y + height + FONT_GLYPH_PADDING > atlas->height) {
         return 0;
     }
 
-    *out_x = font->pen_x;
-    *out_y = font->pen_y;
+    *out_x = atlas->pen_x;
+    *out_y = atlas->pen_y;
 
-    font->pen_x += width + FONT_GLYPH_PADDING;
-    if (height > font->row_height) {
-        font->row_height = height;
+    atlas->pen_x += width + FONT_GLYPH_PADDING;
+    if (height > atlas->row_height) {
+        atlas->row_height = height;
     }
 
+    return 1;
+}
+
+static int font_add_atlas(Font *font)
+{
+    if (font->atlas_count >= MAX_ATLAS_COUNT) {
+        return 0;
+    }
+
+    Atlas *atlas = &font->atlases[font->atlas_count];
+    atlas->width = FONT_ATLAS_SIZE;
+    atlas->height = FONT_ATLAS_SIZE;
+    atlas->pen_x = FONT_GLYPH_PADDING;
+    atlas->pen_y = FONT_GLYPH_PADDING;
+    atlas->row_height = 0;
+
+    unsigned char *pixels = (unsigned char *)calloc(1, (size_t)atlas->width * atlas->height * 4);
+    if (!pixels) {
+        return 0;
+    }
+
+    atlas->texture = graphics_createtexture_rgba(atlas->width, atlas->height, pixels);
+    free(pixels);
+
+    if (!atlas->texture) {
+        return 0;
+    }
+
+    font->atlas_count++;
     return 1;
 }
 
@@ -243,7 +281,28 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
     glyph->bearing_y = slot->bitmap_top;
     glyph->advance_x = slot->advance.x / 64.0f;
 
-    if (!font_pack_glyph(font, glyph->width, glyph->height, &glyph->x, &glyph->y)) {
+    /* Try to pack in existing atlases, round-robin */
+    int packed = 0;
+    for (int i = 0; i < font->atlas_count; i++) {
+        if (font_pack_glyph(font, i, glyph->width, glyph->height, &glyph->x, &glyph->y)) {
+            glyph->atlas_index = i;
+            packed = 1;
+            break;
+        }
+    }
+
+    /* If no space, try to create a new atlas */
+    if (!packed) {
+        if (font_add_atlas(font)) {
+            int new_idx = font->atlas_count - 1;
+            if (font_pack_glyph(font, new_idx, glyph->width, glyph->height, &glyph->x, &glyph->y)) {
+                glyph->atlas_index = new_idx;
+                packed = 1;
+            }
+        }
+    }
+
+    if (!packed) {
         return NULL;
     }
 
@@ -264,14 +323,19 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
             rgba[i * 4 + 3] = alpha;
         }
 
-        graphics_updatetexture(font->atlas, glyph->x, glyph->y, glyph->width, glyph->height, rgba);
+        graphics_updatetexture(font->atlases[glyph->atlas_index].texture,
+                               glyph->x, glyph->y,
+                               glyph->width, glyph->height, rgba);
         free(rgba);
     }
 
-    glyph->u0 = (float)glyph->x / (float)font->atlas_width;
-    glyph->v0 = (float)glyph->y / (float)font->atlas_height;
-    glyph->u1 = (float)(glyph->x + glyph->width) / (float)font->atlas_width;
-    glyph->v1 = (float)(glyph->y + glyph->height) / (float)font->atlas_height;
+    {
+        Atlas *atlas = &font->atlases[glyph->atlas_index];
+        glyph->u0 = (float)glyph->x / (float)atlas->width;
+        glyph->v0 = (float)glyph->y / (float)atlas->height;
+        glyph->u1 = (float)(glyph->x + glyph->width) / (float)atlas->width;
+        glyph->v1 = (float)(glyph->y + glyph->height) / (float)atlas->height;
+    }
 
     return glyph;
 }
@@ -402,7 +466,6 @@ Font *font_create(const char *filepath, int size)
     void *file_data = NULL;
     size_t file_size;
     int pixel_size;
-    unsigned char *atlas_pixels;
 
     if (!filepath || size <= 0) {
         fprintf(stderr, "font_create: invalid filepath or size\n");
@@ -450,22 +513,8 @@ Font *font_create(const char *filepath, int size)
     font->hb_font = hb_ft_font_create_referenced(font->face);
     font->hb_buffer = hb_buffer_create();
 
-    font->atlas_width = FONT_ATLAS_SIZE;
-    font->atlas_height = FONT_ATLAS_SIZE;
-    font->pen_x = FONT_GLYPH_PADDING;
-    font->pen_y = FONT_GLYPH_PADDING;
-    font->row_height = 0;
-
-    atlas_pixels = (unsigned char *)calloc(1, (size_t)font->atlas_width * (size_t)font->atlas_height * 4);
-    if (!atlas_pixels) {
-        font_destroy(font);
-        return NULL;
-    }
-
-    font->atlas = graphics_createtexture_rgba(font->atlas_width, font->atlas_height, atlas_pixels);
-    free(atlas_pixels);
-
-    if (!font->atlas) {
+    font->atlas_count = 0;
+    if (!font_add_atlas(font)) {
         font_destroy(font);
         return NULL;
     }
@@ -506,8 +555,10 @@ void font_destroy(Font *font)
     if (font->index_buffer) {
         graphics_destroybuffer(font->index_buffer);
     }
-    if (font->atlas) {
-        graphics_destroytexture(font->atlas);
+    for (int i = 0; i < font->atlas_count; i++) {
+        if (font->atlases[i].texture) {
+            graphics_destroytexture(font->atlases[i].texture);
+        }
     }
 
     if (font->hb_buffer) {
@@ -705,7 +756,16 @@ void font_print(Font *font,
             graphics_bindpipeline(font->pipeline);
         }
 
-        graphics_bindtexture(font->atlas, 0);
+        {
+            /* Determine which atlas this line's first glyph is packed in */
+            uint32_t first_id = infos[0].codepoint;
+            Glyph *first_glyph = font_find_glyph(font, first_id);
+            int atlas_idx = first_glyph ? first_glyph->atlas_index : 0;
+            if (atlas_idx >= font->atlas_count) {
+                atlas_idx = 0;
+            }
+            graphics_bindtexture(font->atlases[atlas_idx].texture, 0);
+        }
         graphics_draw_buffers(font->vertex_buffer, font->index_buffer, index_count, NULL, NULL);
 
         if (*line_end == '\n') {
@@ -934,75 +994,82 @@ void font_end_batch(Font *font)
         goto cleanup_lines;
     }
 
-    size_t vertex_bytes = total_vertices * sizeof(TextVertex);
-    size_t index_bytes = total_indices * sizeof(uint32_t);
-
-    if (vertex_bytes > font->batch_vertex_capacity) {
-        font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, vertex_bytes);
-        font->batch_vertex_capacity = vertex_bytes;
-    }
-    if (index_bytes > font->batch_index_capacity) {
-        font->batch_indices = (uint32_t *)realloc(font->batch_indices, index_bytes);
-        font->batch_index_capacity = index_bytes;
-    }
-
-    if (!font->batch_vertices || !font->batch_indices) {
-        goto cleanup_lines;
-    }
-
-    /* Build geometry from stored shaped results (no re-shape needed) */
-    size_t vertex_offset = 0;
-    size_t index_offset = 0;
-
+    /* Build geometry from stored shaped results (no re-shape needed).
+     * Draw each line independently with the correct atlas binding,
+     * same pattern as font_print(). */
     for (size_t i = 0; i < total_lines; i++) {
         ShapedLine *line = &lines[i];
         if (line->glyph_count == 0) {
             continue;
         }
 
+        size_t line_vertices = line->glyph_count * 4;
+        size_t line_indices = line->glyph_count * 6;
+        size_t line_vertex_bytes = line_vertices * sizeof(TextVertex);
+        size_t line_index_bytes = line_indices * sizeof(uint32_t);
+
+        /* Ensure scratch buffers are large enough */
+        if (line_vertex_bytes > font->batch_vertex_capacity) {
+            font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, line_vertex_bytes);
+            font->batch_vertex_capacity = line_vertex_bytes;
+        }
+        if (line_index_bytes > font->batch_index_capacity) {
+            font->batch_indices = (uint32_t *)realloc(font->batch_indices, line_index_bytes);
+            font->batch_index_capacity = line_index_bytes;
+        }
+        if (!font->batch_vertices || !font->batch_indices) {
+            goto cleanup_lines;
+        }
+
+        /* Build vertices for this line (scratch buffers, indices start at 0) */
         size_t line_index_count = 0;
         font_build_vertices(font,
                            line->infos, line->positions, line->glyph_count,
                            line->origin_x, line->origin_y, line->sx, line->sy,
-                           &font->batch_vertices[vertex_offset],
-                           &font->batch_indices[index_offset],
+                           font->batch_vertices, font->batch_indices,
                            &line_index_count);
 
-        for (size_t j = 0; j < line_index_count; j++) {
-            font->batch_indices[index_offset + j] += (uint32_t)vertex_offset;
+        /* Ensure GPU buffers are large enough */
+        if (!font->vertex_buffer || line_vertex_bytes > font->vertex_capacity) {
+            if (font->vertex_buffer) {
+                graphics_destroybuffer(font->vertex_buffer);
+            }
+            font->vertex_buffer = graphics_createvertexbuffer(NULL, line_vertex_bytes);
+            font->vertex_capacity = line_vertex_bytes;
+        }
+        if (!font->index_buffer || line_index_bytes > font->index_capacity) {
+            if (font->index_buffer) {
+                graphics_destroybuffer(font->index_buffer);
+            }
+            font->index_buffer = graphics_createindexbuffer(NULL, line_index_bytes);
+            font->index_capacity = line_index_bytes;
         }
 
-        vertex_offset += line->glyph_count * 4;
-        index_offset += line_index_count;
-    }
-
-    if (!font->vertex_buffer || vertex_bytes > font->vertex_capacity) {
-        if (font->vertex_buffer) {
-            graphics_destroybuffer(font->vertex_buffer);
+        if (!font->vertex_buffer || !font->index_buffer) {
+            goto cleanup_lines;
         }
-        font->vertex_buffer = graphics_createvertexbuffer(NULL, vertex_bytes);
-        font->vertex_capacity = vertex_bytes;
-    }
-    if (!font->index_buffer || index_bytes > font->index_capacity) {
-        if (font->index_buffer) {
-            graphics_destroybuffer(font->index_buffer);
+
+        /* Upload and draw this line */
+        graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, line_vertex_bytes);
+        graphics_updatebuffer(font->index_buffer, font->batch_indices, line_index_bytes);
+
+        if (font->pipeline) {
+            graphics_bindpipeline(font->pipeline);
         }
-        font->index_buffer = graphics_createindexbuffer(NULL, index_bytes);
-        font->index_capacity = index_bytes;
-    }
 
-    if (!font->vertex_buffer || !font->index_buffer) {
-        goto cleanup_lines;
+        {
+            /* Determine atlas from first glyph in this line */
+            uint32_t first_id = line->infos[0].codepoint;
+            Glyph *first_glyph = font_find_glyph(font, first_id);
+            int atlas_idx = first_glyph ? first_glyph->atlas_index : 0;
+            if (atlas_idx >= font->atlas_count) {
+                atlas_idx = 0;
+            }
+            graphics_bindtexture(font->atlases[atlas_idx].texture, 0);
+        }
+        graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
+                             line_indices, NULL, NULL);
     }
-
-    graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, vertex_bytes);
-    graphics_updatebuffer(font->index_buffer, font->batch_indices, index_bytes);
-
-    if (font->pipeline) {
-        graphics_bindpipeline(font->pipeline);
-    }
-    graphics_bindtexture(font->atlas, 0);
-    graphics_draw_buffers(font->vertex_buffer, font->index_buffer, total_indices, NULL, NULL);
 
 cleanup_lines:
     for (size_t i = 0; i < total_lines; i++) {

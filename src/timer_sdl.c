@@ -8,7 +8,7 @@ static uint64_t prevtime = 0;
 
 uint64_t timer_gettime()
 {
-    return SDL_GetTicks64();
+    return SDL_GetTicks();
 }
 
 uint64_t timer_step()

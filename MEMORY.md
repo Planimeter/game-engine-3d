@@ -10,6 +10,55 @@ Follow-up review verifying prior fixes and discovering new critical rendering pi
 
 ---
 
+## Fixes Applied (11 total)
+
+### Fix #1 — SDL_Vulkan_CreateSurface return value unchecked
+- `src/window_sdl.c`, `src/window.h`, `src/window_null.c`
+- Changed return type to `int`, validate SDL result
+
+### Fix #2 — WAV audioFormat not validated
+- `src/audio_openal.c`
+- Added PCM-only validation (format==1), reject non-PCM
+
+### Fix #3 — VK_NULL_HANDLE semaphores destroyed
+- `src/graphics_vulkan.cpp`
+- Added `VK_NULL_HANDLE` guards before vkDestroySemaphore
+
+### Fix #4 — OpenAL source not cleaned up on config failure
+- `src/audio_openal.c`
+- Added error check after alSourcei/alSourcef; delete source on failure
+
+### Fix #5 — frameTime on stack (dangling pointer risk)
+- `src/main_sdl.c`
+- Made `g_frameTime` file-scope static for async job safety
+
+### Fix #6 — Swapchain resize didn't recreate semaphores, render pass, or pipeline layout
+- `src/graphics_vulkan.cpp`
+- `graphics_resize()` now recreates semaphores, shaders, render pass, and graphics pipeline
+- Added `VK_NULL_HANDLE` guard + vkDestroy before creating new render pass and pipeline layout
+
+### Fix #7 — graphics_material_set_texture ignored name parameter
+- `src/graphics_vulkan.cpp`
+- Added `MaterialTexture[8]` array to `GPUMaterial`, store by name, bind all on setmaterial
+
+### Fix #8 — Joystick/gamepad events fell through to default
+- `src/event_sdl.c`, `src/framework.h`, `src/framework.c`
+- Wired 12 SDL event types to 12 new framework callback stubs
+
+### Fix #9 — graphics_transition_image only handled 2/9 transitions
+- `src/graphics_vulkan.cpp`
+- Expanded to 9 transitions with correct stage/access masks per pair; added depth aspect support
+
+### Fix #10 — font_print malloc/free on every call
+- `src/font.c`
+- Added scratch buffers to `Font` struct, grow on demand, reuse across calls
+
+### Fix #11 — font_end_batch shaped text twice
+- `src/font.c`
+- Single shape pass stores results in `ShapedLine` array; geometry built from stored data
+
+---
+
 ## Architecture Summary
 
 **Layered module architecture** with C99/C++20, Vulkan graphics via volk+VMA, SDL3 windowing, OpenAL audio, PhysFS filesystem, FreeType+HarfBuzz fonts, Assimp 3D model loading, GLM math library, and optional CEF (Chromium 145) browser integration.
@@ -50,7 +99,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 
 ### P3 — Low Priority
 8. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-9. **No Memory Tracking** — No allocator wrapper or leak detection.
 
 ---
 
@@ -80,13 +128,35 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
+## Font Rendering Research (2026-07-26)
+
+### Sources Consulted
+1. **Evan Wallace (2016)** — "Text Rendering Hates You" — Fundamental GPU text challenges
+2. **Behdad Esfahbod (2024)** — "State of Text Rendering" — Comprehensive overview of open-source text stack (FreeType + HarfBuzz is the industry standard: Chrome, Android, Firefox, Adobe all use it)
+3. **osor.io (2025)** — "GPU Glyph Rasterization" — Runtime curve rasterization with temporal accumulation (cutting edge, overkill for this engine)
+
+### Approaches (ranked by effort)
+| Approach | Effort | Quality | Used By |
+|----------|--------|---------|---------|
+| Multi-Atlas (texture array) | ~2 hrs | Good (same as current) | Many games |
+| Dynamic Atlas Growth (resize+blit) | ~4 hrs | Good | Some engines |
+| MSDF (multi-channel SDF) | 1-2 days | Excellent (sharp at any size) | Qt 6.7, Godot, mapbox |
+| GPU Curve Rasterization | 1-2 weeks | Perfect (resolution independent) | Pathfinder, osor.io |
+
+### Recommendation
+- **Short-term**: Multi-atlas for quick fix (texture array, round-robin allocation)
+- **Long-term**: MSDF for production-quality text
+- Engine already has industry-standard FreeType + HarfBuzz stack
+
+---
+
 ## Files Read (Complete List)
 
 ### Headers (all src/)
 - `framework.h`, `graphics.h`, `window.h`, `event.h`, `audio.h`, `model.h`, `font.h`, `text.h`, `image.h`, `timer.h`, `filesystem.h`, `job.h`
 
 ### Core Implementations
-- `main_sdl.c`, `window_sdl.c`, `event_sdl.c`, `graphics_vulkan.cpp` (2750 lines), `audio_openal.c`, `filesystem_physfs.c`, `font.c`, `framework.c`, `image_stb.c`, `job_pthread.c`, `model_assimp.cpp`, `text.c`, `timer_sdl.c`
+- `main_sdl.c`, `window_sdl.c`, `event_sdl.c`, `graphics_vulkan.cpp` (2846 lines), `audio_openal.c`, `filesystem_physfs.c`, `font.c` (1013 lines), `framework.c`, `image_stb.c`, `job_pthread.c`, `model_assimp.cpp`, `text.c`, `timer_sdl.c`
 
 ### Stub/Null Implementations
 - `graphics_null.c`, `graphics_opengl_sdl.c`, `window_null.c`, `event_null.c`, `audio_null.c`, `filesystem_null.c`, `filesystem_posix.c`, `model_null.c`, `image_null.c`, `timer_null.c`, `job_null.c`, `main_null.c`
