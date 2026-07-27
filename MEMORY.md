@@ -53,8 +53,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ### P3 — Low Priority
 10. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
 11. **No Memory Tracking** — No allocator wrapper or leak detection.
-12. **No CMake Install Target** — Missing `install()` rules.
-13. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 
