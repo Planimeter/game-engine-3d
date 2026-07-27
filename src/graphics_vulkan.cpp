@@ -741,6 +741,11 @@ static void graphics_createrenderpass()
     createInfo.pDependencies     = dependencies;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#vkCreateRenderPass */
+    if (renderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, renderPass, NULL);
+        renderPass = VK_NULL_HANDLE;
+    }
+
     VkResult result = vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create render pass: %d\n", result);
@@ -887,6 +892,10 @@ static void graphics_creategraphicspipeline()
 
     pipelineLayoutCreateInfo.setLayoutCount = 1;
     pipelineLayoutCreateInfo.pSetLayouts = &bindlessDescriptorSetLayout;
+
+    if (pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelineLayout, NULL);
+    }
 
     VkResult result = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
     if (result != VK_SUCCESS) {
@@ -2440,8 +2449,12 @@ void graphics_resize()
     graphics_destroydepthresources();
     graphics_destroyframebuffers();
     graphics_createswapchain();
+    graphics_createsemaphores();
     graphics_getswapchainimages();
     graphics_createdepthresources();
+    graphics_createshaders();
+    graphics_createrenderpass();
+    graphics_creategraphicspipeline();
     graphics_createcommandpools();
     graphics_allocatecommandbuffers();
     graphics_createfences();
