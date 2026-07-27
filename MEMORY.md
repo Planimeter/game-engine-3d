@@ -36,9 +36,10 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ## 🔴 Critical Issues
 
 ### P0 — Blocker (Rendering Broken)
-1. **Model Transform Matrices Ignored** — `graphics_drawmodel()` and `graphics_draw_instanced()` both cast `transform4x4` to `(void)`. The matrix is never uploaded to the GPU. Every model renders at origin with identity transform.
-2. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `GPUMaterial.mat4`, but the pipeline layout only has a bindless descriptor set for images — no push constants, no UBO descriptor. The matrix lives in CPU memory forever.
+1. **Model Transform Matrices Ignored** — `graphics_drawmodel()` and `graphics_draw_instanced()` both cast `transform4x4`/`transforms4x4` to `(void)` at lines 1797 and 1836 of `graphics_vulkan.cpp`. The matrix is never uploaded to the GPU. Every model renders at origin with identity transform.
+2. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
 3. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
+4. **Root Cause: Pipeline Layout Gap** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
 
 ### P1 — High Priority
 4. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
@@ -46,6 +47,21 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ### P2 — Medium Priority
 5. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
 6. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
+
+---
+
+## Shader Source Verification (2026-07-27)
+
+All shader sources were examined to confirm the uniform binding gap:
+
+| Shader | Uniforms Declared | Bindable? |
+|--------|------------------|-----------|
+| `default3d.vert` | `mat4 modelMatrix`, `viewMatrix`, `projectionMatrix`, `normalMatrix`; `sampler2D tex` | No — no UBO binding, only bindless textures for samplers |
+| `pbr-vert.glsl` | Same as default3d + light direction/color, camera position | No — same issue |
+| `pbr-frag.glsl` | IBL samplers, emissive texture | Partially — bindless texture binding works, but no PBR uniform data |
+| `triangle.vert/frag` | None (hardcoded colors) | N/A — only test shader that actually works |
+
+**Conclusion:** Only the triangle test shader can produce visible output. All 3D shaders require uniform matrices that have no binding path.
 
 ---
 
