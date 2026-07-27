@@ -15,8 +15,11 @@ Window window_getwindow()
     return NULL;
 }
 
-void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
+int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
+    (void)instance;
+    (void)surface;
+    return 0;
 }
 
 void window_getwindowsizeinpixels(int *w, int *h)

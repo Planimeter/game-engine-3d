@@ -927,7 +927,10 @@ static void graphics_creategraphicspipeline()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#_wsi_surface */
 static void graphics_createsurface()
 {
-    window_vulkan_createsurface(instance, &surface);
+    if (!window_vulkan_createsurface(instance, &surface)) {
+        fprintf(stderr, "Failed to create Vulkan surface\n");
+        exit(EXIT_FAILURE);
+    }
 }
 
 static void graphics_destroyframebuffers();

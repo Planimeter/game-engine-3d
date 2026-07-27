@@ -40,7 +40,7 @@ typedef VkSurfaceKHR vulkanSurface; /* for compatibility with Tizen */
 
 void   window_init();
 Window window_getwindow();
-void   window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
+int    window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
 void   window_getwindowsizeinpixels(int *w, int *h);
 void   window_shutdown(void);
 

@@ -37,9 +37,13 @@ Window window_getwindow()
     return window;
 }
 
-void window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
+int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
-    SDL_Vulkan_CreateSurface(window, instance, NULL, surface);
+    if (!SDL_Vulkan_CreateSurface(window, instance, NULL, surface)) {
+        printf("SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());
+        return 0;
+    }
+    return 1;
 }
 
 void window_getwindowsizeinpixels(int *w, int *h)
