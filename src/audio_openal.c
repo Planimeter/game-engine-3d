@@ -1,6 +1,7 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "audio.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -141,8 +142,18 @@ int audio_play_sample(void *sample, int loop)
     ALuint src = 0;
     alGenSources(1, &src);
     if (!src) return -1;
+
     alSourcei(src, AL_BUFFER, (ALint)s->buffer);
     alSourcei(src, AL_LOOPING, loop ? AL_TRUE : AL_FALSE);
+
+    /* Check for OpenAL errors — if any setup call failed, clean up the source */
+    ALenum err = alGetError();
+    if (err != AL_NO_ERROR) {
+        fprintf(stderr, "audio_play_sample: OpenAL error %#x while configuring source\n", err);
+        alDeleteSources(1, &src);
+        return -1;
+    }
+
     alSourcePlay(src);
     return (int)src;
 }
