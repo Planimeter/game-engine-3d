@@ -32,6 +32,19 @@ void framework_mousemoved(int x, int y, int dx, int dy, int istouch);
 void framework_mousepressed(int x, int y, const char *button, int istouch);
 void framework_mousereleased(int x, int y, const char *button, int istouch);
 void framework_wheelmoved(int x, int y);
+void framework_joystick_axis_motion(int which, int axis, int value);
+void framework_joystick_ball_motion(int which, int ball, int dx, int dy);
+void framework_joystick_hat_motion(int which, int hat, int value);
+void framework_joystick_button_pressed(int which, int button);
+void framework_joystick_button_released(int which, int button);
+void framework_joystick_added(int which);
+void framework_joystick_removed(int which);
+void framework_gamepad_axis_motion(int which, int axis, int value);
+void framework_gamepad_button_pressed(int which, int button);
+void framework_gamepad_button_released(int which, int button);
+void framework_gamepad_added(int which);
+void framework_gamepad_removed(int which);
+void framework_gamepad_remapped(int which);
 
 #ifdef __cplusplus
 }

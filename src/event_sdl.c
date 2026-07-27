@@ -170,25 +170,54 @@ int event_poll()
 
         /* Joystick events */
         case SDL_EVENT_JOYSTICK_AXIS_MOTION:
+            framework_joystick_axis_motion((int)event.jaxis.which, (int)event.jaxis.axis, (int)event.jaxis.value);
+            break;
         case SDL_EVENT_JOYSTICK_BALL_MOTION:
+            framework_joystick_ball_motion((int)event.jball.which, (int)event.jball.ball,
+                                           (int)event.jball.xrel, (int)event.jball.yrel);
+            break;
         case SDL_EVENT_JOYSTICK_HAT_MOTION:
+            framework_joystick_hat_motion((int)event.jhat.which, (int)event.jhat.hat, (int)event.jhat.value);
+            break;
         case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+            framework_joystick_button_pressed((int)event.jbutton.which, (int)event.jbutton.button);
+            break;
         case SDL_EVENT_JOYSTICK_BUTTON_UP:
+            framework_joystick_button_released((int)event.jbutton.which, (int)event.jbutton.button);
+            break;
         case SDL_EVENT_JOYSTICK_ADDED:
+            framework_joystick_added((int)event.jdevice.which);
+            break;
         case SDL_EVENT_JOYSTICK_REMOVED:
+            framework_joystick_removed((int)event.jdevice.which);
+            break;
         case SDL_EVENT_JOYSTICK_BATTERY_UPDATED:
+            break;
 
         /* Game controller events */
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            framework_gamepad_axis_motion((int)event.gaxis.which, (int)event.gaxis.axis, (int)event.gaxis.value);
+            break;
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            framework_gamepad_button_pressed((int)event.gbutton.which, (int)event.gbutton.button);
+            break;
         case SDL_EVENT_GAMEPAD_BUTTON_UP:
+            framework_gamepad_button_released((int)event.gbutton.which, (int)event.gbutton.button);
+            break;
         case SDL_EVENT_GAMEPAD_ADDED:
+            framework_gamepad_added((int)event.gdevice.which);
+            break;
         case SDL_EVENT_GAMEPAD_REMOVED:
+            framework_gamepad_removed((int)event.gdevice.which);
+            break;
         case SDL_EVENT_GAMEPAD_REMAPPED:
+            framework_gamepad_remapped((int)event.gdevice.which);
+            break;
         case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
         case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
         case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
         case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+            break;
 
         /* Touch events */
         case SDL_EVENT_FINGER_DOWN: {
