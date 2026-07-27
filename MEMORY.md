@@ -10,8 +10,6 @@ Follow-up review verifying prior fixes and discovering new critical rendering pi
 
 ---
 
----
-
 ## Architecture Summary
 
 **Layered module architecture** with C99/C++20, Vulkan graphics via volk+VMA, SDL3 windowing, OpenAL audio, PhysFS filesystem, FreeType+HarfBuzz fonts, Assimp 3D model loading, GLM math library, and optional CEF (Chromium 145) browser integration.
@@ -50,7 +48,7 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 6. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
 
 ### P3 — Low Priority
-8. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+7. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
 
 ---
 
