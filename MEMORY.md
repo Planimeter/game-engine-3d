@@ -49,13 +49,12 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 7. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
 8. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
 9. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
-10. **`graphics_transition_image()` Only Handles 2 Transitions** — Only supports `UNDEFINED→TRANSFER_DST` and `TRANSFER_DST→SHADER_READ_ONLY`. Missing depth, color-attachment, and present transitions.
 
 ### P3 — Low Priority
-11. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
-12. **No Memory Tracking** — No allocator wrapper or leak detection.
-13. **No CMake Install Target** — Missing `install()` rules.
-14. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
+10. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
+11. **No Memory Tracking** — No allocator wrapper or leak detection.
+12. **No CMake Install Target** — Missing `install()` rules.
+13. **`font_print()` Unused Parameters** — `r` (rotation), `ox`, `oy`, `kx`, `ky` are all cast to `(void)`. Text rotation/alignment/kerning not implemented.
 
 ---
 
