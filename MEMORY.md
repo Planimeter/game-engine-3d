@@ -10,53 +10,6 @@ Follow-up review verifying prior fixes and discovering new critical rendering pi
 
 ---
 
-## Fixes Applied (11 total)
-
-### Fix #1 — SDL_Vulkan_CreateSurface return value unchecked
-- `src/window_sdl.c`, `src/window.h`, `src/window_null.c`
-- Changed return type to `int`, validate SDL result
-
-### Fix #2 — WAV audioFormat not validated
-- `src/audio_openal.c`
-- Added PCM-only validation (format==1), reject non-PCM
-
-### Fix #3 — VK_NULL_HANDLE semaphores destroyed
-- `src/graphics_vulkan.cpp`
-- Added `VK_NULL_HANDLE` guards before vkDestroySemaphore
-
-### Fix #4 — OpenAL source not cleaned up on config failure
-- `src/audio_openal.c`
-- Added error check after alSourcei/alSourcef; delete source on failure
-
-### Fix #5 — frameTime on stack (dangling pointer risk)
-- `src/main_sdl.c`
-- Made `g_frameTime` file-scope static for async job safety
-
-### Fix #6 — Swapchain resize didn't recreate semaphores, render pass, or pipeline layout
-- `src/graphics_vulkan.cpp`
-- `graphics_resize()` now recreates semaphores, shaders, render pass, and graphics pipeline
-- Added `VK_NULL_HANDLE` guard + vkDestroy before creating new render pass and pipeline layout
-
-### Fix #7 — graphics_material_set_texture ignored name parameter
-- `src/graphics_vulkan.cpp`
-- Added `MaterialTexture[8]` array to `GPUMaterial`, store by name, bind all on setmaterial
-
-### Fix #8 — Joystick/gamepad events fell through to default
-- `src/event_sdl.c`, `src/framework.h`, `src/framework.c`
-- Wired 12 SDL event types to 12 new framework callback stubs
-
-### Fix #9 — graphics_transition_image only handled 2/9 transitions
-- `src/graphics_vulkan.cpp`
-- Expanded to 9 transitions with correct stage/access masks per pair; added depth aspect support
-
-### Fix #10 — font_print malloc/free on every call
-- `src/font.c`
-- Added scratch buffers to `Font` struct, grow on demand, reuse across calls
-
-### Fix #11 — font_end_batch shaped text twice
-- `src/font.c`
-- Single shape pass stores results in `ShapedLine` array; geometry built from stored data
-
 ---
 
 ## Architecture Summary
@@ -95,7 +48,6 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
 ### P2 — Medium Priority
 5. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
 6. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
-7. **Font Atlas Can't Grow** — 1024×1024 fixed atlas. When full, glyphs silently fail (`font_pack_glyph()` returns 0).
 
 ### P3 — Low Priority
 8. **Global `g_jobSystem`** — Prevents multi-window or editor+game coexistence.
@@ -156,7 +108,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 - `framework.h`, `graphics.h`, `window.h`, `event.h`, `audio.h`, `model.h`, `font.h`, `text.h`, `image.h`, `timer.h`, `filesystem.h`, `job.h`
 
 ### Core Implementations
-- `main_sdl.c`, `window_sdl.c`, `event_sdl.c`, `graphics_vulkan.cpp` (2846 lines), `audio_openal.c`, `filesystem_physfs.c`, `font.c` (1013 lines), `framework.c`, `image_stb.c`, `job_pthread.c`, `model_assimp.cpp`, `text.c`, `timer_sdl.c`
+- `main_sdl.c`, `window_sdl.c`, `event_sdl.c`, `graphics_vulkan.cpp` (2846 lines), `audio_openal.c`, `filesystem_physfs.c`, `font.c` (1080 lines), `framework.c`, `image_stb.c`, `job_pthread.c`, `model_assimp.cpp`, `text.c`, `timer_sdl.c`
 
 ### Stub/Null Implementations
 - `graphics_null.c`, `graphics_opengl_sdl.c`, `window_null.c`, `event_null.c`, `audio_null.c`, `filesystem_null.c`, `filesystem_posix.c`, `model_null.c`, `image_null.c`, `timer_null.c`, `job_null.c`, `main_null.c`
