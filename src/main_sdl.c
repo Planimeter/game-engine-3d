@@ -11,6 +11,7 @@
 #include <stdio.h>
 
 JobSystem *g_jobSystem = NULL;
+static uint64_t g_frameTime = 0;
 
 static void job_update(void *context, uint32_t jobIndex)
 {
@@ -40,11 +41,11 @@ int main(int argc, char *argv[])
     }
     
     while (event_poll()) {
-        uint64_t frameTime = timer_step();
+        g_frameTime = timer_step();
         
         JobDescriptor updateJob = {
             .function = job_update,
-            .context = &frameTime,
+            .context = &g_frameTime,
             .jobCount = 1,
             .name = "Update"
         };
