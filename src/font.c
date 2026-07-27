@@ -633,8 +633,6 @@ void font_print(Font *font,
         hb_glyph_position_t *positions;
         size_t vertex_count;
         size_t index_count;
-        TextVertex *vertices;
-        uint32_t *indices;
         size_t vertex_bytes;
         size_t index_bytes;
 
@@ -685,21 +683,23 @@ void font_print(Font *font,
             return;
         }
 
-        vertices = (TextVertex *)malloc(vertex_bytes);
-        indices = (uint32_t *)malloc(index_bytes);
-        if (!vertices || !indices) {
-            free(vertices);
-            free(indices);
+        if (vertex_bytes > font->batch_vertex_capacity) {
+            font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, vertex_bytes);
+            font->batch_vertex_capacity = vertex_bytes;
+        }
+        if (index_bytes > font->batch_index_capacity) {
+            font->batch_indices = (uint32_t *)realloc(font->batch_indices, index_bytes);
+            font->batch_index_capacity = index_bytes;
+        }
+        if (!font->batch_vertices || !font->batch_indices) {
             return;
         }
 
-        font_build_vertices(font, infos, positions, glyph_count, origin_x, cursor_y, sx, sy, vertices, indices, &index_count);
+        font_build_vertices(font, infos, positions, glyph_count, origin_x, cursor_y, sx, sy,
+                            font->batch_vertices, font->batch_indices, &index_count);
 
-        graphics_updatebuffer(font->vertex_buffer, vertices, vertex_bytes);
-        graphics_updatebuffer(font->index_buffer, indices, index_bytes);
-
-        free(vertices);
-        free(indices);
+        graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, vertex_bytes);
+        graphics_updatebuffer(font->index_buffer, font->batch_indices, index_bytes);
 
         if (font->pipeline) {
             graphics_bindpipeline(font->pipeline);
@@ -833,111 +833,94 @@ void font_end_batch(Font *font)
     if (!font || font->batch.count == 0) {
         return;
     }
-    
-    size_t total_vertices = 0;
-    size_t total_indices = 0;
-    
+
+    /* Count total lines and allocate shaped-line storage */
+    size_t total_lines = 0;
     for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
         TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
         if (!cmd->text) {
             continue;
         }
-        
-        const char *line_start = cmd->text;
-        
-        while (*line_start) {
-            const char *line_end = strchr(line_start, '\n');
-            if (!line_end) {
-                line_end = line_start + strlen(line_start);
-            }
-            
-            size_t line_len = (size_t)(line_end - line_start);
-            
-            hb_buffer_clear_contents(font->hb_buffer);
-            hb_buffer_add_utf8(font->hb_buffer, line_start, (int)line_len, 0, (int)line_len);
-            hb_buffer_guess_segment_properties(font->hb_buffer);
-            hb_shape(font->hb_font, font->hb_buffer, NULL, 0);
-            
-            unsigned int glyph_count = 0;
-            hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(font->hb_buffer, &glyph_count);
-            hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(font->hb_buffer, &glyph_count);
-            
-            total_vertices += glyph_count * 4;
-            total_indices += glyph_count * 6;
-            
-            if (*line_end == '\n') {
-                line_start = line_end + 1;
-            } else {
+        const char *s = cmd->text;
+        while (*s) {
+            total_lines++;
+            const char *nl = strchr(s, '\n');
+            if (!nl) {
                 break;
             }
+            s = nl + 1;
         }
     }
-    
-    if (total_vertices == 0) {
+
+    if (total_lines == 0) {
         return;
     }
-    
-    size_t vertex_bytes = total_vertices * sizeof(TextVertex);
-    size_t index_bytes = total_indices * sizeof(uint32_t);
-    
-    if (vertex_bytes > font->batch_vertex_capacity) {
-        font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, vertex_bytes);
-        font->batch_vertex_capacity = vertex_bytes;
-    }
-    if (index_bytes > font->batch_index_capacity) {
-        font->batch_indices = (uint32_t *)realloc(font->batch_indices, index_bytes);
-        font->batch_index_capacity = index_bytes;
-    }
-    
-    if (!font->batch_vertices || !font->batch_indices) {
+
+    ShapedLine *lines = (ShapedLine *)calloc(total_lines, sizeof(ShapedLine));
+    if (!lines) {
         return;
     }
-    
-    size_t vertex_offset = 0;
-    size_t index_offset = 0;
-    
+
+    /* Single shape pass: shape each line once, store results */
+    size_t total_vertices = 0;
+    size_t total_indices = 0;
+    size_t line_idx = 0;
+
     for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
         TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
         if (!cmd->text) {
             continue;
         }
-        
+
         const char *line_start = cmd->text;
         float cursor_y = cmd->y;
-        
+
         while (*line_start) {
             const char *line_end = strchr(line_start, '\n');
             if (!line_end) {
                 line_end = line_start + strlen(line_start);
             }
-            
+
             size_t line_len = (size_t)(line_end - line_start);
-            
+
+            ShapedLine *line = &lines[line_idx++];
+
             hb_buffer_clear_contents(font->hb_buffer);
             hb_buffer_add_utf8(font->hb_buffer, line_start, (int)line_len, 0, (int)line_len);
             hb_buffer_guess_segment_properties(font->hb_buffer);
             hb_shape(font->hb_font, font->hb_buffer, NULL, 0);
-            
+
             unsigned int glyph_count = 0;
             hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(font->hb_buffer, &glyph_count);
             hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(font->hb_buffer, &glyph_count);
-            
+
+            line->origin_x = cmd->x;
+            line->origin_y = cursor_y;
+            line->sx = cmd->sx;
+            line->sy = cmd->sy;
+            line->glyph_count = glyph_count;
+
             if (glyph_count > 0) {
-                size_t line_index_count = 0;
-                font_build_vertices(font, infos, positions, glyph_count,
-                                   cmd->x, cursor_y, cmd->sx, cmd->sy,
-                                   &font->batch_vertices[vertex_offset],
-                                   &font->batch_indices[index_offset],
-                                   &line_index_count);
-                
-                for (size_t i = 0; i < line_index_count; i++) {
-                    font->batch_indices[index_offset + i] += (uint32_t)vertex_offset;
+                line->infos = (hb_glyph_info_t *)malloc(glyph_count * sizeof(hb_glyph_info_t));
+                line->positions = (hb_glyph_position_t *)malloc(glyph_count * sizeof(hb_glyph_position_t));
+                if (line->infos && line->positions) {
+                    memcpy(line->infos, infos, glyph_count * sizeof(hb_glyph_info_t));
+                    memcpy(line->positions, positions, glyph_count * sizeof(hb_glyph_position_t));
+                } else {
+                    free(line->infos);
+                    free(line->positions);
+                    line->infos = NULL;
+                    line->positions = NULL;
+                    line->glyph_count = 0;
                 }
-                
-                vertex_offset += glyph_count * 4;
-                index_offset += line_index_count;
+            } else {
+                line->infos = NULL;
+                line->positions = NULL;
             }
-            
+
+            total_vertices += glyph_count * 4;
+            total_indices += glyph_count * 6;
+
             if (*line_end == '\n') {
                 line_start = line_end + 1;
                 cursor_y += font->height * cmd->sy;
@@ -946,7 +929,53 @@ void font_end_batch(Font *font)
             }
         }
     }
-    
+
+    if (total_vertices == 0) {
+        goto cleanup_lines;
+    }
+
+    size_t vertex_bytes = total_vertices * sizeof(TextVertex);
+    size_t index_bytes = total_indices * sizeof(uint32_t);
+
+    if (vertex_bytes > font->batch_vertex_capacity) {
+        font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, vertex_bytes);
+        font->batch_vertex_capacity = vertex_bytes;
+    }
+    if (index_bytes > font->batch_index_capacity) {
+        font->batch_indices = (uint32_t *)realloc(font->batch_indices, index_bytes);
+        font->batch_index_capacity = index_bytes;
+    }
+
+    if (!font->batch_vertices || !font->batch_indices) {
+        goto cleanup_lines;
+    }
+
+    /* Build geometry from stored shaped results (no re-shape needed) */
+    size_t vertex_offset = 0;
+    size_t index_offset = 0;
+
+    for (size_t i = 0; i < total_lines; i++) {
+        ShapedLine *line = &lines[i];
+        if (line->glyph_count == 0) {
+            continue;
+        }
+
+        size_t line_index_count = 0;
+        font_build_vertices(font,
+                           line->infos, line->positions, line->glyph_count,
+                           line->origin_x, line->origin_y, line->sx, line->sy,
+                           &font->batch_vertices[vertex_offset],
+                           &font->batch_indices[index_offset],
+                           &line_index_count);
+
+        for (size_t j = 0; j < line_index_count; j++) {
+            font->batch_indices[index_offset + j] += (uint32_t)vertex_offset;
+        }
+
+        vertex_offset += line->glyph_count * 4;
+        index_offset += line_index_count;
+    }
+
     if (!font->vertex_buffer || vertex_bytes > font->vertex_capacity) {
         if (font->vertex_buffer) {
             graphics_destroybuffer(font->vertex_buffer);
@@ -961,17 +990,24 @@ void font_end_batch(Font *font)
         font->index_buffer = graphics_createindexbuffer(NULL, index_bytes);
         font->index_capacity = index_bytes;
     }
-    
+
     if (!font->vertex_buffer || !font->index_buffer) {
-        return;
+        goto cleanup_lines;
     }
-    
+
     graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, vertex_bytes);
     graphics_updatebuffer(font->index_buffer, font->batch_indices, index_bytes);
-    
+
     if (font->pipeline) {
         graphics_bindpipeline(font->pipeline);
     }
     graphics_bindtexture(font->atlas, 0);
     graphics_draw_buffers(font->vertex_buffer, font->index_buffer, total_indices, NULL, NULL);
+
+cleanup_lines:
+    for (size_t i = 0; i < total_lines; i++) {
+        free(lines[i].infos);
+        free(lines[i].positions);
+    }
+    free(lines);
 }
