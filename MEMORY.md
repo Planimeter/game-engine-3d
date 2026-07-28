@@ -92,6 +92,17 @@ After FPS text was working, we fixed the transform matrix upload pipeline, added
 - Default 3D shader declares `MaterialData` struct at `[[buffer(2)]]` for future use
 - OpenGL and null backends updated with proper CPU-side storage (no GPU upload yet — those backends lack the binding infrastructure)
 
+**Fix 16 — Vulkan pipeline layout rework (UBO descriptor set + transform upload):** The Vulkan backend had `setLayoutCount=1` (bindless textures only) and `pushConstantRangeCount=0`. `graphics_binduniformbuffer()` was a no-op. All 3 draw functions discarded transform matrices with `(void)` casts. Material data never reached the GPU. Implemented:
+- UBO descriptor set layout, pool, and set (set 1) with 16 slots for uniform buffers
+- Global uniform buffer (4096 bytes) for transform matrices
+- Pipeline layout updated to use 2 descriptor sets (set 0=bindless textures, set 1=UBOs)
+- `graphics_binduniformbuffer()` implemented via `vkUpdateDescriptorSets()` with `VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER`
+- Transform matrix upload in all 3 draw calls (global UBO at slot 0)
+- Per-material uniform buffer added to `GPUMaterial` struct
+- `vulkan_material_pack()` packs material data into GPU buffer, bound at UBO slot 1
+- Material dirty flag set on `set_float`/`set_vec3`/`set_mat4` changes
+- Proper cleanup of UBO descriptor pool/layout and global buffer in `graphics_shutdown()`
+
 **End-to-end test:** Added spinning cube rendering to `framework.c`:
 - C matrix math helpers: `mat4_identity`, `mat4_multiply`, `mat4_rotate_y`, `mat4_translate`, `mat4_perspective`, `mat4_lookat`
 - Model loading with `realpath(argv[0])` path resolution (navigates up from `.app` bundle to repo root)
@@ -163,15 +174,15 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 
 ## 🔴 Critical Issues
 
-### P0 — Blocker (3D Rendering Broken)
-1. ~~**Model Transform Matrices Ignored (Metal)** — `graphics_drawmodel()` binds `g_uniformBuffer` at index 1 but never copies `transform4x4` data into it. The default vertex shader expects the matrix at `[[buffer(0)]]`. **Two bugs: wrong binding index + no data upload.**~~ ✅ **Fixed** — matrix copied into `g_uniformBuffer`, shader changed to `[[buffer(1)]]` to avoid vertex descriptor conflict.
-2. ~~**`graphics_draw_instanced()` Discards Transforms (Metal)** — `(void)transforms4x4` at line 786. Instance transforms never reach GPU.~~ ✅ **Fixed** — matrix uploaded, instanceCount passed through.
-3. ~~**`graphics_draw_buffers()` Discards Transforms (Metal)** — `(void)transform4x4` at line 817. Transform never reaches GPU.~~ ✅ **Fixed** — matrix uploaded.
-4. ~~**`graphics_loadmodel()` No GPU Buffer Creation (Metal)** — Was a no-op stub. Models loaded but had no vertex/index buffers on GPU.~~ ✅ **Fixed** — iterates meshes and creates GPU buffers.
-5. ~~**Default 3D Shader Stub (Metal)** — Default vertex/fragment shaders for 3D were stubs returning hardcoded colors.~~ ✅ **Fixed** — replaced with VERTEX_FORMAT_FULL handler with normal visualization.
-6. ~~**Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.~~ ✅ **Fixed (Metal)** — `MetalMaterial` struct has a per-material uniform buffer (1024 bytes), `metal_material_pack()` packs all material data (floats, vec3s, mat4) into the buffer, and `graphics_setmaterial()` binds it at slot 2. OpenGL and null backends store data CPU-side but lack GPU upload.
-7. ~~**No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.~~ ✅ **Fixed** — `graphics_binduniformbuffer(Buffer buf, unsigned slot)` added to graphics.h, implemented in Metal backend via `metal_encoder_set_buffer()` (binds to both vertex and fragment stages). Vulkan backend still needs pipeline layout rework.
-8. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
+### P0 — Blocker (3D Rendering Broken) — ALL FIXED ✅
+1. ~~**Model Transform Matrices Ignored (Metal)**~~ ✅ **Fixed**
+2. ~~**`graphics_draw_instanced()` Discards Transforms (Metal)**~~ ✅ **Fixed**
+3. ~~**`graphics_draw_buffers()` Discards Transforms (Metal)**~~ ✅ **Fixed**
+4. ~~**`graphics_loadmodel()` No GPU Buffer Creation (Metal)**~~ ✅ **Fixed**
+5. ~~**Default 3D Shader Stub (Metal)**~~ ✅ **Fixed**
+6. ~~**Material mat4 Never Uploaded to GPU**~~ ✅ **Fixed (Metal + Vulkan)**
+7. ~~**No Uniform Buffer Binding API**~~ ✅ **Fixed**
+8. ~~**Root Cause: Pipeline Layout Gap (Vulkan)**~~ ✅ **Fixed**
 
 ### P1 — High Priority
 7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
@@ -273,9 +284,9 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 - Matrix math is provided by `math_c.h` / `math_glm.cpp` wrapping real GLM calls (SIMD, etc.) behind `extern "C"` functions
 - 3D model rendering is working via the Metal backend with MVP matrix pipeline
 - The default 3D shader visualizes normals as color (`normal * 0.5 + 0.5`) — debug quality, no proper lighting yet
-- The Vulkan backend still uses a bindless descriptor set (16384 max textures) for `sampler2D` only — no UBO descriptor
-- The pipeline layout is created once in `graphics_creategraphicspipeline()` and reused by all pipelines created via `graphics_createpipeline()` — all custom pipelines share the same layout (no UBO support)
-- `graphics_setmaterial()` only binds textures from the material to the bindless descriptor set; it does NOT upload floats, vec3s, or mat4 to the GPU
+- **The Vulkan backend now has a UBO descriptor set (set 1) with 16 uniform buffer slots** — `graphics_binduniformbuffer()` is fully implemented via `vkUpdateDescriptorSets()`
+- The pipeline layout uses 2 descriptor sets: set 0 (bindless textures, 16384 max) and set 1 (UBOs, 16 slots)
+- `graphics_setmaterial()` packs material uniforms into a per-material GPU buffer and binds it at UBO slot 1, plus binds textures from the material
 
 ### Memory Management
 - VMA (Vulkan Memory Allocator) is used for all GPU allocations
@@ -309,9 +320,11 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
-## Rating: 8/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **All P0 rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix), has a proper uniform buffer binding API, and a working material system that packs uniforms into per-material GPU buffers. The Vulkan backend still needs pipeline layout rework to support UBOs (P0). Remaining P1: shader variant system is a no-op.
+## Rating: 9/10
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **All P0 rendering pipeline defects have been fixed in both Metal and Vulkan backends** — the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), and a working material system that packs uniforms into per-material GPU buffers on both backends. Remaining P1: shader variant system is a no-op.
 
-**Metal backend progress:** FPS text + spinning cube + uniform buffer binding API + material system is working. No remaining P0 issues in Metal.
+**Metal backend progress:** FPS text + spinning cube + uniform buffer binding API + material system is working. No remaining P0 issues.
 
-**Last commit:** `7ea9d733` — Implement material system in Metal backend (Fix 15)
+**Vulkan backend progress:** UBO descriptor set added, transform upload working, material system implemented. No remaining P0 issues.
+
+**Last commit:** `bec96126` — Fix Vulkan pipeline layout: add UBO descriptor set + transform upload (Fix 16)
