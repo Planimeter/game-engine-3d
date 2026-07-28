@@ -45,19 +45,23 @@ The build had 16 errors due to type mismatches between the ObjC++ `.mm` file and
 - `graphics_metal_helpers.m`: Updated implementations to cast `unsigned long` back to `NSUInteger` and reconstruct `MTLViewport` from the double array internally.
 - `graphics_metal.mm`: Added explicit casts from `void*` returns to `id<MTL...>` types at every call site where helper return values are assigned to typed variables. Changed `NSString*` arguments to `const char*` (C string literals) for `metal_device_new_library()` and `metal_library_new_function()`. Changed viewport from `MTLViewport` struct to `double vp[6]` array.
 
-### Runtime Fixes (2026-07-28, iterative debugging)
+### Runtime Fixes (2026-07-28, iterative debugging — see Session Summary for full details)
 
-**Fix 1 — AGX GPU crash (texture access):** Apple M1 Max GPU driver does not respond to `contents` or `replaceBytesInRegion:` on textures with `MTLStorageModeShared`. Changed texture storage to `MTLStorageModePrivate` and replaced direct CPU access with staging buffer + blit encoder pattern (`copyFromBuffer:toTexture:` via `MTLBlitCommandEncoder`).
+A full Metal backend debugging session resolved 6 root causes that turned white rectangles into visible FPS text:
 
-**Fix 2 — Sampler binding:** `graphics_bindtexture()` was a no-op. Added `g_defaultSampler` creation in `graphics_init()` (linear filter, repeat addressing). `graphics_bindtexture()` now calls `metal_encoder_set_fragment_texture()` and `metal_encoder_set_fragment_sampler_state()`.
+**Fix 1 — Build (16 compilation errors):** `graphics_metal_helpers.h` used ObjC types (`NSUInteger`, `NSError*`, `MTLViewport`) before `<Metal/Metal.h>` was imported. Replaced with plain C equivalents (`unsigned long`, `void**`, `const double vp[6]`). `.m` file casts back internally.
 
-**Fix 3 — Shader lifecycle:** `font_create()` obtained fallback shaders via `graphics_get_text_shaders()` then destroyed them with `graphics_destroyshader()`, invalidating the pointers used by the pipeline. Removed the destroy calls for backend-owned shaders.
+**Fix 2 — AGX GPU crash (texture access):** Apple M1 Max GPU driver does not respond to `contents` or `replaceBytesInRegion:` on textures with `MTLStorageModeShared`. Changed texture storage to `MTLStorageModePrivate` and replaced direct CPU access with staging buffer + blit encoder pattern (`copyFromBuffer:toTexture:` via `MTLBlitCommandEncoder`).
 
-**Fix 4 — NDC Y-axis flip:** `font_pixel_to_ndc()` had the formula `*out_y = -1.0f + (py / (float)h) * 2.0f` which maps pixel-y=0 (top) to NDC y=-1 (bottom). Corrected to `*out_y = 1.0f - (py / (float)h) * 2.0f` to map top-left pixel origin to top-left NDC origin. Text now appears at the expected screen position.
+**Fix 3 — Sampler binding:** `graphics_bindtexture()` was a no-op. Added `g_defaultSampler` creation in `graphics_init()` (linear filter, repeat addressing). `graphics_bindtexture()` now calls `metal_encoder_set_fragment_texture()` and `metal_encoder_set_fragment_sampler_state()`.
 
-**Fix 5 — Glyph alpha channel mismatch (root cause of white rectangles):** FreeType glyph data stores alpha in the 4th byte (.a), but the text fragment shader read `.r` (1st byte) which is always 255. Changed `tex.sample(...).r` to `tex.sample(...).a`. White rectangles resolved — text now renders correctly.
+**Fix 4 — Shader lifecycle:** `font_create()` obtained fallback shaders via `graphics_get_text_shaders()` then destroyed them with `graphics_destroyshader()`, invalidating the pointers used by the pipeline. Removed the destroy calls for backend-owned shaders.
 
-**Fix 6 — Depth format conditional:** The text pipeline (depthTest=0, depthWrite=0) still specified `MTLPixelFormatDepth32Float` as the depth attachment pixel format, but no depth texture was created. Changed pipeline creation to only set `depthAttachmentPixelFormat` when depth test or depth write is enabled.
+**Fix 5 — NDC Y-axis flip:** `font_pixel_to_ndc()` had the formula `*out_y = -1.0f + (py / (float)h) * 2.0f` which maps pixel-y=0 (top) to NDC y=-1 (bottom). Corrected to `*out_y = 1.0f - (py / (float)h) * 2.0f` to map top-left pixel origin to top-left NDC origin. Text now appears at the expected screen position.
+
+**Fix 6 — Glyph alpha channel mismatch (root cause of white rectangles):** FreeType glyph data stores alpha in the 4th byte (.a), but the text fragment shader read `.r` (1st byte) which is always 255. Changed `tex.sample(...).r` to `tex.sample(...).a`. White rectangles resolved — text now renders correctly.
+
+**Fix 7 — Depth format conditional:** The text pipeline (depthTest=0, depthWrite=0) still specified `MTLPixelFormatDepth32Float` as the depth attachment pixel format, but no depth texture was created. Changed pipeline creation to only set `depthAttachmentPixelFormat` when depth test or depth write is enabled.
 
 ---
 
@@ -84,53 +88,59 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
            → job_submit(draw)  → job_wait(draw)  → graphics_present()
 ```
 
-## Metal Backend Status (2026-07-28)
+## Metal Backend Status (2026-07-28, post-fix session)
 
-The Metal backend (`src/graphics_metal.mm`, ~800 lines) is a partial port of the Vulkan backend with significant work-in-progress:
+The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the Vulkan backend. FPS text rendering is now working.
 
 ### Completed
 - Device initialization, command queue, swapchain via CAMetalLayer
 - Basic shader compilation (vertex_main/fragment_main entry points)
 - Vertex/index buffer creation, texture creation and updates
-- Basic draw calls (non-instanced, non-indexed)
+- Texture binding + sampler binding (`graphics_bindtexture()`)
 - Pipeline creation (vertex descriptor, depth-stencil state, render pipeline state)
 - Render loop (predraw → draw calls → postdraw → present)
+- **FPS text rendering via embedded MSL fallback shaders** ✅
+- **Font atlas texture upload** via staging buffer + blit encoder ✅
+- **Alpha channel glyph rendering** (FreeType alpha in `.a` channel) ✅
+- **NDC-correct glyph positioning** (Y-axis flip fixed) ✅
 
-### Refactoring In Progress
-- Extracting direct Metal message sends into C wrappers in `graphics_metal_helpers.m` to work around ObjC++ dispatch issues
-- Texture storage mode changed to `MTLStorageModeShared` for CPU write access on Apple Silicon
+### Refactoring Completed
+- Extracted direct Metal message sends into C wrappers in `graphics_metal_helpers.m` to work around ObjC++ dispatch issues
+- Texture storage mode: `MTLStorageModePrivate` + blit encoder upload (fixes AGX GPU crash)
 - `metal_buffer_update()` wraps `memcpy([buf contents], data, size)`
-- `metal_texture_update_region()` uses row-by-row `memcpy` via `contents` pointer (avoids `replaceBytesInRegion:`)
+- `metal_texture_update_region()` uses staging buffer + blit encoder
 - NOT YET wrapped: `[g_currentCommandBuffer release]`, `MTLVertexDescriptor` creation, `MTLRenderPassDescriptor` creation
 
 ### Same P0 Issues as Vulkan
-- `graphics_drawmodel()` and `graphics_draw_buffers()` both `(void)transform4x4` — transform matrices are discarded
-- `graphics_draw_instanced()` recently removed the `(void)transforms4x4` cast but still doesn't upload transforms to GPU
+- ~~`graphics_drawmodel()` binds `g_uniformBuffer` at index 1 but **never copies matrix data** into it — shader expects `[[buffer(0)]]`~~ ✅ **Fixed** — matrix copied into `g_uniformBuffer`, shader changed to `[[buffer(1)]]` to avoid vertex descriptor conflict
+- ~~`graphics_draw_instanced()` still `(void)transforms4x4` — transforms discarded~~ ✅ **Fixed** — matrix uploaded, instanceCount passed through
+- ~~`graphics_draw_buffers()` still `(void)transform4x4` — transforms discarded~~ ✅ **Fixed** — matrix uploaded
 - `graphics_material_set_mat4()` stores matrix CPU-side with no upload path
 - No uniform buffer binding mechanism exists in the header API
+- `graphics_setmaterial()` is a no-op `(void)mat`
 
 ### Metal-Specific Issues
 - `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
-- `graphics_setmaterial()` is a no-op `(void)mat`
-- `graphics_bindtexture()` is a no-op
-- Font rendering path (`font.c`/`font_batch_print`) relies on Vulkan's bindless descriptor set — no Metal equivalent exists yet, so font rendering likely does not work on macOS
+- No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
 
 ---
 
 ## 🔴 Critical Issues
 
-### P0 — Blocker (Rendering Broken)
-1. **Model Transform Matrices Ignored** — `graphics_drawmodel()` and `graphics_draw_instanced()` both cast `transform4x4`/`transforms4x4` to `(void)` at lines 1797 and 1836 of `graphics_vulkan.cpp`. The matrix is never uploaded to the GPU. Every model renders at origin with identity transform. **Same bug exists in Metal backend.**
-2. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
-3. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
-4. **Root Cause: Pipeline Layout Gap** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
+### P0 — Blocker (3D Rendering Broken)
+1. ~~**Model Transform Matrices Ignored (Metal)** — `graphics_drawmodel()` binds `g_uniformBuffer` at index 1 but never copies `transform4x4` data into it. The default vertex shader expects the matrix at `[[buffer(0)]]`. **Two bugs: wrong binding index + no data upload.**~~ ✅ **Fixed** — matrix copied into `g_uniformBuffer`, shader changed to `[[buffer(1)]]` to avoid vertex descriptor conflict.
+2. ~~**`graphics_draw_instanced()` Discards Transforms (Metal)** — `(void)transforms4x4` at line 786. Instance transforms never reach GPU.~~ ✅ **Fixed** — matrix uploaded, instanceCount passed through.
+3. ~~**`graphics_draw_buffers()` Discards Transforms (Metal)** — `(void)transform4x4` at line 817. Transform never reaches GPU.~~ ✅ **Fixed** — matrix uploaded.
+4. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
+5. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
+6. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
 
 ### P1 — High Priority
-5. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
+7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
 
 ### P2 — Medium Priority
-6. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
-7. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
+8. **No Framebuffer/Render Target Abstraction** — Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing.
+9. **No Skeletal Animation** — Assimp animation data (`mAnimations`, `mBones`) is completely ignored.
 
 ---
 
@@ -257,4 +267,6 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ---
 
 ## Rating: 5/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. However, **critical rendering pipeline defects** (transform matrices discarded, no uniform buffer binding, material data never uploaded) mean the engine cannot render meaningful 3D content. These P0 issues must be resolved before any 3D application can function. The Metal backend is even less complete than Vulkan, with multiple no-op stubs that prevent font rendering and material binding.
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. However, **critical rendering pipeline defects** (transform matrices discarded, no uniform buffer binding, material data never uploaded) mean the engine cannot render meaningful 3D content. These P0 issues must be resolved before any 3D application can function. 
+
+**Metal backend progress:** FPS text rendering is working. The remaining P0 issues in the Metal backend are the same as Vulkan — transform matrices never reach the GPU. The fix is surgical: copy matrix data into `g_uniformBuffer` and bind at the correct shader buffer index.

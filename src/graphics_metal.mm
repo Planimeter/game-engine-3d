@@ -552,7 +552,7 @@ void graphics_init() {
         "\n"
         "vertex VertexOutput vertex_main(\n"
         "    VertexInput v [[stage_in]],\n"
-        "    constant float4x4 &modelViewProj [[buffer(0)]]\n"
+        "    constant float4x4 &modelViewProj [[buffer(1)]]\n"
         ") {\n"
         "    VertexOutput out;\n"
         "    out.position = modelViewProj * float4(v.position, 1.0);\n"
@@ -758,16 +758,18 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_FULL, state);
     if (p) graphics_bindpipeline(p);
 
+    /* Upload transform matrix to uniform buffer and bind at index 1 */
+    if (transform4x4 && g_uniformBuffer) {
+        memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64);
+        metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
+
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
 
         if (mesh->vertexBuffer) {
             MetalBuffer *vb = (MetalBuffer *)mesh->vertexBuffer;
             metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
-        }
-
-        if (transform4x4) {
-            metal_encoder_set_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
         }
 
         if (mesh->indexBuffer && mesh->indexCount > 0) {
@@ -783,7 +785,6 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
 }
 
 void graphics_draw_instanced(Model *model, Material mat, const float *transforms4x4, size_t count) {
-    (void)transforms4x4;
     if (!model || !g_currentEncoder) return;
 
     Shader vertShader = mat ? mat : (Shader)g_defaultVertShader;
@@ -793,6 +794,12 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
     Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_FULL, state);
     if (p) graphics_bindpipeline(p);
+
+    /* Upload first transform to uniform buffer and bind at index 1 */
+    if (transforms4x4 && g_uniformBuffer) {
+        memcpy(metal_buffer_get_contents(g_uniformBuffer), transforms4x4, 64);
+        metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
@@ -806,7 +813,7 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
             MetalBuffer *ib = (MetalBuffer *)mesh->indexBuffer;
             metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
                                                   mesh->indexCount, MTLIndexTypeUInt32,
-                                                  ib->buffer, 0, 1);
+                                                  ib->buffer, 0, (unsigned long)count);
         }
     }
 }
@@ -814,11 +821,16 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
 void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t indexCount,
                            Material mat, const float *transform4x4) {
     (void)mat;
-    (void)transform4x4;
     if (!g_currentEncoder || !vertexBuffer) return;
 
     MetalBuffer *vb = (MetalBuffer *)vertexBuffer;
     metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
+
+    /* Upload transform matrix to uniform buffer and bind at index 1 */
+    if (transform4x4 && g_uniformBuffer) {
+        memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64);
+        metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
 
     if (indexBuffer && indexCount > 0) {
         MetalBuffer *ib = (MetalBuffer *)indexBuffer;
