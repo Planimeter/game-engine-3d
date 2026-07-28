@@ -310,6 +310,8 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ---
 
 ## Rating: 8/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **All P0 rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix), has a proper uniform buffer binding API, and a working material system that packs uniforms into per-material GPU buffers. The Vulkan backend still needs pipeline layout rework to support UBOs. Remaining P1: shader variant system is a no-op.
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **All P0 rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix), has a proper uniform buffer binding API, and a working material system that packs uniforms into per-material GPU buffers. The Vulkan backend still needs pipeline layout rework to support UBOs (P0). Remaining P1: shader variant system is a no-op.
 
 **Metal backend progress:** FPS text + spinning cube + uniform buffer binding API + material system is working. No remaining P0 issues in Metal.
+
+**Last commit:** `7ea9d733` — Implement material system in Metal backend (Fix 15)
