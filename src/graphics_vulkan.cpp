@@ -100,6 +100,16 @@ static VkDescriptorPool bindlessDescriptorPool;
 static VkDescriptorSetLayout bindlessDescriptorSetLayout;
 static VkDescriptorSet bindlessDescriptorSet;
 
+/* UBO descriptor set (set 1) — bindless uniform buffers for transform + material data */
+#define MAX_UBO_SLOTS 16
+static VkDescriptorPool uboDescriptorPool;
+static VkDescriptorSetLayout uboDescriptorSetLayout;
+static VkDescriptorSet uboDescriptorSet;
+
+/* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
+#define UNIFORM_BUFFER_SIZE 4096
+static GPUBuffer *g_uniformBuffer = NULL;
+
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
 
@@ -682,6 +692,57 @@ static void graphics_createbindlessdescriptors()
     }
 }
 
+/* Create UBO descriptor set (set 1) with MAX_UBO_SLOTS uniform buffer descriptors.
+ * Each slot can be bound to a VkBuffer via vkUpdateDescriptorSets.
+ * Used for transforms (slot 0), material data (slot 1), etc. */
+static void graphics_createubodescriptors()
+{
+    VkDescriptorSetLayoutBinding binding = {};
+    VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    VkDescriptorPoolSize poolSize = {};
+    VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    VkResult result;
+
+    /* One binding with MAX_UBO_SLOTS descriptors for uniform buffers */
+    binding.binding = 0;
+    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    binding.descriptorCount = MAX_UBO_SLOTS;
+    binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &binding;
+
+    result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &uboDescriptorSetLayout);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create UBO descriptor set layout: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSize.descriptorCount = MAX_UBO_SLOTS;
+
+    poolInfo.maxSets = 1;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+
+    result = vkCreateDescriptorPool(device, &poolInfo, NULL, &uboDescriptorPool);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create UBO descriptor pool: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+
+    allocInfo.descriptorPool = uboDescriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &uboDescriptorSetLayout;
+
+    result = vkAllocateDescriptorSets(device, &allocInfo, &uboDescriptorSet);
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to allocate UBO descriptor set: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-creation */
 static void graphics_createrenderpass()
 {
@@ -890,8 +951,10 @@ static void graphics_creategraphicspipeline()
     dynamicState.dynamicStateCount              = 2;
     dynamicState.pDynamicStates                 = states;
 
-    pipelineLayoutCreateInfo.setLayoutCount = 1;
-    pipelineLayoutCreateInfo.pSetLayouts = &bindlessDescriptorSetLayout;
+    VkDescriptorSetLayout setLayouts[2] = { bindlessDescriptorSetLayout, uboDescriptorSetLayout };
+
+    pipelineLayoutCreateInfo.setLayoutCount = 2;
+    pipelineLayoutCreateInfo.pSetLayouts = setLayouts;
 
     if (pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, pipelineLayout, NULL);
@@ -1259,6 +1322,10 @@ void graphics_init()
     graphics_createsemaphores();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html */
     graphics_createbindlessdescriptors();
+    /* UBO descriptor set for uniform buffers */
+    graphics_createubodescriptors();
+    /* Create global uniform buffer for transform matrices */
+    g_uniformBuffer = (GPUBuffer *)graphics_createuniformbuffer(UNIFORM_BUFFER_SIZE);
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
@@ -1389,6 +1456,10 @@ void graphics_predraw()
     vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
                            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
 
+    /* Bind UBO descriptor set at set 1 */
+    vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                           pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+
     viewport.width    = w;
     viewport.height   = h;
     viewport.minDepth = 0.0f;
@@ -1444,6 +1515,8 @@ typedef struct {
     size_t textureCount;
     float mat4[16];
     int hasMat4;
+    Buffer uniformBuffer;  /* GPU buffer for packed material data */
+    int dirty;
 } GPUMaterial;
 
 typedef struct {
@@ -1794,7 +1867,6 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
     if (mat) {
         graphics_setmaterial(mat);
     }
-    (void)transform4x4;
 
     if (!model || graphics_isminimized()) {
         return;
@@ -1803,6 +1875,12 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
     GPUModel *gpuModel = (GPUModel *)model;
     if (gpuModel->meshCount == 0) {
         return;
+    }
+
+    /* Upload transform matrix to global uniform buffer and bind at slot 0 */
+    if (transform4x4 && g_uniformBuffer) {
+        graphics_updatebuffer((Buffer)g_uniformBuffer, transform4x4, 64);
+        graphics_binduniformbuffer((Buffer)g_uniformBuffer, 0);
     }
 
     // Bind default 3D pipeline if no custom pipeline is bound
@@ -1833,7 +1911,6 @@ void graphics_draw_instanced(Model *model,
     if (mat) {
         graphics_setmaterial(mat);
     }
-    (void)transforms4x4;
 
     if (!model || graphics_isminimized()) {
         return;
@@ -1842,6 +1919,12 @@ void graphics_draw_instanced(Model *model,
     GPUModel *gpuModel = (GPUModel *)model;
     if (gpuModel->meshCount == 0) {
         return;
+    }
+
+    /* Upload first transform to global uniform buffer and bind at slot 0 */
+    if (transforms4x4 && g_uniformBuffer) {
+        graphics_updatebuffer((Buffer)g_uniformBuffer, transforms4x4, 64);
+        graphics_binduniformbuffer((Buffer)g_uniformBuffer, 0);
     }
 
     // Bind default 3D pipeline if no custom pipeline is bound
@@ -1870,13 +1953,17 @@ void graphics_draw_buffers(Buffer vertexBuffer,
     GPUBuffer *index = (GPUBuffer *)indexBuffer;
     VkDeviceSize offsets[] = {0};
 
-    (void)transform4x4;
-
     if (mat) {
         graphics_setmaterial(mat);
     }
     if (!vertex || !index || indexCount == 0 || graphics_isminimized()) {
         return;
+    }
+
+    /* Upload transform matrix to global uniform buffer and bind at slot 0 */
+    if (transform4x4 && g_uniformBuffer) {
+        graphics_updatebuffer((Buffer)g_uniformBuffer, transform4x4, 64);
+        graphics_binduniformbuffer((Buffer)g_uniformBuffer, 0);
     }
 
     vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertex->buffer, offsets);
@@ -1892,6 +1979,8 @@ Material graphics_creatematerial(Shader shader)
     }
 
     material->shader = shader;
+    material->uniformBuffer = graphics_createuniformbuffer(1024);
+    material->dirty = 1;
     return material;
 }
 
@@ -1901,6 +1990,8 @@ void graphics_destroymaterial(Material mat)
         return;
     }
 
+    GPUMaterial *m = (GPUMaterial *)mat;
+    if (m->uniformBuffer) graphics_destroybuffer(m->uniformBuffer);
     free(mat);
 }
 
@@ -1935,6 +2026,7 @@ void graphics_material_set_float(Material mat, const char *name, float value)
     for (size_t i = 0; i < material->floatCount; i++) {
         if (strcmp(material->floats[i].name, name) == 0) {
             material->floats[i].value = value;
+            material->dirty = 1;
             return;
         }
     }
@@ -1943,6 +2035,7 @@ void graphics_material_set_float(Material mat, const char *name, float value)
         MaterialFloat *entry = &material->floats[material->floatCount++];
         graphics_copy_name(entry->name, sizeof(entry->name), name);
         entry->value = value;
+        material->dirty = 1;
     }
 }
 
@@ -1959,6 +2052,7 @@ void graphics_material_set_vec3(Material mat, const char *name,
             material->vec3s[i].value[0] = x;
             material->vec3s[i].value[1] = y;
             material->vec3s[i].value[2] = z;
+            material->dirty = 1;
             return;
         }
     }
@@ -1969,6 +2063,7 @@ void graphics_material_set_vec3(Material mat, const char *name,
         entry->value[0] = x;
         entry->value[1] = y;
         entry->value[2] = z;
+        material->dirty = 1;
     }
 }
 
@@ -1981,6 +2076,54 @@ void graphics_material_set_mat4(Material mat, const float *matrix4x4)
 
     memcpy(material->mat4, matrix4x4, sizeof(material->mat4));
     material->hasMat4 = 1;
+    material->dirty = 1;
+}
+
+/* Pack material uniforms into the GPU buffer.
+ * Layout: [floats (tight)] [vec3s (padded to vec4)] [mat4]
+ * Same layout as Metal backend's metal_material_pack(). */
+static void vulkan_material_pack(GPUMaterial *m) {
+    if (!m || !m->dirty || !m->uniformBuffer) return;
+
+    GPUBuffer *ub = (GPUBuffer *)m->uniformBuffer;
+    void *mappedData;
+    VkResult result = vmaMapMemory(allocator, ub->allocation, &mappedData);
+    if (result != VK_SUCCESS) return;
+
+    float *dst = (float *)mappedData;
+    size_t offset = 0;
+
+    /* Write floats — tightly packed */
+    for (size_t i = 0; i < m->floatCount && i < MAX_MATERIAL_FLOATS; i++) {
+        dst[offset++] = m->floats[i].value;
+    }
+    for (size_t i = m->floatCount; i < MAX_MATERIAL_FLOATS; i++) {
+        dst[offset++] = 0.0f;
+    }
+
+    /* Write vec3s — each padded to vec4 */
+    for (size_t i = 0; i < m->vec3Count && i < MAX_MATERIAL_VEC3S; i++) {
+        dst[offset++] = m->vec3s[i].value[0];
+        dst[offset++] = m->vec3s[i].value[1];
+        dst[offset++] = m->vec3s[i].value[2];
+        dst[offset++] = 0.0f;
+    }
+    for (size_t i = m->vec3Count; i < MAX_MATERIAL_VEC3S; i++) {
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+    }
+
+    /* Write mat4 if set */
+    if (m->hasMat4) {
+        memcpy(&dst[offset], m->mat4, 16 * sizeof(float));
+    } else {
+        memset(&dst[offset], 0, 16 * sizeof(float));
+    }
+
+    vmaUnmapMemory(allocator, ub->allocation);
+    m->dirty = 0;
 }
 
 void graphics_setmaterial(Material mat)
@@ -1988,10 +2131,19 @@ void graphics_setmaterial(Material mat)
     GPUMaterial *material = (GPUMaterial *)mat;
     currentMaterial = material;
 
-    if (material) {
-        for (size_t i = 0; i < material->textureCount; i++) {
-            graphics_bindtexture(material->textures[i].texture, (unsigned)i);
-        }
+    if (!material) {
+        return;
+    }
+
+    /* Pack dirty uniforms into GPU buffer and bind at UBO slot 1 */
+    vulkan_material_pack(material);
+    if (material->uniformBuffer) {
+        graphics_binduniformbuffer(material->uniformBuffer, 1);
+    }
+
+    /* Bind textures */
+    for (size_t i = 0; i < material->textureCount; i++) {
+        graphics_bindtexture(material->textures[i].texture, (unsigned)i);
     }
 }
 
@@ -2129,8 +2281,26 @@ void graphics_destroybuffer(Buffer buf)
 
 void graphics_binduniformbuffer(Buffer buf, unsigned slot)
 {
-    (void)buf;
-    (void)slot;
+    GPUBuffer *buffer = (GPUBuffer *)buf;
+    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    VkDescriptorBufferInfo bufferInfo;
+
+    if (!buffer || slot >= MAX_UBO_SLOTS) {
+        return;
+    }
+
+    bufferInfo.buffer = buffer->buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = buffer->size;
+
+    write.dstSet = uboDescriptorSet;
+    write.dstBinding = 0;
+    write.dstArrayElement = slot;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.pBufferInfo = &bufferInfo;
+
+    vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
 }
 
 Texture graphics_createtexture(Texture src)
@@ -2579,6 +2749,17 @@ void graphics_shutdown(void)
         }
         if (bindlessDescriptorPool != VK_NULL_HANDLE) {
             vkDestroyDescriptorPool(device, bindlessDescriptorPool, NULL);
+        }
+        if (uboDescriptorSetLayout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, uboDescriptorSetLayout, NULL);
+        }
+        if (uboDescriptorPool != VK_NULL_HANDLE) {
+            vkDestroyDescriptorPool(device, uboDescriptorPool, NULL);
+        }
+
+        if (g_uniformBuffer) {
+            graphics_destroybuffer((Buffer)g_uniformBuffer);
+            g_uniformBuffer = NULL;
         }
 
         graphics_destroysemaphores();
