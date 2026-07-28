@@ -517,8 +517,8 @@ Font *font_create(const char *filepath, int size)
     }
 
     if (g_text_spv_ready) {
-        Shader vert = graphics_createshader((const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
-        Shader frag = graphics_createshader((const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
+        Shader vert = graphics_createshader(SHADER_STAGE_VERTEX, (const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
+        Shader frag = graphics_createshader(SHADER_STAGE_FRAGMENT, (const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
         
         if (vert && frag) {
             RasterState state = {0};

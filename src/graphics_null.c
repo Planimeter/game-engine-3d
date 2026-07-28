@@ -48,11 +48,10 @@ void graphics_init()
     atexit(graphics_shutdown);
 }
 
-Shader graphics_createshader(const char *shader, size_t size,
+Shader graphics_createshader(ShaderStage stage, const char *shader, size_t size,
                              const char **defines, size_t defineCount)
 {
-    (void)defines;
-    (void)defineCount;
+    (void)stage; (void)defines; (void)defineCount;
     (void)shader;
     (void)size;
     return NULL;

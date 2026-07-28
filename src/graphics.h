@@ -18,6 +18,11 @@ typedef void *RenderPass;
 typedef void *Pipeline;
 
 typedef enum {
+	SHADER_STAGE_VERTEX,
+	SHADER_STAGE_FRAGMENT
+} ShaderStage;
+
+typedef enum {
 	BLEND_NONE,
 	BLEND_ALPHA,
 	BLEND_ADD,
@@ -47,7 +52,8 @@ void        graphics_present();
 
 void        graphics_setshader(Shader vertShader, Shader fragShader);
 
-Shader      graphics_createshader(const char *source, size_t size,
+Shader      graphics_createshader(ShaderStage stage,
+                                  const char *source, size_t size,
                                   const char **defines, size_t defineCount);
 void        graphics_destroyshader(Shader shader);
 Material    graphics_creatematerial(Shader shader);

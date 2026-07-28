@@ -178,9 +178,9 @@ static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
     return (id<MTLDepthStencilState>)metal_device_new_depth_stencil_state(g_device, desc);
 }
 
-Shader graphics_createshader(const char *source, size_t size,
+Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
                              const char **defines, size_t defineCount) {
-    (void)defines; (void)defineCount;
+    (void)stage; (void)defines; (void)defineCount;
 
     MetalShader *shader = (MetalShader *)calloc(1, sizeof(MetalShader));
     if (!shader) return NULL;
@@ -725,8 +725,8 @@ void graphics_init() {
         "    return float4(in.normal * 0.5 + 0.5, 1.0);\n"
         "}\n";
 
-    g_defaultVertShader = (MetalShader *)graphics_createshader(default3dCombined, strlen(default3dCombined), NULL, 0);
-    g_defaultFragShader = (MetalShader *)graphics_createshader(default3dCombined, strlen(default3dCombined), NULL, 0);
+    g_defaultVertShader = (MetalShader *)graphics_createshader(SHADER_STAGE_VERTEX, default3dCombined, strlen(default3dCombined), NULL, 0);
+    g_defaultFragShader = (MetalShader *)graphics_createshader(SHADER_STAGE_FRAGMENT, default3dCombined, strlen(default3dCombined), NULL, 0);
 
     /* Embedded text shaders (combined vertex + fragment in one MSL source) */
     const char *textCombined =
@@ -765,8 +765,8 @@ void graphics_init() {
         "    return float4(1.0, 1.0, 1.0, alpha);\n"
         "}\n";
 
-    g_textVertShader = (MetalShader *)graphics_createshader(textCombined, strlen(textCombined), NULL, 0);
-    g_textFragShader = (MetalShader *)graphics_createshader(textCombined, strlen(textCombined), NULL, 0);
+    g_textVertShader = (MetalShader *)graphics_createshader(SHADER_STAGE_VERTEX, textCombined, strlen(textCombined), NULL, 0);
+    g_textFragShader = (MetalShader *)graphics_createshader(SHADER_STAGE_FRAGMENT, textCombined, strlen(textCombined), NULL, 0);
 }
 
 void graphics_get_text_shaders(Shader *out_vert, Shader *out_frag) {
