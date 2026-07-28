@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.22)
 
 # set the project name
 project(game LANGUAGES C CXX OBJC OBJCXX)
@@ -94,11 +94,56 @@ add_subdirectory(third_party/freetype)
 # add the HarfBuzz library
 add_subdirectory(third_party/harfbuzz-12.3.2)
 # add the shaderc library
-# set(SHADERC_SKIP_TESTS ON CACHE BOOL "" FORCE)
-# set(SHADERC_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
-# set(SHADERC_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
-# set(SHADERC_SKIP_COPYRIGHT_CHECK ON CACHE BOOL "" FORCE)
-# add_subdirectory(third_party/shaderc-2026.1)
+include(FetchContent)
+
+# shaderc requires glslang, SPIRV-Headers, and SPIRV-Tools
+# which are not vendored — fetch them at configure time.
+# Use FetchContent_Populate (not MakeAvailable) to avoid creating targets
+# before shaderc's third_party/CMakeLists.txt adds them as subdirectories.
+# NOTE: Avoid hyphens in FetchContent names — CMake cannot dereference
+# variables like ${SPIRV-Tools_SOURCE_DIR} (hyphen = subtraction operator).
+set(SHADERC_GLSLANG_REVISION "f0bd0257c308b9a26562c1a30c4748a0219cc951")
+set(SHADERC_SPIRV_HEADERS_REVISION "04f10f650d514df88b76d25e83db360142c7b174")
+set(SHADERC_SPIRV_TOOLS_REVISION "fbe4f3ad913c44fe8700545f8ffe35d1382b7093")
+
+FetchContent_Declare(
+  glslang
+  GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
+  GIT_TAG ${SHADERC_GLSLANG_REVISION}
+)
+FetchContent_Declare(
+  spirv_headers
+  GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
+  GIT_TAG ${SHADERC_SPIRV_HEADERS_REVISION}
+)
+FetchContent_Declare(
+  spirv_tools
+  GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
+  GIT_TAG ${SHADERC_SPIRV_TOOLS_REVISION}
+)
+
+# Download only — do not add_subdirectory (shaderc handles that).
+FetchContent_Populate(glslang)
+FetchContent_Populate(spirv_headers)
+FetchContent_Populate(spirv_tools)
+
+# Point shaderc's third_party resolver at the fetched sources
+set(SHADERC_GLSLANG_DIR "${glslang_SOURCE_DIR}" CACHE INTERNAL "")
+set(SHADERC_SPIRV_HEADERS_DIR "${spirv_headers_SOURCE_DIR}" CACHE INTERNAL "")
+set(SHADERC_SPIRV_TOOLS_DIR "${spirv_tools_SOURCE_DIR}" CACHE INTERNAL "")
+# SPIRV-Tools' external/CMakeLists.txt checks SPIRV-Headers_SOURCE_DIR
+# (with hyphen). Set it manually since we use underscores for FetchContent.
+set("SPIRV-Headers_SOURCE_DIR" "${spirv_headers_SOURCE_DIR}" CACHE INTERNAL "")
+
+# glslang's ENABLE_OPT defaults to ON but requires SPIRV-Tools-opt,
+# which we don't have as a standalone target. Disable it.
+set(ENABLE_OPT OFF CACHE BOOL "" FORCE)
+
+set(SHADERC_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SHADERC_SKIP_COPYRIGHT_CHECK ON CACHE BOOL "" FORCE)
+add_subdirectory(third_party/shaderc-2026.1)
 # add the Assimp library
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
@@ -247,6 +292,7 @@ target_link_libraries(game PUBLIC
     glm::glm
     freetype
     harfbuzz
+    shaderc
     assimp::assimp
     OpenAL
     libcef_lib
