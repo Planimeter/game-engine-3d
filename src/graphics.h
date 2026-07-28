@@ -84,6 +84,7 @@ Buffer      graphics_createvertexbuffer(const void *data, size_t size);
 Buffer      graphics_createindexbuffer(const void *data, size_t size);
 Buffer      graphics_createuniformbuffer(size_t size);
 void        graphics_updatebuffer(Buffer buf, const void *data, size_t size);
+void        graphics_binduniformbuffer(Buffer buf, unsigned slot);
 void        graphics_destroybuffer(Buffer buf);
 
 Texture     graphics_createtexture(Texture src);

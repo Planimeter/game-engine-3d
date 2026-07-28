@@ -2127,6 +2127,12 @@ void graphics_destroybuffer(Buffer buf)
     free(buffer);
 }
 
+void graphics_binduniformbuffer(Buffer buf, unsigned slot)
+{
+    (void)buf;
+    (void)slot;
+}
+
 Texture graphics_createtexture(Texture src)
 {
     unsigned char pixel[4] = { 255, 255, 255, 255 };

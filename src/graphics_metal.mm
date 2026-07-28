@@ -281,6 +281,12 @@ void graphics_destroybuffer(Buffer buf) {
     free(mb);
 }
 
+void graphics_binduniformbuffer(Buffer buf, unsigned slot) {
+    if (!buf || !g_currentEncoder) return;
+    MetalBuffer *mb = (MetalBuffer *)buf;
+    metal_encoder_set_buffer(g_currentEncoder, mb->buffer, 0, (unsigned long)slot);
+}
+
 /* ------------------------------------------------------------------ */
 /*  Texture management                                                 */
 /* ------------------------------------------------------------------ */
