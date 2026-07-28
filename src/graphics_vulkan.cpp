@@ -28,6 +28,8 @@
 #include <glm/vec3.hpp>
 #include "model.h"
 
+#include <shaderc/shaderc.h>
+
 /* Constants */
 static const uint32_t MIN_SWAPCHAIN_IMAGES = 2;
 static const float CLEAR_COLOR[4] = {0.01f, 0.01f, 0.033f, 1.0f};
@@ -70,6 +72,9 @@ static VkFramebuffer *framebuffers;
 /* 9. Shaders */
 static Shader vertShader;
 static Shader fragShader;
+
+/* Shaderc compiler for runtime GLSL→SPIR-V compilation */
+static shaderc_compiler_t g_shaderc_compiler;
 
 /* 10. Pipelines */
 static VkPipelineLayout pipelineLayout;
@@ -849,19 +854,19 @@ static void graphics_createframebuffers()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
 static void graphics_createshaders()
 {
-    char   *vertBinary;
+    char   *vertSource;
     size_t  vertSize;
-    char   *fragBinary;
+    char   *fragSource;
     size_t  fragSize;
 
-    vertSize   = filesystem_fileread((void **)&vertBinary, "shaders/triangle.vert.spv");
-    fragSize   = filesystem_fileread((void **)&fragBinary, "shaders/triangle.frag.spv");
-    vertShader = graphics_createshader(vertBinary, vertSize, NULL, 0);
-    fragShader = graphics_createshader(fragBinary, fragSize, NULL, 0);
-    free(fragBinary);
-    fragBinary = NULL;
-    free(vertBinary);
-    vertBinary = NULL;
+    vertSize   = filesystem_fileread((void **)&vertSource, "shaders/triangle.vert");
+    fragSize   = filesystem_fileread((void **)&fragSource, "shaders/triangle.frag");
+    vertShader = graphics_createshader(SHADER_STAGE_VERTEX, vertSource, vertSize, NULL, 0);
+    fragShader = graphics_createshader(SHADER_STAGE_FRAGMENT, fragSource, fragSize, NULL, 0);
+    free(fragSource);
+    fragSource = NULL;
+    free(vertSource);
+    vertSource = NULL;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
@@ -1326,6 +1331,13 @@ void graphics_init()
     graphics_createubodescriptors();
     /* Create global uniform buffer for transform matrices */
     g_uniformBuffer = (GPUBuffer *)graphics_createuniformbuffer(UNIFORM_BUFFER_SIZE);
+    /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
+    g_shaderc_compiler = shaderc_compiler_initialize();
+    if (!g_shaderc_compiler) {
+        fprintf(stderr, "Failed to initialize shaderc compiler\n");
+        exit(EXIT_FAILURE);
+    }
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
     graphics_createshaders();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
@@ -1350,24 +1362,81 @@ void graphics_init()
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#vkCreateShaderModule */
-Shader graphics_createshader(const char *shader, size_t size,
+Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
                              const char **defines, size_t defineCount)
 {
-    (void)defines;
-    (void)defineCount;
+    /* Map ShaderStage to shaderc_shader_kind */
+    shaderc_shader_kind kind;
+    switch (stage) {
+        case SHADER_STAGE_VERTEX:
+            kind = shaderc_glsl_vertex_shader;
+            break;
+        case SHADER_STAGE_FRAGMENT:
+            kind = shaderc_glsl_fragment_shader;
+            break;
+        default:
+            fprintf(stderr, "Unknown shader stage: %d\n", stage);
+            exit(EXIT_FAILURE);
+    }
 
-    VkShaderModule shaderModule;
-    VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-
-    createInfo.codeSize = size;
-    createInfo.pCode    = (const uint32_t *)shader;
-
-    VkResult result = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create shader module: %d\n", result);
+    /* Set up compilation options */
+    shaderc_compile_options_t options = shaderc_compile_options_initialize();
+    if (!options) {
+        fprintf(stderr, "Failed to create shaderc compile options\n");
         exit(EXIT_FAILURE);
     }
 
+    shaderc_compile_options_set_target_env(
+        options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+    shaderc_compile_options_set_optimization_level(
+        options, shaderc_optimization_level_performance);
+
+    /* Add macro definitions */
+    for (size_t i = 0; i < defineCount; i++) {
+        const char *def = defines[i];
+        if (!def) continue;
+
+        /* Split "NAME=VALUE" at the first '=' */
+        const char *eq = strchr(def, '=');
+        if (eq) {
+            size_t nameLen = (size_t)(eq - def);
+            shaderc_compile_options_add_macro_definition(
+                options, def, nameLen, eq + 1, strlen(eq + 1));
+        } else {
+            shaderc_compile_options_add_macro_definition(
+                options, def, strlen(def), NULL, 0);
+        }
+    }
+
+    /* Compile GLSL to SPIR-V */
+    shaderc_compilation_result_t result = shaderc_compile_into_spv(
+        g_shaderc_compiler, source, size, kind, "shader", "main", options);
+
+    shaderc_compile_options_release(options);
+
+    if (shaderc_result_get_compilation_status(result) !=
+        shaderc_compilation_status_success)
+    {
+        fprintf(stderr, "Shader compilation failed:\n%s\n",
+                shaderc_result_get_error_message(result));
+        shaderc_result_release(result);
+        exit(EXIT_FAILURE);
+    }
+
+    /* Create VkShaderModule from compiled SPIR-V */
+    VkShaderModule shaderModule;
+    VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    createInfo.codeSize = shaderc_result_get_length(result);
+    createInfo.pCode    = (const uint32_t *)shaderc_result_get_bytes(result);
+
+    VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+    if (vkResult != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create shader module: %d\n", vkResult);
+        shaderc_result_release(result);
+        exit(EXIT_FAILURE);
+    }
+
+    shaderc_result_release(result);
     return shaderModule;
 }
 
