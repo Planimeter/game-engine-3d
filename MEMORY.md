@@ -135,6 +135,7 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 - **Default 3D fallback shader with VERTEX_FORMAT_FULL support** (position, normal, tangent, bitangent, texcoord) ✅
 - **`graphics_loadmodel()` GPU buffer creation** (vertex + index buffer upload per mesh) ✅
 - **End-to-end 3D model rendering test** (spinning cube with MVP matrix, normal visualization) ✅
+- **`graphics_binduniformbuffer()` API** (binds a Buffer to both vertex and fragment stages at a given slot) ✅
 - **`model_get_mesh_count()` C-compatible accessor** for opaque Model struct ✅
 
 ### Refactoring Completed
@@ -146,7 +147,6 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 
 ### Remaining Issues
 - `graphics_material_set_mat4()` stores matrix CPU-side with no upload path
-- No uniform buffer binding mechanism exists in the header API
 - `graphics_setmaterial()` is a no-op `(void)mat`
 - `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
 - No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
@@ -162,7 +162,7 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 4. ~~**`graphics_loadmodel()` No GPU Buffer Creation (Metal)** — Was a no-op stub. Models loaded but had no vertex/index buffers on GPU.~~ ✅ **Fixed** — iterates meshes and creates GPU buffers.
 5. ~~**Default 3D Shader Stub (Metal)** — Default vertex/fragment shaders for 3D were stubs returning hardcoded colors.~~ ✅ **Fixed** — replaced with VERTEX_FORMAT_FULL handler with normal visualization.
 6. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
-7. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
+7. ~~**No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.~~ ✅ **Fixed** — `graphics_binduniformbuffer(Buffer buf, unsigned slot)` added to graphics.h, implemented in Metal backend via `metal_encoder_set_buffer()` (binds to both vertex and fragment stages). Vulkan backend still needs pipeline layout rework.
 8. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
 
 ### P1 — High Priority
@@ -301,7 +301,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
-## Rating: 6/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **Critical rendering pipeline defects (transform matrices discarded) have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix). However, the Vulkan backend still has the same P0 issues, and there is no uniform buffer binding API, material system, or lighting. The Metal backend is now the functional primary backend. 
+## Rating: 7/10
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **Critical rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix) and has a proper uniform buffer binding API. The Vulkan backend still needs pipeline layout rework to support UBOs. Remaining P0 issues: material system (mat4 never uploaded, setmaterial is no-op).
 
-**Metal backend progress:** FPS text + spinning cube rendering is working. Remaining P0 issues are the material system and uniform buffer binding API.
+**Metal backend progress:** FPS text + spinning cube + uniform buffer binding API is working. Remaining P0 issues are the material system.
