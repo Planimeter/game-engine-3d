@@ -64,6 +64,8 @@ void filesystem_init(const char *argv0)
             PHYSFS_mount(cwd, "/", 1);
         }
     }
+    /* Mount system fonts for macOS */
+    PHYSFS_mount("/System/Library/Fonts", "Fonts", 0);
 #else
     PHYSFS_mount(".", NULL, 1);
 #endif

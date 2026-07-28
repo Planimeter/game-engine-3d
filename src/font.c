@@ -350,7 +350,7 @@ static Glyph *font_get_glyph(Font *font, uint32_t glyph_id)
 static void font_pixel_to_ndc(float px, float py, int w, int h, float *out_x, float *out_y)
 {
     *out_x = (px / (float)w) * 2.0f - 1.0f;
-    *out_y = -1.0f + (py / (float)h) * 2.0f;
+    *out_y = 1.0f - (py / (float)h) * 2.0f;
 }
 
 static void font_build_vertices(Font *font,
@@ -548,9 +548,7 @@ Font *font_create(const char *filepath, int size)
             
             font->pipeline = graphics_createpipeline(vert, frag, VERTEX_FORMAT_POS_UV, state);
         }
-        
-        if (vert) graphics_destroyshader(vert);
-        if (frag) graphics_destroyshader(frag);
+        /* Note: do not destroy vert/frag — they are owned by the graphics backend */
     }
 
     return font;

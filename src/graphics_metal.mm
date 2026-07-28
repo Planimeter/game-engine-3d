@@ -13,6 +13,7 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include "SDL3/SDL_metal.h"
+#include "graphics_metal_helpers.h"
 
 static const float CLEAR_COLOR[4] = {0.01f, 0.01f, 0.033f, 1.0f};
 
@@ -69,6 +70,9 @@ static int g_inPass = 0;
 static MetalPipeline *g_currentPipeline = NULL;
 static id<CAMetalDrawable> g_currentDrawable = nil;
 
+/* Default sampler */
+static id<MTLSamplerState> g_defaultSampler = nil;
+
 /* Uniform buffer */
 #define UNIFORM_BUFFER_SIZE 4096
 static id<MTLBuffer> g_uniformBuffer = nil;
@@ -86,7 +90,7 @@ static MetalShader *g_textVertShader = NULL;
 static MetalShader *g_textFragShader = NULL;
 
 static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
-    MTLVertexDescriptor *vd = [MTLVertexDescriptor vertexDescriptor];
+    MTLVertexDescriptor *vd = [[MTLVertexDescriptor alloc] init];
 
     switch (format) {
         case VERTEX_FORMAT_FULL: {
@@ -151,7 +155,7 @@ static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
     MTLDepthStencilDescriptor *desc = [[MTLDepthStencilDescriptor alloc] init];
     desc.depthCompareFunction = state.depthTest ? MTLCompareFunctionLess : MTLCompareFunctionAlways;
     desc.depthWriteEnabled = state.depthWrite;
-    return [g_device newDepthStencilStateWithDescriptor:desc];
+    return (id<MTLDepthStencilState>)metal_device_new_depth_stencil_state(g_device, desc);
 }
 
 Shader graphics_createshader(const char *source, size_t size,
@@ -166,9 +170,7 @@ Shader graphics_createshader(const char *source, size_t size,
     nullTerm[size] = '\0';
 
     NSError *error = nil;
-    id<MTLLibrary> library = [g_device newLibraryWithSource:[NSString stringWithUTF8String:nullTerm]
-                                                     options:nil
-                                                       error:&error];
+    id<MTLLibrary> library = (id<MTLLibrary>)metal_device_new_library(g_device, nullTerm, (void **)&error);
     free(nullTerm);
 
     if (!library) {
@@ -179,8 +181,8 @@ Shader graphics_createshader(const char *source, size_t size,
     }
 
     shader->library = library;
-    shader->vertFunc = [library newFunctionWithName:@"vertex_main"];
-    shader->fragFunc = [library newFunctionWithName:@"fragment_main"];
+    shader->vertFunc = (id<MTLFunction>)metal_library_new_function(library, "vertex_main");
+    shader->fragFunc = (id<MTLFunction>)metal_library_new_function(library, "fragment_main");
 
     if (!shader->vertFunc || !shader->fragFunc) {
         fprintf(stderr, "Metal: could not find vertex_main/fragment_main in shader\n");
@@ -218,9 +220,9 @@ void graphics_setmaterial(Material mat) { (void)mat; }
 /* ------------------------------------------------------------------ */
 
 Buffer graphics_createvertexbuffer(const void *data, size_t size) {
-    id<MTLBuffer> buf = [g_device newBufferWithLength:size options:MTLResourceStorageModeShared];
+    id<MTLBuffer> buf = (id<MTLBuffer>)metal_device_new_buffer(g_device, size, MTLResourceStorageModeShared);
     if (!buf) return NULL;
-    if (data) memcpy([buf contents], data, size);
+    if (data) memcpy(metal_buffer_get_contents(buf), data, size);
 
     MetalBuffer *mb = (MetalBuffer *)calloc(1, sizeof(MetalBuffer));
     mb->buffer = buf;
@@ -241,7 +243,7 @@ Buffer graphics_createindexbuffer(const void *data, size_t size) {
 }
 
 Buffer graphics_createuniformbuffer(size_t size) {
-    id<MTLBuffer> buf = [g_device newBufferWithLength:size options:MTLResourceStorageModeShared];
+    id<MTLBuffer> buf = (id<MTLBuffer>)metal_device_new_buffer(g_device, size, MTLResourceStorageModeShared);
     if (!buf) return NULL;
 
     MetalBuffer *mb = (MetalBuffer *)calloc(1, sizeof(MetalBuffer));
@@ -261,7 +263,7 @@ Buffer graphics_createuniformbuffer(size_t size) {
 void graphics_updatebuffer(Buffer buf, const void *data, size_t size) {
     if (!buf || !data) return;
     MetalBuffer *mb = (MetalBuffer *)buf;
-    memcpy([mb->buffer contents], data, size);
+    metal_buffer_update(mb->buffer, data, size);
 }
 
 void graphics_destroybuffer(Buffer buf) {
@@ -290,14 +292,17 @@ Texture graphics_createtexture_rgba(int width, int height, const unsigned char *
                                                                                      width:width
                                                                                     height:height
                                                                                     mipmapped:NO];
-    desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageShaderWrite;
+    desc.usage = MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;  /* Blit encoder handles upload, no CPU access needed */
 
-    id<MTLTexture> tex = [g_device newTextureWithDescriptor:desc];
+    id<MTLTexture> tex = (id<MTLTexture>)metal_device_new_texture(g_device, desc);
     if (!tex) return NULL;
 
     if (pixels) {
-        MTLRegion region = MTLRegionMake2D(0, 0, width, height);
-        [(id<MTLTexture>)tex replaceBytesInRegion:region mipmapLevel:0 withBytes:pixels bytesPerRow:(NSUInteger)(width * 4)];
+        /* Use helper which wraps replaceBytesInRegion (avoids ObjC++ protocol dispatch) */
+        metal_texture_update_region(tex, 0, 0,
+                                    (unsigned long)width, (unsigned long)height,
+                                    pixels, (unsigned long)(width * 4));
     }
 
     MetalTexture *mt = (MetalTexture *)calloc(1, sizeof(MetalTexture));
@@ -318,8 +323,11 @@ Texture graphics_createtexture_rgba(int width, int height, const unsigned char *
 void graphics_updatetexture(Texture tex, int x, int y, int width, int height, const unsigned char *pixels) {
     if (!tex || !pixels) return;
     MetalTexture *mt = (MetalTexture *)tex;
-    MTLRegion region = MTLRegionMake2D(x, y, width, height);
-    [mt->texture replaceBytesInRegion:region mipmapLevel:0 withBytes:pixels bytesPerRow:width * 4];
+    id<MTLTexture> t = mt->texture;
+    NSUInteger bpr = (NSUInteger)(width * 4);
+    metal_texture_update_region(t, (unsigned long)x, (unsigned long)y,
+                                (unsigned long)width, (unsigned long)height,
+                                pixels, (unsigned long)bpr);
 }
 
 void graphics_destroytexture(Texture tex) {
@@ -337,7 +345,12 @@ void graphics_destroytexture(Texture tex) {
     free(mt);
 }
 
-void graphics_bindtexture(Texture tex, unsigned slot) { (void)tex; (void)slot; }
+void graphics_bindtexture(Texture tex, unsigned slot) {
+    if (!tex || !g_currentEncoder) return;
+    MetalTexture *mt = (MetalTexture *)tex;
+    metal_encoder_set_fragment_texture(g_currentEncoder, mt->texture, (unsigned long)slot);
+    metal_encoder_set_fragment_sampler_state(g_currentEncoder, g_defaultSampler, (unsigned long)slot);
+}
 
 /* ------------------------------------------------------------------ */
 /*  Pipeline management                                                */
@@ -390,10 +403,13 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
     }
 
     desc.colorAttachments[0] = colorAtt;
-    desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    /* Only set depth format if depth test/write is enabled */
+    if (state.depthTest || state.depthWrite) {
+        desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    }
 
     NSError *error = nil;
-    id<MTLRenderPipelineState> pso = [g_device newRenderPipelineStateWithDescriptor:desc error:&error];
+    id<MTLRenderPipelineState> pso = (id<MTLRenderPipelineState>)metal_device_new_pipeline_state(g_device, desc, (void **)&error);
     if (!pso) {
         fprintf(stderr, "Failed to create Metal pipeline state: %s\n",
                 error ? [[error localizedDescription] UTF8String] : "(unknown)");
@@ -423,8 +439,8 @@ void graphics_bindpipeline(Pipeline pipeline) {
     if (!pipeline || !g_currentEncoder) return;
     MetalPipeline *mp = (MetalPipeline *)pipeline;
     g_currentPipeline = mp;
-    [g_currentEncoder setRenderPipelineState:mp->pipelineState];
-    [g_currentEncoder setDepthStencilState:mp->depthState];
+    metal_encoder_set_render_pipeline_state(g_currentEncoder, mp->pipelineState);
+    metal_encoder_set_depth_stencil_state(g_currentEncoder, mp->depthState);
 }
 
 void graphics_destroypipeline(Pipeline pipeline) {
@@ -462,7 +478,7 @@ void graphics_beginpass(RenderPass pass) { (void)pass; g_inPass = 1; }
 void graphics_endpass(RenderPass pass) {
     (void)pass;
     if (g_currentEncoder) {
-        [g_currentEncoder endEncoding];
+        metal_encoder_end_encoding(g_currentEncoder);
         g_currentEncoder = nil;
     }
     g_inPass = 0;
@@ -482,10 +498,10 @@ void graphics_init() {
     printf("Metal device: %s\n", [[g_device name] UTF8String]);
 
     /* Create command queue */
-    g_commandQueue = [g_device newCommandQueue];
+    g_commandQueue = (id<MTLCommandQueue>)metal_device_new_command_queue(g_device);
 
     /* Uniform buffer */
-    g_uniformBuffer = [g_device newBufferWithLength:UNIFORM_BUFFER_SIZE options:MTLResourceStorageModeShared];
+    g_uniformBuffer = (id<MTLBuffer>)metal_device_new_buffer(g_device, UNIFORM_BUFFER_SIZE, MTLResourceStorageModeShared);
 
     /* Get CAMetalLayer from SDL's Metal view */
     SDL_MetalView metalView = (SDL_MetalView)(uintptr_t)(size_t)window_get_metal_view();
@@ -510,6 +526,15 @@ void graphics_init() {
     g_windowHeight = h;
     g_metalLayer.drawableSize = CGSizeMake((CGFloat)g_windowWidth, (CGFloat)g_windowHeight);
 
+    /* Create default sampler */
+    MTLSamplerDescriptor *sampDesc = [[MTLSamplerDescriptor alloc] init];
+    sampDesc.minFilter = MTLSamplerMinMagFilterLinear;
+    sampDesc.magFilter = MTLSamplerMinMagFilterLinear;
+    sampDesc.sAddressMode = MTLSamplerAddressModeRepeat;
+    sampDesc.tAddressMode = MTLSamplerAddressModeRepeat;
+    g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];
+    [sampDesc release];
+    
     /* Embedded fallback shaders (combined vertex + fragment in one MSL source) */
     const char *fallbackCombined =
         "#include <metal_stdlib>\n"
@@ -583,7 +608,7 @@ void graphics_init() {
         "    texture2d<float> tex [[texture(0)]],\n"
         "    sampler texSampler [[sampler(0)]]\n"
         ") {\n"
-        "    float alpha = tex.sample(texSampler, in.texcoord).r;\n"
+        "    float alpha = tex.sample(texSampler, in.texcoord).a;\n"
         "    return float4(1.0, 1.0, 1.0, alpha);\n"
         "}\n";
 
@@ -666,31 +691,30 @@ void graphics_predraw() {
 
     /* Begin command buffer and render encoder */
     if (g_currentCommandBuffer) [g_currentCommandBuffer release];
-    g_currentCommandBuffer = [g_commandQueue commandBuffer];
+    g_currentCommandBuffer = (id<MTLCommandBuffer>)metal_command_queue_new_command_buffer(g_commandQueue);
 
-    g_currentEncoder = [g_currentCommandBuffer renderCommandEncoderWithDescriptor:passDesc];
+    g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(g_currentCommandBuffer, passDesc);
 
     /* Set viewport */
-    MTLViewport vp = {
-        .originX = 0, .originY = 0,
-        .width = (double)g_windowWidth,
-        .height = (double)g_windowHeight,
-        .znear = 0.0, .zfar = 1.0
+    double vp[6] = {
+        0.0, 0.0,
+        (double)g_windowWidth, (double)g_windowHeight,
+        0.0, 1.0
     };
-    [g_currentEncoder setViewport:vp];
+    metal_encoder_set_viewport(g_currentEncoder, vp);
 
     /* Default depth state */
     MTLDepthStencilDescriptor *d = [[MTLDepthStencilDescriptor alloc] init];
     d.depthCompareFunction = MTLCompareFunctionLess;
     d.depthWriteEnabled = YES;
-    [g_currentEncoder setDepthStencilState:[g_device newDepthStencilStateWithDescriptor:d]];
+    metal_encoder_set_depth_stencil_state(g_currentEncoder, metal_device_new_depth_stencil_state(g_device, d));
 
     g_currentPipeline = NULL;
 }
 
 void graphics_postdraw() {
     if (g_currentEncoder) {
-        [g_currentEncoder endEncoding];
+        metal_encoder_end_encoding(g_currentEncoder);
         g_currentEncoder = nil;
     }
 }
@@ -698,9 +722,9 @@ void graphics_postdraw() {
 void graphics_present() {
     if (!g_currentCommandBuffer || g_minimized) return;
 
-    [g_currentCommandBuffer presentDrawable:g_currentDrawable];
-    [g_currentCommandBuffer commit];
-    [g_currentCommandBuffer waitUntilCompleted];
+    metal_command_buffer_present(g_currentCommandBuffer, g_currentDrawable);
+    metal_command_buffer_commit(g_currentCommandBuffer);
+    metal_command_buffer_wait(g_currentCommandBuffer);
 
     [g_currentCommandBuffer release];
     g_currentCommandBuffer = nil;
@@ -739,30 +763,28 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
 
         if (mesh->vertexBuffer) {
             MetalBuffer *vb = (MetalBuffer *)mesh->vertexBuffer;
-            [g_currentEncoder setVertexBuffer:vb->buffer offset:0 atIndex:0];
+            metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
         }
 
         if (transform4x4) {
-            [g_currentEncoder setBuffer:g_uniformBuffer offset:0 atIndex:1];
+            metal_encoder_set_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
         }
 
         if (mesh->indexBuffer && mesh->indexCount > 0) {
             MetalBuffer *ib = (MetalBuffer *)mesh->indexBuffer;
-            [g_currentEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                                        indexCount:mesh->indexCount
-                                       indexType:MTLIndexTypeUInt32
-                                         indexBuffer:ib->buffer
-                                    indexBufferOffset:0];
+            metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
+                                                  mesh->indexCount, MTLIndexTypeUInt32,
+                                                  ib->buffer, 0, 1);
         } else if (mesh->vertexCount > 0) {
-            [g_currentEncoder drawPrimitives:MTLPrimitiveTypeTriangle
-                                vertexStart:0
-                                vertexCount:mesh->vertexCount];
+            metal_encoder_draw_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
+                                          0, mesh->vertexCount);
         }
     }
 }
 
 void graphics_draw_instanced(Model *model, Material mat, const float *transforms4x4, size_t count) {
-    if (!model || !g_currentEncoder || !transforms4x4) return;
+    (void)transforms4x4;
+    if (!model || !g_currentEncoder) return;
 
     Shader vertShader = mat ? mat : (Shader)g_defaultVertShader;
     Shader fragShader = mat ? mat : (Shader)g_defaultFragShader;
@@ -777,17 +799,14 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
 
         if (mesh->vertexBuffer) {
             MetalBuffer *vb = (MetalBuffer *)mesh->vertexBuffer;
-            [g_currentEncoder setVertexBuffer:vb->buffer offset:0 atIndex:0];
+            metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
         }
 
         if (mesh->indexBuffer && mesh->indexCount > 0) {
             MetalBuffer *ib = (MetalBuffer *)mesh->indexBuffer;
-            [g_currentEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                                        indexCount:mesh->indexCount
-                                       indexType:MTLIndexTypeUInt32
-                                         indexBuffer:ib->buffer
-                                    indexBufferOffset:0
-                                           instanceCount:(NSUInteger)count];
+            metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
+                                                  mesh->indexCount, MTLIndexTypeUInt32,
+                                                  ib->buffer, 0, 1);
         }
     }
 }
@@ -795,21 +814,16 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
 void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t indexCount,
                            Material mat, const float *transform4x4) {
     (void)mat;
+    (void)transform4x4;
     if (!g_currentEncoder || !vertexBuffer) return;
 
     MetalBuffer *vb = (MetalBuffer *)vertexBuffer;
-    [g_currentEncoder setVertexBuffer:vb->buffer offset:0 atIndex:0];
-
-    if (transform4x4) {
-        [g_currentEncoder setBuffer:g_uniformBuffer offset:0 atIndex:1];
-    }
+    metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
 
     if (indexBuffer && indexCount > 0) {
         MetalBuffer *ib = (MetalBuffer *)indexBuffer;
-        [g_currentEncoder drawIndexedPrimitives:MTLPrimitiveTypeTriangle
-                                    indexCount:(NSUInteger)indexCount
-                                   indexType:MTLIndexTypeUInt32
-                                     indexBuffer:ib->buffer
-                                indexBufferOffset:0];
+        metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
+                                              (NSUInteger)indexCount, MTLIndexTypeUInt32,
+                                              ib->buffer, 0, 1);
     }
 }

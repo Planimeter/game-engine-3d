@@ -172,7 +172,7 @@ set(SOURCES
 
 # Graphics backend: Metal on macOS, Vulkan elsewhere
 if(APPLE)
-    list(APPEND SOURCES src/graphics_metal.mm)
+    list(APPEND SOURCES src/graphics_metal.mm src/graphics_metal_helpers.m)
 else()
     list(APPEND SOURCES src/graphics_vulkan.cpp)
 endif()
