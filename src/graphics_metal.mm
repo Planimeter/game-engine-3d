@@ -77,6 +77,26 @@ static id<MTLSamplerState> g_defaultSampler = nil;
 #define UNIFORM_BUFFER_SIZE 4096
 static id<MTLBuffer> g_uniformBuffer = nil;
 
+/* Material constants */
+#define METAL_MATERIAL_FLOAT_COUNT   32
+#define METAL_MATERIAL_VEC3_COUNT    16
+#define METAL_MATERIAL_TEXTURE_COUNT  8
+#define METAL_MATERIAL_BUFFER_SIZE  1024
+
+typedef struct {
+    Shader shader;
+    MetalBuffer *uniformBuffer;
+    float floats[METAL_MATERIAL_FLOAT_COUNT];
+    size_t floatCount;
+    float vec3s[METAL_MATERIAL_VEC3_COUNT * 3];
+    size_t vec3Count;
+    MetalTexture *textures[METAL_MATERIAL_TEXTURE_COUNT];
+    size_t textureCount;
+    float mat4[16];
+    int hasMat4;
+    int dirty;
+} MetalMaterial;
+
 static int g_windowWidth = 640;
 static int g_windowHeight = 480;
 static int g_minimized = 0;
@@ -207,13 +227,132 @@ void graphics_destroyshader(Shader shader) {
 /*  Material management                                                */
 /* ------------------------------------------------------------------ */
 
-Material graphics_creatematerial(Shader shader) { return shader; }
-void graphics_destroymaterial(Material mat) { (void)mat; }
-void graphics_material_set_texture(Material m, const char *n, Texture t) { (void)m; (void)n; (void)t; }
-void graphics_material_set_float(Material m, const char *n, float v) { (void)m; (void)n; (void)v; }
-void graphics_material_set_vec3(Material m, const char *n, float x, float y, float z) { (void)m; (void)n; (void)x; (void)y; (void)z; }
-void graphics_material_set_mat4(Material m, const float *matrix4x4) { (void)m; (void)matrix4x4; }
-void graphics_setmaterial(Material mat) { (void)mat; }
+Material graphics_creatematerial(Shader shader) {
+    MetalMaterial *m = (MetalMaterial *)calloc(1, sizeof(MetalMaterial));
+    if (!m) return NULL;
+    m->shader = shader;
+    m->uniformBuffer = (MetalBuffer *)graphics_createuniformbuffer(METAL_MATERIAL_BUFFER_SIZE);
+    m->dirty = 1;
+    return (Material)m;
+}
+
+void graphics_destroymaterial(Material mat) {
+    if (!mat) return;
+    MetalMaterial *m = (MetalMaterial *)mat;
+    if (m->uniformBuffer) graphics_destroybuffer((Buffer)m->uniformBuffer);
+    free(m);
+}
+
+void graphics_material_set_texture(Material mat, const char *name, Texture tex) {
+    MetalMaterial *m = (MetalMaterial *)mat;
+    if (!m || !name || !tex) return;
+    if (m->textureCount < METAL_MATERIAL_TEXTURE_COUNT) {
+        m->textures[m->textureCount++] = (MetalTexture *)tex;
+        m->dirty = 1;
+    }
+}
+
+void graphics_material_set_float(Material mat, const char *name, float value) {
+    MetalMaterial *m = (MetalMaterial *)mat;
+    if (!m || !name) return;
+    if (m->floatCount < METAL_MATERIAL_FLOAT_COUNT) {
+        m->floats[m->floatCount++] = value;
+        m->dirty = 1;
+    }
+}
+
+void graphics_material_set_vec3(Material mat, const char *name,
+                                float x, float y, float z) {
+    MetalMaterial *m = (MetalMaterial *)mat;
+    if (!m || !name) return;
+    if (m->vec3Count < METAL_MATERIAL_VEC3_COUNT) {
+        size_t idx = m->vec3Count * 3;
+        m->vec3s[idx + 0] = x;
+        m->vec3s[idx + 1] = y;
+        m->vec3s[idx + 2] = z;
+        m->vec3Count++;
+        m->dirty = 1;
+    }
+}
+
+void graphics_material_set_mat4(Material mat, const float *matrix4x4) {
+    MetalMaterial *m = (MetalMaterial *)mat;
+    if (!m || !matrix4x4) return;
+    memcpy(m->mat4, matrix4x4, sizeof(m->mat4));
+    m->hasMat4 = 1;
+    m->dirty = 1;
+}
+
+/* Pack material uniforms into the GPU buffer.
+ * Layout (tightly packed):
+ *   floats[0..31]  — 32 floats, 4 bytes each (128 bytes total)
+ *   vec3s[0..15]   — 16 vec3s, each padded to vec4 (16 bytes each, 256 bytes total)
+ *   extraMatrix    — 16 floats (64 bytes)
+ * Total: 448 bytes, fits in METAL_MATERIAL_BUFFER_SIZE (1024).
+ */
+static void metal_material_pack(MetalMaterial *m) {
+    if (!m || !m->dirty || !m->uniformBuffer) return;
+
+    float *dst = (float *)metal_buffer_get_contents(m->uniformBuffer->buffer);
+    size_t offset = 0;
+
+    /* Write floats — tightly packed, 4 bytes each */
+    for (size_t i = 0; i < m->floatCount && i < METAL_MATERIAL_FLOAT_COUNT; i++) {
+        dst[offset++] = m->floats[i];
+    }
+    /* Zero out remaining float slots */
+    for (size_t i = m->floatCount; i < METAL_MATERIAL_FLOAT_COUNT; i++) {
+        dst[offset++] = 0.0f;
+    }
+
+    /* Write vec3s — each padded to vec4 (16 bytes) for alignment */
+    for (size_t i = 0; i < m->vec3Count && i < METAL_MATERIAL_VEC3_COUNT; i++) {
+        size_t srcIdx = i * 3;
+        dst[offset++] = m->vec3s[srcIdx + 0];
+        dst[offset++] = m->vec3s[srcIdx + 1];
+        dst[offset++] = m->vec3s[srcIdx + 2];
+        dst[offset++] = 0.0f; /* padding to vec4 */
+    }
+    /* Zero out remaining vec3 slots */
+    for (size_t i = m->vec3Count; i < METAL_MATERIAL_VEC3_COUNT; i++) {
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+        dst[offset++] = 0.0f;
+    }
+
+    /* Write mat4 if set */
+    if (m->hasMat4) {
+        memcpy(&dst[offset], m->mat4, 16 * sizeof(float));
+    } else {
+        memset(&dst[offset], 0, 16 * sizeof(float));
+    }
+
+    m->dirty = 0;
+}
+
+void graphics_setmaterial(Material mat) {
+    if (!mat || !g_currentEncoder) return;
+    MetalMaterial *m = (MetalMaterial *)mat;
+
+    /* Pack dirty uniforms into GPU buffer */
+    metal_material_pack(m);
+
+    /* Bind material uniform buffer at slot 2 */
+    if (m->uniformBuffer) {
+        metal_encoder_set_buffer(g_currentEncoder, m->uniformBuffer->buffer, 0, 2);
+    }
+
+    /* Bind textures */
+    for (size_t i = 0; i < m->textureCount; i++) {
+        if (m->textures[i]) {
+            metal_encoder_set_fragment_texture(g_currentEncoder,
+                m->textures[i]->texture, (unsigned long)i);
+            metal_encoder_set_fragment_sampler_state(g_currentEncoder,
+                g_defaultSampler, (unsigned long)i);
+        }
+    }
+}
 
 /* ------------------------------------------------------------------ */
 /*  Buffer management                                                  */
@@ -543,7 +682,7 @@ void graphics_init() {
     
     /* Embedded 3D fallback shader (combined vertex + fragment in one MSL source).
      * Handles VERTEX_FORMAT_FULL: position(0), normal(1), tangent(2), bitangent(3), texcoord(4).
-     * Model matrix at buffer(1) to avoid conflict with vertex attribute buffer(0). */
+     * Model matrix at buffer(1), material uniforms at buffer(2). */
     const char *default3dCombined =
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
@@ -560,6 +699,12 @@ void graphics_init() {
         "    float4 position [[position]];\n"
         "    float2 texcoord;\n"
         "    float3 normal;\n"
+        "};\n"
+        "\n"
+        "struct MaterialData {\n"
+        "    float floats[32];\n"
+        "    float4 vec3s_padded[16];\n"
+        "    float4x4 extraMatrix;\n"
         "};\n"
         "\n"
         "vertex VertexOut vertex_main(\n"
@@ -776,8 +921,10 @@ void graphics_destroymodel(Model *model) {
 void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     if (!model || !g_currentEncoder) return;
 
-    Shader vertShader = mat ? mat : (Shader)g_defaultVertShader;
-    Shader fragShader = mat ? mat : (Shader)g_defaultFragShader;
+    /* Resolve shaders from material or use defaults */
+    MetalMaterial *mm = (MetalMaterial *)mat;
+    Shader vertShader = mm ? mm->shader : (Shader)g_defaultVertShader;
+    Shader fragShader = mm ? mm->shader : (Shader)g_defaultFragShader;
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
@@ -788,6 +935,11 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     if (transform4x4 && g_uniformBuffer) {
         memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64);
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
+
+    /* Bind material uniforms */
+    if (mat) {
+        graphics_setmaterial(mat);
     }
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
@@ -813,8 +965,9 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
 void graphics_draw_instanced(Model *model, Material mat, const float *transforms4x4, size_t count) {
     if (!model || !g_currentEncoder) return;
 
-    Shader vertShader = mat ? mat : (Shader)g_defaultVertShader;
-    Shader fragShader = mat ? mat : (Shader)g_defaultFragShader;
+    MetalMaterial *mm = (MetalMaterial *)mat;
+    Shader vertShader = mm ? mm->shader : (Shader)g_defaultVertShader;
+    Shader fragShader = mm ? mm->shader : (Shader)g_defaultFragShader;
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
@@ -825,6 +978,11 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
     if (transforms4x4 && g_uniformBuffer) {
         memcpy(metal_buffer_get_contents(g_uniformBuffer), transforms4x4, 64);
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
+
+    /* Bind material uniforms */
+    if (mat) {
+        graphics_setmaterial(mat);
     }
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
@@ -846,7 +1004,6 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
 
 void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t indexCount,
                            Material mat, const float *transform4x4) {
-    (void)mat;
     if (!g_currentEncoder || !vertexBuffer) return;
 
     MetalBuffer *vb = (MetalBuffer *)vertexBuffer;
@@ -856,6 +1013,11 @@ void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t index
     if (transform4x4 && g_uniformBuffer) {
         memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64);
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    }
+
+    /* Bind material uniforms */
+    if (mat) {
+        graphics_setmaterial(mat);
     }
 
     if (indexBuffer && indexCount > 0) {

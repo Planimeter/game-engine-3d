@@ -6,7 +6,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define NULL_MATERIAL_FLOAT_COUNT   32
+#define NULL_MATERIAL_VEC3_COUNT    16
+#define NULL_MATERIAL_TEXTURE_COUNT  8
+
 typedef struct {
+    float floats[NULL_MATERIAL_FLOAT_COUNT];
+    size_t floatCount;
+    float vec3s[NULL_MATERIAL_VEC3_COUNT * 3];
+    size_t vec3Count;
+    void *textures[NULL_MATERIAL_TEXTURE_COUNT];
+    size_t textureCount;
     float mat4[16];
     int hasMat4;
 } GPUMaterial;
@@ -105,26 +115,34 @@ void graphics_destroymaterial(Material mat)
 
 void graphics_material_set_texture(Material mat, const char *name, Texture tex)
 {
-    (void)mat;
-    (void)name;
-    (void)tex;
+    GPUMaterial *m = (GPUMaterial *)mat;
+    if (!m || !name || !tex) return;
+    if (m->textureCount < NULL_MATERIAL_TEXTURE_COUNT) {
+        m->textures[m->textureCount++] = tex;
+    }
 }
 
 void graphics_material_set_float(Material mat, const char *name, float value)
 {
-    (void)mat;
-    (void)name;
-    (void)value;
+    GPUMaterial *m = (GPUMaterial *)mat;
+    if (!m || !name) return;
+    if (m->floatCount < NULL_MATERIAL_FLOAT_COUNT) {
+        m->floats[m->floatCount++] = value;
+    }
 }
 
 void graphics_material_set_vec3(Material mat, const char *name,
                                 float x, float y, float z)
 {
-    (void)mat;
-    (void)name;
-    (void)x;
-    (void)y;
-    (void)z;
+    GPUMaterial *m = (GPUMaterial *)mat;
+    if (!m || !name) return;
+    if (m->vec3Count < NULL_MATERIAL_VEC3_COUNT) {
+        size_t idx = m->vec3Count * 3;
+        m->vec3s[idx + 0] = x;
+        m->vec3s[idx + 1] = y;
+        m->vec3s[idx + 2] = z;
+        m->vec3Count++;
+    }
 }
 
 void graphics_material_set_mat4(Material mat, const float *matrix4x4)

@@ -63,9 +63,9 @@ A full Metal backend debugging session resolved 6 root causes that turned white 
 
 **Fix 7 — Depth format conditional:** The text pipeline (depthTest=0, depthWrite=0) still specified `MTLPixelFormatDepth32Float` as the depth attachment pixel format, but no depth texture was created. Changed pipeline creation to only set `depthAttachmentPixelFormat` when depth test or depth write is enabled.
 
-### Transform Pipeline Fix + 3D Model Rendering Test (2026-07-28, Session #2)
+### Transform Pipeline Fix + 3D Model Rendering Test + Material System (2026-07-28, Sessions #2-#3)
 
-After FPS text was working, we fixed the transform matrix upload pipeline and added an end-to-end 3D rendering test:
+After FPS text was working, we fixed the transform matrix upload pipeline, added an end-to-end 3D rendering test, and implemented the material system:
 
 **Fix 8 — `graphics_drawmodel()` transform matrix upload:** `graphics_drawmodel()` bound `g_uniformBuffer` at index 1 but never copied `transform4x4` data into it. The default vertex shader expected the matrix at `[[buffer(0)]]` which conflicted with vertex attribute buffer(0). **Two bugs:**
 - Wrong binding index (buffer 0 vs buffer 1) — shader changed to `[[buffer(1)]]`
@@ -82,6 +82,15 @@ After FPS text was working, we fixed the transform matrix upload pipeline and ad
 **Fix 13 — C/C++ opaque struct boundary (`model_get_mesh_count()`):** The `Model` struct is fully defined only inside `#ifdef __cplusplus` — C code sees only a forward declaration. Added `model_get_mesh_count(const Model *model)` as a C-compatible accessor function declared in model.h with `extern "C"` linkage, implemented in `model_assimp.cpp` and `model_null.c`.
 
 **Fix 14 — Missing `#include <stdint.h>` in model.h:** The `uint32_t` return type on `model_get_mesh_count()` was unknown to C compilers because model.h only included `<sys/types.h>`. Added `#include <stdint.h>`.
+
+**Fix 15 — Material system implementation (Metal backend):** `graphics_creatematerial()` returned the shader pointer directly (no material struct). `graphics_material_set_float()`, `graphics_material_set_vec3()`, `graphics_material_set_texture()`, `graphics_material_set_mat4()` all discarded data. `graphics_setmaterial()` was `(void)mat`. Implemented:
+- `MetalMaterial` struct with CPU-side storage for floats (32), vec3s (16 padded to vec4), textures (8), and a mat4
+- Per-material uniform buffer (1024 bytes) created at material creation
+- `metal_material_pack()` packs dirty uniforms into the GPU buffer with correct alignment (floats tightly packed, vec3s padded to vec4, mat4 at end)
+- `graphics_setmaterial()` packs dirty uniforms, binds material buffer at slot 2, and binds textures
+- All draw functions (`graphics_drawmodel`, `graphics_draw_instanced`, `graphics_draw_buffers`) now call `graphics_setmaterial()` when a material is provided
+- Default 3D shader declares `MaterialData` struct at `[[buffer(2)]]` for future use
+- OpenGL and null backends updated with proper CPU-side storage (no GPU upload yet — those backends lack the binding infrastructure)
 
 **End-to-end test:** Added spinning cube rendering to `framework.c`:
 - C matrix math helpers: `mat4_identity`, `mat4_multiply`, `mat4_rotate_y`, `mat4_translate`, `mat4_perspective`, `mat4_lookat`
@@ -137,6 +146,7 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 - **End-to-end 3D model rendering test** (spinning cube with MVP matrix, normal visualization) ✅
 - **`graphics_binduniformbuffer()` API** (binds a Buffer to both vertex and fragment stages at a given slot) ✅
 - **`model_get_mesh_count()` C-compatible accessor** for opaque Model struct ✅
+- **Material system implementation** — `MetalMaterial` struct with CPU-side storage, per-material uniform buffer, `metal_material_pack()` for GPU upload, `graphics_setmaterial()` binds material buffer at slot 2 + textures ✅
 
 ### Refactoring Completed
 - Extracted direct Metal message sends into C wrappers in `graphics_metal_helpers.m` to work around ObjC++ dispatch issues
@@ -146,8 +156,6 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 - NOT YET wrapped: `[g_currentCommandBuffer release]`, `MTLVertexDescriptor` creation, `MTLRenderPassDescriptor` creation
 
 ### Remaining Issues
-- `graphics_material_set_mat4()` stores matrix CPU-side with no upload path
-- `graphics_setmaterial()` is a no-op `(void)mat`
 - `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
 - No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
 
@@ -161,7 +169,7 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 3. ~~**`graphics_draw_buffers()` Discards Transforms (Metal)** — `(void)transform4x4` at line 817. Transform never reaches GPU.~~ ✅ **Fixed** — matrix uploaded.
 4. ~~**`graphics_loadmodel()` No GPU Buffer Creation (Metal)** — Was a no-op stub. Models loaded but had no vertex/index buffers on GPU.~~ ✅ **Fixed** — iterates meshes and creates GPU buffers.
 5. ~~**Default 3D Shader Stub (Metal)** — Default vertex/fragment shaders for 3D were stubs returning hardcoded colors.~~ ✅ **Fixed** — replaced with VERTEX_FORMAT_FULL handler with normal visualization.
-6. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
+6. ~~**Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.~~ ✅ **Fixed (Metal)** — `MetalMaterial` struct has a per-material uniform buffer (1024 bytes), `metal_material_pack()` packs all material data (floats, vec3s, mat4) into the buffer, and `graphics_setmaterial()` binds it at slot 2. OpenGL and null backends store data CPU-side but lack GPU upload.
 7. ~~**No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.~~ ✅ **Fixed** — `graphics_binduniformbuffer(Buffer buf, unsigned slot)` added to graphics.h, implemented in Metal backend via `metal_encoder_set_buffer()` (binds to both vertex and fragment stages). Vulkan backend still needs pipeline layout rework.
 8. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
 
@@ -301,7 +309,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
-## Rating: 7/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **Critical rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix) and has a proper uniform buffer binding API. The Vulkan backend still needs pipeline layout rework to support UBOs. Remaining P0 issues: material system (mat4 never uploaded, setmaterial is no-op).
+## Rating: 8/10
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **All P0 rendering pipeline defects have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix), has a proper uniform buffer binding API, and a working material system that packs uniforms into per-material GPU buffers. The Vulkan backend still needs pipeline layout rework to support UBOs. Remaining P1: shader variant system is a no-op.
 
-**Metal backend progress:** FPS text + spinning cube + uniform buffer binding API is working. Remaining P0 issues are the material system.
+**Metal backend progress:** FPS text + spinning cube + uniform buffer binding API + material system is working. No remaining P0 issues in Metal.
