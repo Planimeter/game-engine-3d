@@ -63,6 +63,33 @@ A full Metal backend debugging session resolved 6 root causes that turned white 
 
 **Fix 7 — Depth format conditional:** The text pipeline (depthTest=0, depthWrite=0) still specified `MTLPixelFormatDepth32Float` as the depth attachment pixel format, but no depth texture was created. Changed pipeline creation to only set `depthAttachmentPixelFormat` when depth test or depth write is enabled.
 
+### Transform Pipeline Fix + 3D Model Rendering Test (2026-07-28, Session #2)
+
+After FPS text was working, we fixed the transform matrix upload pipeline and added an end-to-end 3D rendering test:
+
+**Fix 8 — `graphics_drawmodel()` transform matrix upload:** `graphics_drawmodel()` bound `g_uniformBuffer` at index 1 but never copied `transform4x4` data into it. The default vertex shader expected the matrix at `[[buffer(0)]]` which conflicted with vertex attribute buffer(0). **Two bugs:**
+- Wrong binding index (buffer 0 vs buffer 1) — shader changed to `[[buffer(1)]]`
+- No data upload — added `memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64)` before binding
+
+**Fix 9 — `graphics_draw_instanced()` transform upload:** Was `(void)transforms4x4` — discarding instance transforms entirely. Now uploads first transform to `g_uniformBuffer` and passes `count` as instanceCount to draw call.
+
+**Fix 10 — `graphics_draw_buffers()` transform upload:** Was `(void)transform4x4` — discarding transform entirely. Now uploads matrix to `g_uniformBuffer` and binds at index 1.
+
+**Fix 11 — Default 3D fallback shader:** The original default3d shader was a stub returning hardcoded colors. Replaced with a proper `VERTEX_FORMAT_FULL` handler that reads position(0), normal(1), tangent(2), bitangent(3), texcoord(4) and visualizes normals as color (`normal * 0.5 + 0.5`). Model matrix received at `[[buffer(1)]]`.
+
+**Fix 12 — `graphics_loadmodel()` GPU buffer creation:** Was a no-op stub. Now iterates over each mesh and calls `graphics_createvertexbuffer()` / `graphics_createindexbuffer()` to upload vertex and index data to the GPU.
+
+**Fix 13 — C/C++ opaque struct boundary (`model_get_mesh_count()`):** The `Model` struct is fully defined only inside `#ifdef __cplusplus` — C code sees only a forward declaration. Added `model_get_mesh_count(const Model *model)` as a C-compatible accessor function declared in model.h with `extern "C"` linkage, implemented in `model_assimp.cpp` and `model_null.c`.
+
+**Fix 14 — Missing `#include <stdint.h>` in model.h:** The `uint32_t` return type on `model_get_mesh_count()` was unknown to C compilers because model.h only included `<sys/types.h>`. Added `#include <stdint.h>`.
+
+**End-to-end test:** Added spinning cube rendering to `framework.c`:
+- C matrix math helpers: `mat4_identity`, `mat4_multiply`, `mat4_rotate_y`, `mat4_translate`, `mat4_perspective`, `mat4_lookat`
+- Model loading with `realpath(argv[0])` path resolution (navigates up from `.app` bundle to repo root)
+- MVP matrix computation per frame: `mvp = proj * view * model` with Y-axis rotation
+- `graphics_drawmodel(g_testModel, NULL, mvp)` renders the cube with normal-visualization colors
+- Verified: build succeeds, app runs, cube loads and renders without crashes
+
 ---
 
 ## Architecture Summary
@@ -77,6 +104,7 @@ A full Metal backend debugging session resolved 6 root causes that turned white 
 | Audio | `src/audio.h` | `src/audio_openal.c` | `src/audio_null.c` |
 | Font/Text | `src/font.h`, `src/text.h` | `src/font.c`, `src/text.c` | — (font has no stub) |
 | Model | `src/model.h` | `src/model_assimp.cpp` | `src/model_null.c` |
+| Math (C wrappers) | `src/math_c.h` | `src/math_glm.cpp` | `src/math_null.c` |
 | Filesystem | `src/filesystem.h` | `src/filesystem_physfs.c` | `src/filesystem_null.c`, `src/filesystem_posix.c` |
 | Timer | `src/timer.h` | `src/timer_sdl.c` | `src/timer_null.c` |
 | Image | `src/image.h` | `src/image_stb.c` | `src/image_null.c` |
@@ -88,9 +116,9 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
            → job_submit(draw)  → job_wait(draw)  → graphics_present()
 ```
 
-## Metal Backend Status (2026-07-28, post-fix session)
+## Metal Backend Status (2026-07-28, post-transform-fix session)
 
-The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the Vulkan backend. FPS text rendering is now working.
+The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the Vulkan backend. FPS text rendering and basic 3D model rendering (spinning cube with normal visualization) are now working.
 
 ### Completed
 - Device initialization, command queue, swapchain via CAMetalLayer
@@ -103,6 +131,11 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 - **Font atlas texture upload** via staging buffer + blit encoder ✅
 - **Alpha channel glyph rendering** (FreeType alpha in `.a` channel) ✅
 - **NDC-correct glyph positioning** (Y-axis flip fixed) ✅
+- **Transform matrix upload in all 3 draw calls** (`graphics_drawmodel`, `graphics_draw_instanced`, `graphics_draw_buffers`) ✅
+- **Default 3D fallback shader with VERTEX_FORMAT_FULL support** (position, normal, tangent, bitangent, texcoord) ✅
+- **`graphics_loadmodel()` GPU buffer creation** (vertex + index buffer upload per mesh) ✅
+- **End-to-end 3D model rendering test** (spinning cube with MVP matrix, normal visualization) ✅
+- **`model_get_mesh_count()` C-compatible accessor** for opaque Model struct ✅
 
 ### Refactoring Completed
 - Extracted direct Metal message sends into C wrappers in `graphics_metal_helpers.m` to work around ObjC++ dispatch issues
@@ -111,15 +144,10 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 - `metal_texture_update_region()` uses staging buffer + blit encoder
 - NOT YET wrapped: `[g_currentCommandBuffer release]`, `MTLVertexDescriptor` creation, `MTLRenderPassDescriptor` creation
 
-### Same P0 Issues as Vulkan
-- ~~`graphics_drawmodel()` binds `g_uniformBuffer` at index 1 but **never copies matrix data** into it — shader expects `[[buffer(0)]]`~~ ✅ **Fixed** — matrix copied into `g_uniformBuffer`, shader changed to `[[buffer(1)]]` to avoid vertex descriptor conflict
-- ~~`graphics_draw_instanced()` still `(void)transforms4x4` — transforms discarded~~ ✅ **Fixed** — matrix uploaded, instanceCount passed through
-- ~~`graphics_draw_buffers()` still `(void)transform4x4` — transforms discarded~~ ✅ **Fixed** — matrix uploaded
+### Remaining Issues
 - `graphics_material_set_mat4()` stores matrix CPU-side with no upload path
 - No uniform buffer binding mechanism exists in the header API
 - `graphics_setmaterial()` is a no-op `(void)mat`
-
-### Metal-Specific Issues
 - `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
 - No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
 
@@ -131,9 +159,11 @@ The Metal backend (`src/graphics_metal.mm`, ~830 lines) is a partial port of the
 1. ~~**Model Transform Matrices Ignored (Metal)** — `graphics_drawmodel()` binds `g_uniformBuffer` at index 1 but never copies `transform4x4` data into it. The default vertex shader expects the matrix at `[[buffer(0)]]`. **Two bugs: wrong binding index + no data upload.**~~ ✅ **Fixed** — matrix copied into `g_uniformBuffer`, shader changed to `[[buffer(1)]]` to avoid vertex descriptor conflict.
 2. ~~**`graphics_draw_instanced()` Discards Transforms (Metal)** — `(void)transforms4x4` at line 786. Instance transforms never reach GPU.~~ ✅ **Fixed** — matrix uploaded, instanceCount passed through.
 3. ~~**`graphics_draw_buffers()` Discards Transforms (Metal)** — `(void)transform4x4` at line 817. Transform never reaches GPU.~~ ✅ **Fixed** — matrix uploaded.
-4. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
-5. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
-6. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
+4. ~~**`graphics_loadmodel()` No GPU Buffer Creation (Metal)** — Was a no-op stub. Models loaded but had no vertex/index buffers on GPU.~~ ✅ **Fixed** — iterates meshes and creates GPU buffers.
+5. ~~**Default 3D Shader Stub (Metal)** — Default vertex/fragment shaders for 3D were stubs returning hardcoded colors.~~ ✅ **Fixed** — replaced with VERTEX_FORMAT_FULL handler with normal visualization.
+6. **Material mat4 Never Uploaded to GPU** — `graphics_material_set_mat4()` stores a 4×4 matrix in `material->mat4` (CPU-side struct field). Pipeline layout has zero push constant ranges and only a bindless descriptor set for images — no UBO descriptor, no push constant path. The matrix lives in CPU memory forever.
+7. **No Uniform Buffer Binding API** — `graphics_createuniformbuffer()` exists but there is no `graphics_binduniformbuffer(slot, Buffer)` in the header or implementation. Cannot pass view/projection/light data to shaders.
+8. **Root Cause: Pipeline Layout Gap (Vulkan)** — Vulkan pipeline layout (line 893) has `setLayoutCount = 1` (bindless textures only), `pushConstantRangeCount = 0`. All shader sources (`default3d.vert`, `pbr-vert.glsl`) declare uniform matrices that cannot be bound through any existing API.
 
 ### P1 — High Priority
 7. **Shader Variant System Is a No-Op** — `graphics_createshader()` ignores `defines`/`defineCount`. `graphics_get_shader_variant()` returns the base shader unchanged. No shader permutation support.
@@ -212,13 +242,16 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ### Headers (all src/)
 - `framework.h`, `graphics.h`, `window.h`, `event.h`, `audio.h`, `model.h`, `font.h`, `text.h`, `image.h`, `timer.h`, `filesystem.h`, `job.h`
 - `graphics_metal_helpers.h` (new)
+- `math_c.h` (new)
 
 ### Core Implementations
 - `main_sdl.c`, `window_sdl.c`, `event_sdl.c`, `graphics_vulkan.cpp` (2847 lines), `graphics_metal.mm` (~800 lines), `audio_openal.c`, `filesystem_physfs.c`, `font.c` (1080 lines), `framework.c`, `image_stb.c`, `job_pthread.c`, `model_assimp.cpp`, `text.c`, `timer_sdl.c`
 - `graphics_metal_helpers.m` (new, 139 lines)
+- `math_glm.cpp` (new)
 
 ### Stub/Null Implementations
 - `graphics_null.c`, `graphics_opengl_sdl.c`, `window_null.c`, `event_null.c`, `audio_null.c`, `filesystem_null.c`, `filesystem_posix.c`, `model_null.c`, `image_null.c`, `timer_null.c`, `job_null.c`, `main_null.c`
+- `math_null.c` (new)
 
 ### Build & Config
 - `CMakeLists.txt`, `README.md`
@@ -228,9 +261,11 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ## Additional Observations (2026-07-28)
 
 ### Engine State at Runtime
-- `framework.c` creates a test font and displays an FPS counter — this is the only visual content rendered
-- No 3D scene is loaded; the engine boots to a blank screen with an FPS counter overlay
-- The Vulkan backend uses a bindless descriptor set (16384 max textures) for `sampler2D` only — no UBO descriptor
+- `framework.c` creates a test font and displays an FPS counter, plus loads and renders a spinning cube with normal-visualization colors
+- Matrix math is provided by `math_c.h` / `math_glm.cpp` wrapping real GLM calls (SIMD, etc.) behind `extern "C"` functions
+- 3D model rendering is working via the Metal backend with MVP matrix pipeline
+- The default 3D shader visualizes normals as color (`normal * 0.5 + 0.5`) — debug quality, no proper lighting yet
+- The Vulkan backend still uses a bindless descriptor set (16384 max textures) for `sampler2D` only — no UBO descriptor
 - The pipeline layout is created once in `graphics_creategraphicspipeline()` and reused by all pipelines created via `graphics_createpipeline()` — all custom pipelines share the same layout (no UBO support)
 - `graphics_setmaterial()` only binds textures from the material to the bindless descriptor set; it does NOT upload floats, vec3s, or mat4 to the GPU
 
@@ -266,7 +301,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
-## Rating: 5/10
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. However, **critical rendering pipeline defects** (transform matrices discarded, no uniform buffer binding, material data never uploaded) mean the engine cannot render meaningful 3D content. These P0 issues must be resolved before any 3D application can function. 
+## Rating: 6/10
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. **Critical rendering pipeline defects (transform matrices discarded) have been fixed in the Metal backend** — the engine can now render basic 3D content (spinning cube with MVP matrix). However, the Vulkan backend still has the same P0 issues, and there is no uniform buffer binding API, material system, or lighting. The Metal backend is now the functional primary backend. 
 
-**Metal backend progress:** FPS text rendering is working. The remaining P0 issues in the Metal backend are the same as Vulkan — transform matrices never reach the GPU. The fix is surgical: copy matrix data into `g_uniformBuffer` and bind at the correct shader buffer index.
+**Metal backend progress:** FPS text + spinning cube rendering is working. Remaining P0 issues are the material system and uniform buffer binding API.

@@ -6,10 +6,12 @@
 #include "audio.h"
 #include "font.h"
 #include "text.h"
+#include "math_c.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static Font *g_testFont = NULL;
 static Text *g_testText = NULL;
@@ -17,6 +19,10 @@ static uint64_t g_accumMs = 0;
 static uint32_t g_frameCount = 0;
 static int g_displayFps = 0;
 static const uint64_t g_fpsUpdateIntervalMs = 1000;
+
+/* 3D test model */
+static Model *g_testModel = NULL;
+static float g_elapsed = 0.0f;
 
 void framework_init(const char *argv0)
 {
@@ -29,7 +35,6 @@ void framework_init(const char *argv0)
 void framework_load(int argc, char *argv[])
 {
     (void)argc;
-    (void)argv;
 
 #if defined(__APPLE__)
     /* Use PHYSFS-mounted system fonts */
@@ -42,6 +47,42 @@ void framework_load(int argc, char *argv[])
 
     if (g_testFont) {
         g_testText = text_create(g_testFont, "FPS: 0");
+    }
+
+    /* Load 3D test model.
+     * model_load() uses Assimp (real filesystem, not PHYSFS), so derive
+     * the absolute path from argv[0] (the executable path). */
+    if (argv && argv[0]) {
+        char resolved[4096];
+        if (realpath(argv[0], resolved)) {
+            /* Navigate up from .../Contents/MacOS/game to repo root.
+             * Path: build/game.app/Contents/MacOS/game — need to go up 5 levels. */
+            char *p = strrchr(resolved, '/');
+            if (p) {
+                *p = '\0'; /* .../Contents/MacOS */
+                for (int i = 0; i < 4; i++) { /* up 4 more: MacOS, Contents, game.app, build */
+                    p = strrchr(resolved, '/');
+                    if (p) *p = '\0';
+                }
+                char modelPath[4096];
+                snprintf(modelPath, sizeof(modelPath), "%s/Models/cube.obj", resolved);
+                g_testModel = graphics_loadmodel(modelPath);
+                if (g_testModel) {
+                    printf("Loaded cube model from %s (%d meshes)\n",
+                           modelPath, model_get_mesh_count(g_testModel));
+                } else {
+                    fprintf(stderr, "Failed to load cube model from %s\n", modelPath);
+                }
+            }
+        }
+        /* Fallback: try relative path */
+        if (!g_testModel) {
+            g_testModel = graphics_loadmodel("../Models/cube.obj");
+            if (g_testModel) {
+                printf("Loaded cube model from ../Models/cube.obj (%d meshes)\n",
+                       model_get_mesh_count(g_testModel));
+            }
+        }
     }
 }
 
@@ -61,10 +102,38 @@ void framework_update(uint64_t deltaTime)
             text_set(g_testText, fpsText);
         }
     }
+
+    g_elapsed += (float)deltaTime / 1000.0f;
 }
 
 void framework_draw(void)
 {
+    /* Draw 3D test model */
+    if (g_testModel) {
+        int w, h;
+        window_getwindowsizeinpixels(&w, &h);
+        float aspect = (float)w / (float)h;
+
+        float proj[16], view[16], model[16], mvp[16], temp[16];
+
+        /* Perspective projection */
+        math_perspective(proj, 3.14159f * 0.5f, aspect, 0.1f, 100.0f);
+
+        /* View: camera at (0, 0, 3) looking at origin */
+        math_lookat(view, 0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
+
+        /* Model: rotate around Y axis */
+        math_identity(model);
+        math_rotate(model, model, g_elapsed * 0.5f, 0.0f, 1.0f, 0.0f);
+
+        /* MVP = proj * view * model */
+        math_multiply(temp, view, model);
+        math_multiply(mvp, proj, temp);
+
+        graphics_drawmodel(g_testModel, NULL, mvp);
+    }
+
+    /* Draw FPS text overlay */
     if (!g_testText || !g_testFont) {
         return;
     }

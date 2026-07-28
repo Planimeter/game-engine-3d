@@ -236,6 +236,12 @@ Model *model_load(const char *filepath)
     return model;
 }
 
+uint32_t model_get_mesh_count(const Model *model)
+{
+    if (!model) return 0;
+    return model->meshCount;
+}
+
 void model_destroy(Model *model)
 {
     if (!model) {

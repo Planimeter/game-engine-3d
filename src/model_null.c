@@ -10,3 +10,8 @@ Model *model_load(const char *filepath)
 void model_destroy(Model *model)
 {
 }
+
+uint32_t model_get_mesh_count(const Model *model)
+{
+    return 0;
+}

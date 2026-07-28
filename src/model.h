@@ -3,6 +3,7 @@
 #ifndef MODEL_H
 #define MODEL_H
 
+#include <stdint.h>
 #include <sys/types.h>
 
 #ifdef __cplusplus
@@ -61,6 +62,9 @@ extern "C" {
 /* Model loading and management */
 Model *model_load(const char *filepath);
 void   model_destroy(Model *model);
+
+/* C-compatible accessors for opaque Model struct */
+uint32_t model_get_mesh_count(const Model *model);
 
 #ifdef __cplusplus
 }

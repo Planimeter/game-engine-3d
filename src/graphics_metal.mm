@@ -535,45 +535,47 @@ void graphics_init() {
     g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];
     [sampDesc release];
     
-    /* Embedded fallback shaders (combined vertex + fragment in one MSL source) */
-    const char *fallbackCombined =
+    /* Embedded 3D fallback shader (combined vertex + fragment in one MSL source).
+     * Handles VERTEX_FORMAT_FULL: position(0), normal(1), tangent(2), bitangent(3), texcoord(4).
+     * Model matrix at buffer(1) to avoid conflict with vertex attribute buffer(0). */
+    const char *default3dCombined =
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
         "\n"
-        "struct VertexInput {\n"
+        "struct VertexIn {\n"
         "    float3 position [[attribute(0)]];\n"
-        "    float2 texcoord [[attribute(1)]];\n"
+        "    float3 normal   [[attribute(1)]];\n"
+        "    float3 tangent  [[attribute(2)]];\n"
+        "    float3 bitangent[[attribute(3)]];\n"
+        "    float2 texcoord [[attribute(4)]];\n"
         "};\n"
         "\n"
-        "struct VertexOutput {\n"
+        "struct VertexOut {\n"
         "    float4 position [[position]];\n"
         "    float2 texcoord;\n"
+        "    float3 normal;\n"
         "};\n"
         "\n"
-        "vertex VertexOutput vertex_main(\n"
-        "    VertexInput v [[stage_in]],\n"
-        "    constant float4x4 &modelViewProj [[buffer(1)]]\n"
+        "vertex VertexOut vertex_main(\n"
+        "    VertexIn v [[stage_in]],\n"
+        "    constant float4x4 &model [[buffer(1)]]\n"
         ") {\n"
-        "    VertexOutput out;\n"
-        "    out.position = modelViewProj * float4(v.position, 1.0);\n"
+        "    VertexOut out;\n"
+        "    out.position = model * float4(v.position, 1.0);\n"
         "    out.texcoord = v.texcoord;\n"
+        "    out.normal = v.normal;\n"
         "    return out;\n"
         "}\n"
         "\n"
-        "struct FragmentInput {\n"
-        "    float2 texcoord;\n"
-        "};\n"
-        "\n"
         "fragment float4 fragment_main(\n"
-        "    FragmentInput in [[stage_in]],\n"
-        "    texture2d<float> tex [[texture(0)]],\n"
-        "    sampler texSampler [[sampler(0)]]\n"
+        "    VertexOut in [[stage_in]]\n"
         ") {\n"
-        "    return tex.sample(texSampler, in.texcoord);\n"
+        "    /* Visualize normals as color for debugging */\n"
+        "    return float4(in.normal * 0.5 + 0.5, 1.0);\n"
         "}\n";
 
-    g_defaultVertShader = (MetalShader *)graphics_createshader(fallbackCombined, strlen(fallbackCombined), NULL, 0);
-    g_defaultFragShader = (MetalShader *)graphics_createshader(fallbackCombined, strlen(fallbackCombined), NULL, 0);
+    g_defaultVertShader = (MetalShader *)graphics_createshader(default3dCombined, strlen(default3dCombined), NULL, 0);
+    g_defaultFragShader = (MetalShader *)graphics_createshader(default3dCombined, strlen(default3dCombined), NULL, 0);
 
     /* Embedded text shaders (combined vertex + fragment in one MSL source) */
     const char *textCombined =
@@ -735,7 +737,25 @@ void graphics_present() {
 /*  Model loading and drawing                                          */
 /* ------------------------------------------------------------------ */
 
-Model *graphics_loadmodel(const char *filepath) { return model_load(filepath); }
+Model *graphics_loadmodel(const char *filepath) {
+    Model *model = model_load(filepath);
+    if (!model) return NULL;
+
+    /* Create GPU vertex and index buffers for each mesh */
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (mesh->vertexCount > 0) {
+            mesh->vertexBuffer = graphics_createvertexbuffer(
+                mesh->vertices, mesh->vertexCount * sizeof(Vertex));
+        }
+        if (mesh->indexCount > 0) {
+            mesh->indexBuffer = graphics_createindexbuffer(
+                mesh->indices, mesh->indexCount * sizeof(uint32_t));
+        }
+    }
+
+    return model;
+}
 
 void graphics_destroymodel(Model *model) {
     if (!model) return;

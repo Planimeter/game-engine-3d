@@ -163,6 +163,7 @@ set(SOURCES
     src/image_stb.c
     src/job_pthread.c
     src/main_sdl.c
+    src/math_glm.cpp
     src/model_assimp.cpp
     src/text.c
     src/timer_sdl.c
