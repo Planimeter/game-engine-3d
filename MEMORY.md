@@ -94,9 +94,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **No Skeletal Animation**
   Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
-- **Metal `graphics_present()` Synchronously Waits for GPU**
-  `metal_command_buffer_wait()` blocks the CPU until the GPU finishes rendering, defeating async triple-buffered rendering. Should submit to next frame's command buffer while GPU processes current one.
-
 - **Metal Shader Entry Points Are Hardcoded**
   All shaders must define `vertex_main` and `fragment_main`. Vulkan uses `"main"`. No support for compute shaders or custom entry points. Should be configurable.
 
