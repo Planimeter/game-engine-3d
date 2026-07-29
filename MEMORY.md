@@ -87,73 +87,70 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
     Every `graphics_drawmodel()` and `graphics_draw_instanced()` call created a new pipeline via `graphics_createpipeline()`, bound it, but never called `graphics_destroypipeline()`. Pipelines were allocated with `malloc` and tracked in `g_pipelines[]` array but never removed.
     - **Fix:** Added cache lookup in `graphics_createpipeline()` — scans existing pipelines for a match on `(vertShader, fragShader, vertexFormat, rasterState)` before allocating. Identical pipelines are reused instead of duplicated. Added `vertShader`/`fragShader` fields to `MetalPipeline` struct for cache key comparison.
 
-2. **Vulkan Render Pass Always Includes Depth Attachment** (`src/graphics_vulkan.cpp`)
-   The render pass definition unconditionally includes a depth attachment even when no pipeline uses depth testing. On some drivers this can cause issues — the depth attachment should be optional or per-pipeline.
-
-3. **`model_load()` Fragile Mesh Copy Loop** (`src/model_assimp.cpp` lines 223–229)
+2. **`model_load()` Fragile Mesh Copy Loop** (`src/model_assimp.cpp` lines 223–229)
    If `model_processmesh()` returns NULL for any mesh, the target slot remains zero-initialized while the loop continues. No validation that all meshes were successfully processed before returning. A consumer calling `graphics_drawmodel()` on this model will crash when iterating over uninitialized mesh data.
    - Fix: Track success count; if any mesh fails, destroy the entire model and return NULL.
 
 ### P2 — Medium Priority
 
-4. **Shader Variant System Is a No-Op**
+3. **Shader Variant System Is a No-Op**
    `graphics_createshader()` accepts macro definitions and passes them to shaderc on Vulkan, but `graphics_get_shader_variant()` returns the base shader unchanged (both backends). Defines are silently discarded for variant generation.
    - Fix: Either implement the variant system (cache compiled variants by define set hash) or deprecate the `defines` parameter.
 
-5. **No Framebuffer/Render Target Abstraction**
+4. **No Framebuffer/Render Target Abstraction**
    Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing. `graphics_createpass()` is a no-op stub on both backends.
    - Fix: Implement `graphics_createpass()` to create offscreen framebuffers with user-provided texture attachments.
 
-6. **No Skeletal Animation**
+5. **No Skeletal Animation**
    Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
-7. **Vulkan: No Pipeline Caching** (`src/graphics_vulkan.cpp`)
+6. **Vulkan: No Pipeline Caching** (`src/graphics_vulkan.cpp`)
    `graphics_setshader()` destroys and recreates the entire VkPipeline on every call — expensive for shader changes. Custom pipelines created via `graphics_createpipeline()` are tracked in a global array but never automatically bound during draw calls.
 
-8. **Vulkan: Shader Recompilation on Resize** (`src/graphics_vulkan.cpp`)
+7. **Vulkan: Shader Recompilation on Resize** (`src/graphics_vulkan.cpp`)
    `graphics_resize()` calls `graphics_createshaders()` which re-reads GLSL source and recompiles via shaderc, even though the shader source hasn't changed. Adds unnecessary latency during window resize.
    - Fix: Cache compiled SPIR-V in memory after first compilation; only recompile if source hash changes.
 
-9. **Metal `graphics_predraw()` Allocates New Render Pass Descriptor Per Frame**
+8. **Metal `graphics_predraw()` Allocates New Render Pass Descriptor Per Frame**
    `[MTLRenderPassDescriptor new]` is called every frame. Should be reused via class factory pattern.
 
-10. **Metal `graphics_present()` Synchronously Waits for GPU**
+9. **Metal `graphics_present()` Synchronously Waits for GPU**
     `metal_command_buffer_wait()` blocks the CPU until the GPU finishes rendering, defeating async triple-buffered rendering. Should submit to next frame's command buffer while GPU processes current one.
 
-11. **Metal Shader Entry Points Are Hardcoded**
+10. **Metal Shader Entry Points Are Hardcoded**
     All shaders must define `vertex_main` and `fragment_main`. Vulkan uses `"main"`. No support for compute shaders or custom entry points. Should be configurable.
 
-12. **Vulkan `graphics_createdevice()` — Pointer Initialization UB** (`src/graphics_vulkan.cpp` line 397)
+11. **Vulkan `graphics_createdevice()` — Pointer Initialization UB** (`src/graphics_vulkan.cpp` line 397)
     ```c
     const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     ```
     Initializes a pointer with an array initializer — compiles but is technically undefined behavior. Should be a proper array declaration.
 
-13. **Batch System Jobs Never Wired Up** (`src/font.c`)
+12. **Batch System Jobs Never Wired Up** (`src/font.c`)
     The batching system defines `shape_text_job` and `build_vertices_job` functions with job system integration, but `font_end_batch()` processes lines sequentially without using the job system. The parallel shaping infrastructure is defined but dead code.
 
-14. **No Error Return Codes — All Errors Call `exit()`**
+13. **No Error Return Codes — All Errors Call `exit()`**
     Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
 
-15. **Font Pipeline Shader Lifecycle Risk** (`src/font.c` lines 519–535)
+14. **Font Pipeline Shader Lifecycle Risk** (`src/font.c` lines 519–535)
     When SPIR-V shaders load successfully, they're created and then destroyed after the pipeline is built. The current backends copy shader state internally during `createpipeline()`, so this works — but it's fragile. If a backend ever stores raw shader pointers, this becomes a use-after-free.
 
-16. **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
+15. **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
     Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
 
-17. **`framework_resize()` Is a No-Op** (`src/framework.c`)
+16. **`framework_resize()` Is a No-Op** (`src/framework.c`)
     Window resize events are received in `event_sdl.c` and dispatched to `framework_resize()`, which does nothing. `graphics_resize()` is never called, so the Metal layer's `drawableSize` and Vulkan swapchain are never updated after initial creation.
 
-18. **Multi-Atlas Font Rendering Bug** (`src/font.c`)
+17. **Multi-Atlas Font Rendering Bug** (`src/font.c`)
     When a shaped line contains glyphs from multiple atlases (after atlas overflow), only the first glyph's atlas texture is bound. Glyphs packed into subsequent atlases render with wrong texture data.
 
-19. **`graphics_get_text_shaders()` Only Implemented for Metal**
+18. **`graphics_get_text_shaders()` Only Implemented for Metal**
     The Vulkan backend has no implementation. `font.c`'s MSL fallback path (line 538) calls this function — on Vulkan, if SPIR-V loading fails, the fallback silently produces no shaders and text rendering breaks.
 
-20. **`image_stb.c` Depends on Assimp Internal Structure** (`src/image_stb.c`)
+19. **`image_stb.c` Depends on Assimp Internal Structure** (`src/image_stb.c`)
     `#include "assimp-6.0.4/contrib/stb/stb_image.h"` — if Assimp updates or restructures its vendored stb_image location, this include breaks.
 
-21. **`graphics_opengl_sdl.c` Dead Code**
+20. **`graphics_opengl_sdl.c` Dead Code**
     The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
 ---
