@@ -56,6 +56,7 @@ The Metal backend (`src/graphics_metal.mm`, ~1030 lines) is a complete port of t
 ### Remaining Issues
 - `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
 - No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
+- `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded.
 
 ## Vulkan Backend Status (2026-07-29)
 
@@ -140,6 +141,21 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 16. **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
     Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
 
+17. **`framework_resize()` Is a No-Op** (`src/framework.c`)
+    Window resize events are received in `event_sdl.c` and dispatched to `framework_resize()`, which does nothing. `graphics_resize()` is never called, so the Metal layer's `drawableSize` and Vulkan swapchain are never updated after initial creation.
+
+18. **Multi-Atlas Font Rendering Bug** (`src/font.c`)
+    When a shaped line contains glyphs from multiple atlases (after atlas overflow), only the first glyph's atlas texture is bound. Glyphs packed into subsequent atlases render with wrong texture data.
+
+19. **`graphics_get_text_shaders()` Only Implemented for Metal**
+    The Vulkan backend has no implementation. `font.c`'s MSL fallback path (line 538) calls this function — on Vulkan, if SPIR-V loading fails, the fallback silently produces no shaders and text rendering breaks.
+
+20. **`image_stb.c` Depends on Assimp Internal Structure** (`src/image_stb.c`)
+    `#include "assimp-6.0.4/contrib/stb/stb_image.h"` — if Assimp updates or restructures its vendored stb_image location, this include breaks.
+
+21. **`graphics_opengl_sdl.c` Dead Code**
+    The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
+
 ---
 
 ## Job System Design Notes
@@ -207,7 +223,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ### Portable API Design
 - Graphics API is C99 with opaque handles (`typedef void* Shader, Texture, Material, Buffer, RenderPass, Pipeline`)
 - Dual backend: `#ifdef APPLE` selects Metal, else Vulkan
-- The Metal backend is less mature — many `graphics_*` functions are no-ops or stubs
+- The Metal backend is slightly less feature-complete — `graphics_beginpass()`/`graphics_endpass()` are no-ops and the render pass abstraction is not yet implemented — but all core rendering paths (model drawing, text, materials) are working
 - Some backends (OpenGL SDL, Null) exist but are not wired into the build system as primary backends
 
 ### Shader Compilation
