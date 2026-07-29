@@ -7,7 +7,7 @@
 ### Key Modules
 | Module | API Header | Primary Impl | Null/Stub Impl |
 |--------|-----------|-------------|----------------|
-| Graphics | `src/graphics.h` | `src/graphics_metal.mm` (macOS), `src/graphics_vulkan.cpp` (Linux/Windows) | `src/graphics_null.c`, `src/graphics_opengl_sdl.c` |
+| Graphics | `src/graphics.h` | `src/graphics_metal.mm` (macOS), `src/graphics_vulkan.cpp` (Linux/Windows), `src/graphics_opengl_sdl.c` (Linux/Windows with `-DUSE_OPENGL=ON`) | `src/graphics_null.c` |
 | Window/Input | `src/window.h`, `src/event.h` | `src/window_sdl.c`, `src/event_sdl.c` | `src/window_null.c`, `src/event_null.c` |
 | Audio | `src/audio.h` | `src/audio_openal.c` | `src/audio_null.c` |
 | Font/Text | `src/font.h`, `src/text.h` | `src/font.c`, `src/text.c` | — (font has no stub) |
@@ -54,7 +54,6 @@ The Metal backend (`src/graphics_metal.mm`, ~1030 lines) is a complete port of t
 - `metal_texture_update_region()` uses staging buffer + blit encoder
 
 ### Remaining Issues
-- `g_inPass` flag is set but `graphics_beginpass()`/`graphics_endpass()` are no-ops (just set/reset `g_inPass`)
 - No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
 - `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded.
 
@@ -74,7 +73,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - Blend modes: NONE, ALPHA, ADD, PREMULT
 
 ### Remaining Issues
-- `graphics_beginpass()`/`graphics_endpass()` are no-op stubs on both backends
 - Render pass always includes depth attachment even when no pipeline uses depth testing
 
 ---
@@ -84,21 +82,10 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 ### P2 — Medium Priority
 
 - **Shader Variant System Is a No-Op**
-  `graphics_createshader()` accepts macro definitions and passes them to shaderc on Vulkan, but `graphics_get_shader_variant()` returns the base shader unchanged (both backends). Defines are silently discarded for variant generation.
-  - Fix: Either implement the variant system (cache compiled variants by define set hash) or deprecate the `defines` parameter.
-
-- **No Framebuffer/Render Target Abstraction**
-  Hardcoded to swapchain only. No offscreen rendering, shadow maps, or post-processing. `graphics_createpass()` is a no-op stub on both backends.
-  - Fix: Implement `graphics_createpass()` to create offscreen framebuffers with user-provided texture attachments.
-
-- **No Skeletal Animation**
   Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
 - **No Error Return Codes — All Errors Call `exit()`**
   Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
-
-- **`graphics_opengl_sdl.c` Dead Code**
-  The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
 ---
 
@@ -166,9 +153,9 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ### Portable API Design
 - Graphics API is C99 with opaque handles (`typedef void* Shader, Texture, Material, Buffer, RenderPass, Pipeline`)
-- Dual backend: `#ifdef APPLE` selects Metal, else Vulkan
-- The Metal backend is slightly less feature-complete — `graphics_beginpass()`/`graphics_endpass()` are no-ops and the render pass abstraction is not yet implemented — but all core rendering paths (model drawing, text, materials) are working
-- Some backends (OpenGL SDL, Null) exist but are not wired into the build system as primary backends
+- Dual backend: `#ifdef APPLE` selects Metal, else Vulkan (or OpenGL with `-DUSE_OPENGL=ON`)
+- The Metal backend is slightly less feature-complete — the render pass abstraction was recently implemented but depth texture creation is still pending — but all core rendering paths (model drawing, text, materials) are working
+- Some backends (Null) exist but are not wired into the build system as primary backends
 
 ### Shader Compilation
 - **Vulkan**: Compiles GLSL→SPIR-V at runtime via shaderc library. Reads raw `.vert`/`.frag` GLSL source files, targets Vulkan 1.1 environment, performance optimization level. Supports macro definitions via `defines`/`defineCount`. Entry point: `main`.
@@ -194,4 +181,4 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 rendering pipeline defects have been fixed in both Metal and Vulkan backends — the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, and Vulkan runtime GLSL→SPIR-V compilation via shaderc eliminating the need for pre-compiled SPIR-V files.
 
-The most urgent remaining issues are the **Shader Variant System no-op** and **framebuffer abstraction** — both P2. The second priority is implementing `graphics_createpass()` for offscreen rendering (P2), which unlocks shadow maps, post-processing, and deferred rendering patterns.
+The most urgent remaining issue is the **Shader Variant System no-op** (P2). The framebuffer/render target abstraction has been implemented on both backends — `graphics_createpass()` now creates offscreen render passes with user-provided texture attachments, `graphics_beginpass(NULL)` resumes swapchain rendering, and `graphics_destroypass()` cleans up. This unlocks shadow maps, post-processing, and deferred rendering patterns.

@@ -216,9 +216,12 @@ set(SOURCES
     src/window_sdl.c
     )
 
-# Graphics backend: Metal on macOS, Vulkan elsewhere
+# Graphics backend: Metal on macOS, Vulkan elsewhere (or OpenGL if USE_OPENGL is set)
+option(USE_OPENGL "Use OpenGL backend instead of Vulkan on non-macOS platforms" OFF)
 if(APPLE)
     list(APPEND SOURCES src/graphics_metal.mm src/graphics_metal_helpers.m)
+elseif(USE_OPENGL)
+    list(APPEND SOURCES src/graphics_opengl_sdl.c)
 else()
     list(APPEND SOURCES src/graphics_vulkan.cpp)
 endif()
@@ -239,65 +242,85 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_C_STANDARD 99)
 
 # https://github.com/KhronosGroup/Vulkan-Samples/blob/3df7dba1b1f428f24cd9a242af78540a518f4b67/third_party/CMakeLists.txt#L53-L86
-if(ANDROID)
-    target_compile_definitions(game PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
-elseif(WIN32)
-    target_compile_definitions(game PUBLIC VK_USE_PLATFORM_WIN32_KHR)
-elseif(APPLE)
-    target_compile_definitions(game PUBLIC VK_USE_PLATFORM_METAL_EXT)
-elseif(UNIX)
-    # Choose WSI based on VKB_WSI_SELECTION
-    if (VKB_WSI_SELECTION STREQUAL XCB OR VKB_WSI_SELECTION STREQUAL XLIB OR VKB_WSI_SELECTION STREQUAL WAYLAND)
-        find_package(PkgConfig REQUIRED)
+if(NOT USE_OPENGL)
+    if(ANDROID)
+        target_compile_definitions(game PUBLIC VK_USE_PLATFORM_ANDROID_KHR)
+    elseif(WIN32)
+        target_compile_definitions(game PUBLIC VK_USE_PLATFORM_WIN32_KHR)
+    elseif(APPLE)
+        target_compile_definitions(game PUBLIC VK_USE_PLATFORM_METAL_EXT)
+    elseif(UNIX)
+        # Choose WSI based on VKB_WSI_SELECTION
+        if (VKB_WSI_SELECTION STREQUAL XCB OR VKB_WSI_SELECTION STREQUAL XLIB OR VKB_WSI_SELECTION STREQUAL WAYLAND)
+            find_package(PkgConfig REQUIRED)
+        endif()
+        if (VKB_WSI_SELECTION STREQUAL XCB)
+            pkg_check_modules(XCB xcb REQUIRED)
+            if (XCB_FOUND)
+                target_compile_definitions(game PUBLIC VK_USE_PLATFORM_XCB_KHR)
+            endif()
+        elseif (VKB_WSI_SELECTION STREQUAL XLIB)
+            pkg_check_modules(X11 x11 REQUIRED)
+            if (X11_FOUND)
+                target_compile_definitions(game PUBLIC VK_USE_PLATFORM_XLIB_KHR)
+            endif()
+        elseif (VKB_WSI_SELECTION STREQUAL WAYLAND)
+            pkg_check_modules(WAYLAND wayland-client REQUIRED)
+            if (WAYLAND_FOUND)
+                target_compile_definitions(game PUBLIC VK_USE_PLATFORM_WAYLAND_KHR)
+            endif()
+        elseif (VKB_WSI_SELECTION STREQUAL D2D)
+            set(DIRECT_TO_DISPLAY TRUE)
+            set(DIRECT_TO_DISPLAY TRUE PARENT_SCOPE)
+            target_compile_definitions(game PUBLIC VK_USE_PLATFORM_DISPLAY_KHR)
+        else()
+            # UNDONE: No Window System Integration (WSI) on GitHub Actions.
+            # message(FATAL_ERROR "Unknown WSI")
+        endif()
     endif()
-    if (VKB_WSI_SELECTION STREQUAL XCB)
-        pkg_check_modules(XCB xcb REQUIRED)
-        if (XCB_FOUND)
-            target_compile_definitions(game PUBLIC VK_USE_PLATFORM_XCB_KHR)
-        endif()
-    elseif (VKB_WSI_SELECTION STREQUAL XLIB)
-        pkg_check_modules(X11 x11 REQUIRED)
-        if (X11_FOUND)
-            target_compile_definitions(game PUBLIC VK_USE_PLATFORM_XLIB_KHR)
-        endif()
-    elseif (VKB_WSI_SELECTION STREQUAL WAYLAND)
-        pkg_check_modules(WAYLAND wayland-client REQUIRED)
-        if (WAYLAND_FOUND)
-            target_compile_definitions(game PUBLIC VK_USE_PLATFORM_WAYLAND_KHR)
-        endif()
-    elseif (VKB_WSI_SELECTION STREQUAL D2D)
-        set(DIRECT_TO_DISPLAY TRUE)
-        set(DIRECT_TO_DISPLAY TRUE PARENT_SCOPE)
-        target_compile_definitions(game PUBLIC VK_USE_PLATFORM_DISPLAY_KHR)
-    else()
-        # UNDONE: No Window System Integration (WSI) on GitHub Actions.
-        # message(FATAL_ERROR "Unknown WSI")
-    endif()
-endif()
 
-set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
-if (APPLE)
-    target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
+    set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
+    if (APPLE)
+        target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
+    endif()
 endif()
 
 if(NOT WIN32)
     find_package(Threads REQUIRED)
 endif()
 
-target_link_libraries(game PUBLIC
-    PhysFS::PhysFS
-    SDL3::SDL3
-    volk::volk
-    VulkanMemoryAllocator
-    glm::glm
-    freetype
-    harfbuzz
-    shaderc
-    assimp::assimp
-    OpenAL
-    libcef_lib
-    libcef_dll_wrapper
-)
+if(USE_OPENGL)
+    target_link_libraries(game PUBLIC
+        PhysFS::PhysFS
+        SDL3::SDL3
+        glm::glm
+        freetype
+        harfbuzz
+        assimp::assimp
+        OpenAL
+        libcef_lib
+        libcef_dll_wrapper
+    )
+    if(NOT WIN32)
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(game PUBLIC OpenGL::GL)
+    endif()
+else()
+    target_link_libraries(game PUBLIC
+        PhysFS::PhysFS
+        SDL3::SDL3
+        volk::volk
+        VulkanMemoryAllocator
+        glm::glm
+        freetype
+        harfbuzz
+        shaderc
+        assimp::assimp
+        OpenAL
+        libcef_lib
+        libcef_dll_wrapper
+    )
+endif()
 
 if(NOT WIN32)
     target_link_libraries(game PUBLIC Threads::Threads)
