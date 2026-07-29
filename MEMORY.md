@@ -94,9 +94,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **No Skeletal Animation**
   Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
-- **Metal Shader Entry Points Are Hardcoded**
-  All shaders must define `vertex_main` and `fragment_main`. Vulkan uses `"main"`. No support for compute shaders or custom entry points. Should be configurable.
-
 - **No Error Return Codes — All Errors Call `exit()`**
   Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
 
