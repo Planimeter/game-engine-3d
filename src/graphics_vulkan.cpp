@@ -2015,6 +2015,7 @@ void graphics_draw_instanced(Model *model,
 void graphics_draw_buffers(Buffer vertexBuffer,
                            Buffer indexBuffer,
                            size_t indexCount,
+                           size_t firstIndex,
                            Material mat,
                            const float *transform4x4)
 {
@@ -2037,7 +2038,7 @@ void graphics_draw_buffers(Buffer vertexBuffer,
 
     vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertex->buffer, offsets);
     vkCmdBindIndexBuffer(commandBuffers[imageIndex], index->buffer, 0, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(commandBuffers[imageIndex], (uint32_t)indexCount, 1, 0, 0, 0);
+    vkCmdDrawIndexed(commandBuffers[imageIndex], (uint32_t)indexCount, 1, (uint32_t)firstIndex, 0, 0);
 }
 
 Material graphics_creatematerial(Shader shader)

@@ -197,12 +197,14 @@ void graphics_draw_instanced(Model *model,
 void graphics_draw_buffers(Buffer vertexBuffer,
                            Buffer indexBuffer,
                            size_t indexCount,
+                           size_t firstIndex,
                            Material mat,
                            const float *transform4x4)
 {
     (void)vertexBuffer;
     (void)indexBuffer;
     (void)indexCount;
+    (void)firstIndex;
     (void)mat;
     (void)transform4x4;
 }

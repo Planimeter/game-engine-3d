@@ -1028,7 +1028,7 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
 }
 
 void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t indexCount,
-                           Material mat, const float *transform4x4) {
+                           size_t firstIndex, Material mat, const float *transform4x4) {
     if (!g_currentEncoder || !vertexBuffer) return;
 
     MetalBuffer *vb = (MetalBuffer *)vertexBuffer;
@@ -1049,6 +1049,6 @@ void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t index
         MetalBuffer *ib = (MetalBuffer *)indexBuffer;
         metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
                                               (NSUInteger)indexCount, MTLIndexTypeUInt32,
-                                              ib->buffer, 0, 1);
+                                              ib->buffer, firstIndex * sizeof(uint32_t), 1);
     }
 }

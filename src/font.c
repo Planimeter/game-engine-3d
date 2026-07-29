@@ -774,16 +774,32 @@ void font_print(Font *font,
         }
 
         {
-            /* Determine which atlas this line's first glyph is packed in */
-            uint32_t first_id = infos[0].codepoint;
-            Glyph *first_glyph = font_find_glyph(font, first_id);
-            int atlas_idx = first_glyph ? first_glyph->atlas_index : 0;
-            if (atlas_idx >= font->atlas_count) {
-                atlas_idx = 0;
+            /* Draw glyphs grouped by atlas so each sub-range uses the correct texture */
+            size_t group_start = 0;
+            int current_atlas = -1;
+            for (size_t gi = 0; gi <= glyph_count; gi++) {
+                int atlas_idx = 0;
+                if (gi < glyph_count) {
+                    uint32_t gid = infos[gi].codepoint;
+                    Glyph *g = font_find_glyph(font, gid);
+                    atlas_idx = g ? g->atlas_index : 0;
+                    if (atlas_idx >= font->atlas_count) {
+                        atlas_idx = 0;
+                    }
+                }
+                if (gi == 0) {
+                    current_atlas = atlas_idx;
+                }
+                if (atlas_idx != current_atlas || gi == glyph_count) {
+                    size_t group_count = gi - group_start;
+                    graphics_bindtexture(font->atlases[current_atlas].texture, 0);
+                    graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
+                                         group_count * 6, group_start * 6, NULL, NULL);
+                    group_start = gi;
+                    current_atlas = atlas_idx;
+                }
             }
-            graphics_bindtexture(font->atlases[atlas_idx].texture, 0);
         }
-        graphics_draw_buffers(font->vertex_buffer, font->index_buffer, index_count, NULL, NULL);
 
         if (*line_end == '\n') {
             line_start = line_end + 1;
@@ -1075,17 +1091,32 @@ void font_end_batch(Font *font)
         }
 
         {
-            /* Determine atlas from first glyph in this line */
-            uint32_t first_id = line->infos[0].codepoint;
-            Glyph *first_glyph = font_find_glyph(font, first_id);
-            int atlas_idx = first_glyph ? first_glyph->atlas_index : 0;
-            if (atlas_idx >= font->atlas_count) {
-                atlas_idx = 0;
+            /* Draw glyphs grouped by atlas so each sub-range uses the correct texture */
+            size_t group_start = 0;
+            int current_atlas = -1;
+            for (size_t gi = 0; gi <= line->glyph_count; gi++) {
+                int atlas_idx = 0;
+                if (gi < line->glyph_count) {
+                    uint32_t gid = line->infos[gi].codepoint;
+                    Glyph *g = font_find_glyph(font, gid);
+                    atlas_idx = g ? g->atlas_index : 0;
+                    if (atlas_idx >= font->atlas_count) {
+                        atlas_idx = 0;
+                    }
+                }
+                if (gi == 0) {
+                    current_atlas = atlas_idx;
+                }
+                if (atlas_idx != current_atlas || gi == line->glyph_count) {
+                    size_t group_count = gi - group_start;
+                    graphics_bindtexture(font->atlases[current_atlas].texture, 0);
+                    graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
+                                         group_count * 6, group_start * 6, NULL, NULL);
+                    group_start = gi;
+                    current_atlas = atlas_idx;
+                }
             }
-            graphics_bindtexture(font->atlases[atlas_idx].texture, 0);
         }
-        graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
-                             line_indices, NULL, NULL);
     }
 
 cleanup_lines:
