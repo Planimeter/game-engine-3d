@@ -74,6 +74,7 @@ static id<CAMetalDrawable> g_currentDrawable = nil;
 
 /* Default sampler */
 static id<MTLSamplerState> g_defaultSampler = nil;
+static MTLRenderPassDescriptor *g_renderPassDescriptor = nil;
 
 /* Uniform buffer */
 #define UNIFORM_BUFFER_SIZE 4096
@@ -821,6 +822,9 @@ void graphics_shutdown() {
     if (g_defaultVertShader) graphics_destroyshader((Shader)g_defaultVertShader);
     if (g_defaultFragShader) graphics_destroyshader((Shader)g_defaultFragShader);
 
+    if (g_renderPassDescriptor) [g_renderPassDescriptor release];
+    g_renderPassDescriptor = nil;
+
     g_metalLayer = nil;
 
     if (g_commandQueue) [g_commandQueue release];
@@ -852,20 +856,22 @@ void graphics_predraw() {
     }
     g_minimized = 0;
 
-    /* Create render pass descriptor */
-    MTLRenderPassDescriptor *passDesc = [MTLRenderPassDescriptor new];
-    passDesc.colorAttachments[0].texture = g_currentDrawable.texture;
-    passDesc.colorAttachments[0].loadAction = MTLLoadActionClear;
-    passDesc.colorAttachments[0].storeAction = MTLStoreActionStore;
-    passDesc.colorAttachments[0].clearColor = MTLClearColorMake(
+    /* Reuse cached render pass descriptor */
+    if (!g_renderPassDescriptor) {
+        g_renderPassDescriptor = [MTLRenderPassDescriptor new];
+    }
+    g_renderPassDescriptor.colorAttachments[0].texture = g_currentDrawable.texture;
+    g_renderPassDescriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
+    g_renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+    g_renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(
         CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]);
-    passDesc.depthAttachment.clearDepth = 1.0;
+    g_renderPassDescriptor.depthAttachment.clearDepth = 1.0;
 
     /* Begin command buffer and render encoder */
     if (g_currentCommandBuffer) [g_currentCommandBuffer release];
     g_currentCommandBuffer = (id<MTLCommandBuffer>)metal_command_queue_new_command_buffer(g_commandQueue);
 
-    g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(g_currentCommandBuffer, passDesc);
+    g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(g_currentCommandBuffer, g_renderPassDescriptor);
 
     /* Set viewport */
     double vp[6] = {
