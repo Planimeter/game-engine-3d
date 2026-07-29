@@ -30,6 +30,8 @@ typedef struct {
     int pen_x;
     int pen_y;
     int row_height;
+    unsigned char *pixels;
+    int dirty;
 } Atlas;
 
 typedef struct {
@@ -250,7 +252,8 @@ static int font_add_atlas(Font *font)
     }
 
     atlas->texture = graphics_createtexture_rgba(atlas->width, atlas->height, pixels);
-    free(pixels);
+    atlas->pixels = pixels;
+    atlas->dirty = 0;
 
     if (!atlas->texture) {
         return 0;
@@ -309,6 +312,7 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
     }
 
     if (glyph->width > 0 && glyph->height > 0) {
+        Atlas *atlas = &font->atlases[glyph->atlas_index];
         size_t pixel_count = (size_t)glyph->width * (size_t)glyph->height;
         size_t rgba_size = pixel_count * 4;
         unsigned char *rgba = (unsigned char *)malloc(rgba_size);
@@ -325,9 +329,16 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
             rgba[i * 4 + 3] = alpha;
         }
 
-        graphics_updatetexture(font->atlases[glyph->atlas_index].texture,
-                               glyph->x, glyph->y,
-                               glyph->width, glyph->height, rgba);
+        /* Write to CPU-side atlas buffer; defer GPU upload */
+        if (atlas->pixels) {
+            unsigned char *dst = atlas->pixels + ((size_t)glyph->y * atlas->width + glyph->x) * 4;
+            for (int row = 0; row < glyph->height; row++) {
+                memcpy(dst + (size_t)row * atlas->width * 4,
+                       rgba + (size_t)row * glyph->width * 4,
+                       (size_t)glyph->width * 4);
+            }
+            atlas->dirty = 1;
+        }
         free(rgba);
     }
 
@@ -594,6 +605,8 @@ void font_destroy(Font *font)
         if (font->atlases[i].texture) {
             graphics_destroytexture(font->atlases[i].texture);
         }
+        free(font->atlases[i].pixels);
+        font->atlases[i].pixels = NULL;
     }
 
     if (font->hb_buffer) {
@@ -681,6 +694,23 @@ int font_get_height(Font *font)
     return font->height;
 }
 
+static void font_flush_atlases(Font *font)
+{
+    if (!font) {
+        return;
+    }
+
+    for (int i = 0; i < font->atlas_count; i++) {
+        Atlas *atlas = &font->atlases[i];
+        if (atlas->dirty && atlas->pixels && atlas->texture) {
+            graphics_updatetexture(atlas->texture,
+                                   0, 0, atlas->width, atlas->height,
+                                    atlas->pixels);
+            atlas->dirty = 0;
+        }
+    }
+}
+
 void font_print(Font *font,
                 const char *text,
                 float x, float y,
@@ -710,6 +740,8 @@ void font_print(Font *font,
     if (sy == 0.0f) {
         sy = 1.0f;
     }
+
+    font_flush_atlases(font);
 
     line_start = text;
     while (*line_start) {
@@ -1133,7 +1165,8 @@ void font_end_batch(Font *font)
             }
         }
 
-        /* Phase 5: Single upload and draw */
+        /* Phase 5: Flush atlas uploads, then single upload and draw */
+        font_flush_atlases(font);
         {
             /* Ensure GPU buffers are large enough */
             if (!font->vertex_buffer || vertex_bytes > font->vertex_capacity) {
