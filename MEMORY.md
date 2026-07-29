@@ -81,12 +81,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 
 ## 🔴 Critical Issues
 
-### P1 — High Priority
-
-- **Metal Backend: Pipeline Memory Leak in Draw Path** (`src/graphics_metal.mm`) — **FIXED**
-    Every `graphics_drawmodel()` and `graphics_draw_instanced()` call created a new pipeline via `graphics_createpipeline()`, bound it, but never called `graphics_destroypipeline()`. Pipelines were allocated with `malloc` and tracked in `g_pipelines[]` array but never removed.
-    - **Fix:** Added cache lookup in `graphics_createpipeline()` — scans existing pipelines for a match on `(vertShader, fragShader, vertexFormat, rasterState)` before allocating. Identical pipelines are reused instead of duplicated. Added `vertShader`/`fragShader` fields to `MetalPipeline` struct for cache key comparison.
-
 ### P2 — Medium Priority
 
 - **Shader Variant System Is a No-Op**
@@ -127,9 +121,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 
 - **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
   Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
-
-- **`framework_resize()` Is a No-Op** (`src/framework.c`)
-  Window resize events are received in `event_sdl.c` and dispatched to `framework_resize()`, which does nothing. `graphics_resize()` is never called, so the Metal layer's `drawableSize` and Vulkan swapchain are never updated after initial creation.
 
 - **Multi-Atlas Font Rendering Bug** (`src/font.c`)
   When a shaped line contains glyphs from multiple atlases (after atlas overflow), only the first glyph's atlas texture is bound. Glyphs packed into subsequent atlases render with wrong texture data.
@@ -237,4 +228,4 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 rendering pipeline defects have been fixed in both Metal and Vulkan backends — the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, and Vulkan runtime GLSL→SPIR-V compilation via shaderc eliminating the need for pre-compiled SPIR-V files.
 
-The most urgent remaining issue is the **Metal backend pipeline memory leak in the draw path** (P1) — every frame that renders a model creates an unreleased pipeline object. The second priority is implementing `graphics_createpass()` for offscreen rendering (P2), which unlocks shadow maps, post-processing, and deferred rendering patterns.
+The most urgent remaining issues are the **Shader Variant System no-op** and **framebuffer abstraction** — both P2. The second priority is implementing `graphics_createpass()` for offscreen rendering (P2), which unlocks shadow maps, post-processing, and deferred rendering patterns.

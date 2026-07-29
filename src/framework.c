@@ -164,6 +164,8 @@ void framework_move(int x, int y)
 
 void framework_resize(int width, int height)
 {
+    (void)width; (void)height;
+    graphics_resize();
 }
 
 void framework_minimize(void)
