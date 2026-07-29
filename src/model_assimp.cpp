@@ -219,14 +219,24 @@ Model *model_load(const char *filepath)
         return NULL;
     }
 
+    uint32_t processedCount = 0;
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = model_processmesh(scene->mMeshes[i], scene);
         if (mesh) {
             model->meshes[i] = *mesh;
             free(mesh);
+            processedCount++;
         } else {
             fprintf(stderr, "Failed to process mesh %d\n", i);
         }
+    }
+
+    if (processedCount != model->meshCount) {
+        fprintf(stderr, "Failed to load model '%s': only %u/%u meshes processed successfully\n",
+                filepath, processedCount, model->meshCount);
+        model_destroy(model);
+        aiReleaseImport(scene);
+        return NULL;
     }
 
     aiReleaseImport(scene);
