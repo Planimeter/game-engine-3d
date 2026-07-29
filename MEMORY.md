@@ -94,9 +94,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **No Skeletal Animation**
   Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
-- **Vulkan: No Pipeline Caching** (`src/graphics_vulkan.cpp`)
-  `graphics_setshader()` destroys and recreates the entire VkPipeline on every call — expensive for shader changes. Custom pipelines created via `graphics_createpipeline()` are tracked in a global array but never automatically bound during draw calls.
-
 - **Vulkan: Shader Recompilation on Resize** (`src/graphics_vulkan.cpp`)
   `graphics_resize()` calls `graphics_createshaders()` which re-reads GLSL source and recompiles via shaderc, even though the shader source hasn't changed. Adds unnecessary latency during window resize.
   - Fix: Cache compiled SPIR-V in memory after first compilation; only recompile if source hash changes.
