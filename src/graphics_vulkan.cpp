@@ -394,7 +394,7 @@ static void graphics_createdevice()
     VkDeviceCreateInfo createInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     float queuePriority = 1.0f;
-    const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const char *enabledExtensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     VkResult result;
 
     /* Enable Vulkan 1.2 features for bindless rendering */
@@ -418,7 +418,7 @@ static void graphics_createdevice()
     createInfo.queueCreateInfoCount    = 1;
     createInfo.pQueueCreateInfos       = &queueCreateInfo;
     createInfo.enabledExtensionCount   = 1;
-    createInfo.ppEnabledExtensionNames = &enabledExtensionNames;
+    createInfo.ppEnabledExtensionNames = enabledExtensionNames;
     createInfo.pNext                   = &vulkan12Features;
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#vkCreateDevice */

@@ -116,12 +116,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **Metal Shader Entry Points Are Hardcoded**
   All shaders must define `vertex_main` and `fragment_main`. Vulkan uses `"main"`. No support for compute shaders or custom entry points. Should be configurable.
 
-- **Vulkan `graphics_createdevice()` — Pointer Initialization UB** (`src/graphics_vulkan.cpp` line 397)
-  ```c
-  const char *enabledExtensionNames = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
-  ```
-  Initializes a pointer with an array initializer — compiles but is technically undefined behavior. Should be a proper array declaration.
-
 - **Batch System Jobs Never Wired Up** (`src/font.c`)
   The batching system defines `shape_text_job` and `build_vertices_job` functions with job system integration, but `font_end_batch()` processes lines sequentially without using the job system. The parallel shaping infrastructure is defined but dead code.
 
