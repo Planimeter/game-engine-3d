@@ -183,7 +183,7 @@ static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
 
 Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
                              const char **defines, size_t defineCount) {
-    (void)stage; (void)defines; (void)defineCount;
+    (void)defines; (void)defineCount;
 
     MetalShader *shader = (MetalShader *)calloc(1, sizeof(MetalShader));
     if (!shader) return NULL;
@@ -204,14 +204,29 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     }
 
     shader->library = library;
-    shader->vertFunc = (id<MTLFunction>)metal_library_new_function(library, "vertex_main");
-    shader->fragFunc = (id<MTLFunction>)metal_library_new_function(library, "fragment_main");
 
-    if (!shader->vertFunc || !shader->fragFunc) {
-        fprintf(stderr, "Metal: could not find vertex_main/fragment_main in shader\n");
+    const char *entryPoint = NULL;
+    switch (stage) {
+        case SHADER_STAGE_VERTEX:
+            entryPoint = "vertex_main";
+            break;
+        case SHADER_STAGE_FRAGMENT:
+            entryPoint = "fragment_main";
+            break;
+    }
+
+    id<MTLFunction> function = (id<MTLFunction>)metal_library_new_function(library, entryPoint);
+    if (!function) {
+        fprintf(stderr, "Metal: could not find entry point '%s' in shader\n", entryPoint);
         [library release];
         free(shader);
         return NULL;
+    }
+
+    if (stage == SHADER_STAGE_VERTEX) {
+        shader->vertFunc = function;
+    } else {
+        shader->fragFunc = function;
     }
 
     return (Shader)shader;
