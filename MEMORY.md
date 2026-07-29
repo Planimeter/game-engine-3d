@@ -116,9 +116,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **No Error Return Codes — All Errors Call `exit()`**
   Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
 
-- **Font Pipeline Shader Lifecycle Risk** (`src/font.c` lines 519–535)
-  When SPIR-V shaders load successfully, they're created and then destroyed after the pipeline is built. The current backends copy shader state internally during `createpipeline()`, so this works — but it's fragile. If a backend ever stores raw shader pointers, this becomes a use-after-free.
-
 - **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
   Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
 
