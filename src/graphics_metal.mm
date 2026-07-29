@@ -902,7 +902,6 @@ void graphics_present() {
 
     metal_command_buffer_present(g_currentCommandBuffer, g_currentDrawable);
     metal_command_buffer_commit(g_currentCommandBuffer);
-    metal_command_buffer_wait(g_currentCommandBuffer);
 
     [g_currentCommandBuffer release];
     g_currentCommandBuffer = nil;
