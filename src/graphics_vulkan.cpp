@@ -90,6 +90,16 @@ typedef struct {
 	RasterState rasterState;
 } GPUPipeline;
 
+/* Pipeline cache for graphics_setshader — avoids destroy+recreate for repeated shader pairs */
+#define MAX_CACHED_PIPELINES 16
+typedef struct {
+	VkPipeline pipeline;
+	VkShaderModule vertShader;
+	VkShaderModule fragShader;
+} CachedPipeline;
+static CachedPipeline g_cachedPipelines[MAX_CACHED_PIPELINES];
+static int g_cachedPipelineCount = 0;
+
 /* 12.2. Images */
 static VkFormat depthFormat = VK_FORMAT_UNDEFINED;
 static VkImage depthImage = VK_NULL_HANDLE;
@@ -872,6 +882,9 @@ static void graphics_createshaders()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
 static void graphics_creategraphicspipeline()
 {
+    /* Invalidate pipeline cache — any cached handles are now stale */
+    g_cachedPipelineCount = 0;
+
     VkGraphicsPipelineCreateInfo                  createInfo               = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo               vertShaderStage          = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo               fragShaderStage          = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
@@ -2793,9 +2806,35 @@ void graphics_resize()
 
 void graphics_setshader(Shader _vertShader, Shader _fragShader)
 {
+    VkShaderModule vertModule = (VkShaderModule)_vertShader;
+    VkShaderModule fragModule = (VkShaderModule)_fragShader;
+
+    /* Check cache for existing pipeline with same shader pair */
+    for (int i = 0; i < g_cachedPipelineCount; i++) {
+        if (g_cachedPipelines[i].vertShader == vertModule &&
+            g_cachedPipelines[i].fragShader == fragModule)
+        {
+            if (graphicsPipeline != VK_NULL_HANDLE) {
+                vkDestroyPipeline(device, graphicsPipeline, NULL);
+            }
+            graphicsPipeline = g_cachedPipelines[i].pipeline;
+            vertShader = _vertShader;
+            fragShader = _fragShader;
+            return;
+        }
+    }
+
     vertShader = _vertShader;
     fragShader = _fragShader;
     graphics_creategraphicspipeline();
+
+    /* Cache the newly created pipeline if space remains */
+    if (g_cachedPipelineCount < MAX_CACHED_PIPELINES) {
+        g_cachedPipelines[g_cachedPipelineCount].pipeline = graphicsPipeline;
+        g_cachedPipelines[g_cachedPipelineCount].vertShader = vertModule;
+        g_cachedPipelines[g_cachedPipelineCount].fragShader = fragModule;
+        g_cachedPipelineCount++;
+    }
 }
 
 void graphics_shutdown(void)
@@ -2814,6 +2853,13 @@ void graphics_shutdown(void)
             vkDestroySurfaceKHR(instance, surface, NULL);
         }
         if (graphicsPipeline != VK_NULL_HANDLE) {
+            /* Destroy all cached pipelines */
+            for (int i = 0; i < g_cachedPipelineCount; i++) {
+                if (g_cachedPipelines[i].pipeline != graphicsPipeline) {
+                    vkDestroyPipeline(device, g_cachedPipelines[i].pipeline, NULL);
+                }
+            }
+            g_cachedPipelineCount = 0;
             vkDestroyPipeline(device, graphicsPipeline, NULL);
         }
         if (pipelineLayout != VK_NULL_HANDLE) {

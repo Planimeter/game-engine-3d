@@ -116,9 +116,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
   Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
 
-- **Multi-Atlas Font Rendering Bug** (`src/font.c`)
-  When a shaped line contains glyphs from multiple atlases (after atlas overflow), only the first glyph's atlas texture is bound. Glyphs packed into subsequent atlases render with wrong texture data.
-
 - **`graphics_opengl_sdl.c` Dead Code**
   The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
