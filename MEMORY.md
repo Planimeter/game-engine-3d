@@ -101,9 +101,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
   `graphics_resize()` calls `graphics_createshaders()` which re-reads GLSL source and recompiles via shaderc, even though the shader source hasn't changed. Adds unnecessary latency during window resize.
   - Fix: Cache compiled SPIR-V in memory after first compilation; only recompile if source hash changes.
 
-- **Metal `graphics_predraw()` Allocates New Render Pass Descriptor Per Frame**
-  `[MTLRenderPassDescriptor new]` is called every frame. Should be reused via class factory pattern.
-
 - **Metal `graphics_present()` Synchronously Waits for GPU**
   `metal_command_buffer_wait()` blocks the CPU until the GPU finishes rendering, defeating async triple-buffered rendering. Should submit to next frame's command buffer while GPU processes current one.
 
