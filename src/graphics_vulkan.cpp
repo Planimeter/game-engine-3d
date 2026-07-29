@@ -76,6 +76,14 @@ static Shader fragShader;
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
 
+/* Cached SPIR-V binaries to avoid recompilation on resize */
+typedef struct {
+	uint32_t *data;
+	size_t    size;
+} CachedSPIRV;
+static CachedSPIRV g_cachedVertSPIRV;
+static CachedSPIRV g_cachedFragSPIRV;
+
 /* 10. Pipelines */
 static VkPipelineLayout pipelineLayout;
 static VkPipeline graphicsPipeline;
@@ -864,6 +872,28 @@ static void graphics_createframebuffers()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
 static void graphics_createshaders()
 {
+    if (g_cachedVertSPIRV.data && g_cachedFragSPIRV.data) {
+        /* Reuse cached SPIR-V on resize — skip shaderc recompilation */
+        VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+
+        createInfo.codeSize = g_cachedVertSPIRV.size;
+        createInfo.pCode    = g_cachedVertSPIRV.data;
+        VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&vertShader);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create cached vert shader module: %d\n", vkResult);
+            exit(EXIT_FAILURE);
+        }
+
+        createInfo.codeSize = g_cachedFragSPIRV.size;
+        createInfo.pCode    = g_cachedFragSPIRV.data;
+        vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&fragShader);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create cached frag shader module: %d\n", vkResult);
+            exit(EXIT_FAILURE);
+        }
+        return;
+    }
+
     char   *vertSource;
     size_t  vertSize;
     char   *fragSource;
@@ -871,8 +901,73 @@ static void graphics_createshaders()
 
     vertSize   = filesystem_fileread((void **)&vertSource, "shaders/triangle.vert");
     fragSize   = filesystem_fileread((void **)&fragSource, "shaders/triangle.frag");
-    vertShader = graphics_createshader(SHADER_STAGE_VERTEX, vertSource, vertSize, NULL, 0);
-    fragShader = graphics_createshader(SHADER_STAGE_FRAGMENT, fragSource, fragSize, NULL, 0);
+
+    /* Compile and cache vertex SPIR-V */
+    {
+        shaderc_shader_kind kind = shaderc_glsl_vertex_shader;
+        shaderc_compile_options_t options = shaderc_compile_options_initialize();
+        shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+        shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+        shaderc_compilation_result_t result = shaderc_compile_into_spv(
+            g_shaderc_compiler, vertSource, vertSize, kind, "shader", "main", options);
+        shaderc_compile_options_release(options);
+
+        if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+            fprintf(stderr, "Vertex shader compilation failed:\n%s\n",
+                    shaderc_result_get_error_message(result));
+            shaderc_result_release(result);
+            exit(EXIT_FAILURE);
+        }
+
+        size_t spvSize = shaderc_result_get_length(result);
+        g_cachedVertSPIRV.data = (uint32_t *)malloc(spvSize);
+        memcpy(g_cachedVertSPIRV.data, shaderc_result_get_bytes(result), spvSize);
+        g_cachedVertSPIRV.size = spvSize;
+
+        VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        createInfo.codeSize = spvSize;
+        createInfo.pCode    = g_cachedVertSPIRV.data;
+        VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&vertShader);
+        shaderc_result_release(result);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create vert shader module: %d\n", vkResult);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    /* Compile and cache fragment SPIR-V */
+    {
+        shaderc_shader_kind kind = shaderc_glsl_fragment_shader;
+        shaderc_compile_options_t options = shaderc_compile_options_initialize();
+        shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+        shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+        shaderc_compilation_result_t result = shaderc_compile_into_spv(
+            g_shaderc_compiler, fragSource, fragSize, kind, "shader", "main", options);
+        shaderc_compile_options_release(options);
+
+        if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+            fprintf(stderr, "Fragment shader compilation failed:\n%s\n",
+                    shaderc_result_get_error_message(result));
+            shaderc_result_release(result);
+            exit(EXIT_FAILURE);
+        }
+
+        size_t spvSize = shaderc_result_get_length(result);
+        g_cachedFragSPIRV.data = (uint32_t *)malloc(spvSize);
+        memcpy(g_cachedFragSPIRV.data, shaderc_result_get_bytes(result), spvSize);
+        g_cachedFragSPIRV.size = spvSize;
+
+        VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        createInfo.codeSize = spvSize;
+        createInfo.pCode    = g_cachedFragSPIRV.data;
+        VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&fragShader);
+        shaderc_result_release(result);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create frag shader module: %d\n", vkResult);
+            exit(EXIT_FAILURE);
+        }
+    }
+
     free(fragSource);
     fragSource = NULL;
     free(vertSource);
@@ -2862,6 +2957,18 @@ void graphics_shutdown(void)
             g_cachedPipelineCount = 0;
             vkDestroyPipeline(device, graphicsPipeline, NULL);
         }
+        /* Free cached SPIR-V binaries */
+        if (g_cachedVertSPIRV.data) {
+            free(g_cachedVertSPIRV.data);
+            g_cachedVertSPIRV.data = NULL;
+            g_cachedVertSPIRV.size = 0;
+        }
+        if (g_cachedFragSPIRV.data) {
+            free(g_cachedFragSPIRV.data);
+            g_cachedFragSPIRV.data = NULL;
+            g_cachedFragSPIRV.size = 0;
+        }
+
         if (pipelineLayout != VK_NULL_HANDLE) {
             vkDestroyPipelineLayout(device, pipelineLayout, NULL);
         }
