@@ -83,9 +83,9 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 
 ### P1 — High Priority
 
-1. **Metal Backend: Pipeline Memory Leak in Draw Path** (`src/graphics_metal.mm`)
-   Every `graphics_drawmodel()` and `graphics_draw_instanced()` call creates a new pipeline via `graphics_createpipeline()`, binds it, but never calls `graphics_destroypipeline()`. Pipelines are allocated with `malloc` and tracked in `g_pipelines[]` array but never removed. Over time this will exhaust memory.
-   - Fix: Cache pipelines by shader+format+rasterState combination (keyed hash), or use a global default pipeline with `graphics_setshader()` for state changes.
+1. **Metal Backend: Pipeline Memory Leak in Draw Path** (`src/graphics_metal.mm`) — **FIXED**
+    Every `graphics_drawmodel()` and `graphics_draw_instanced()` call created a new pipeline via `graphics_createpipeline()`, bound it, but never called `graphics_destroypipeline()`. Pipelines were allocated with `malloc` and tracked in `g_pipelines[]` array but never removed.
+    - **Fix:** Added cache lookup in `graphics_createpipeline()` — scans existing pipelines for a match on `(vertShader, fragShader, vertexFormat, rasterState)` before allocating. Identical pipelines are reused instead of duplicated. Added `vertShader`/`fragShader` fields to `MetalPipeline` struct for cache key comparison.
 
 2. **Vulkan Render Pass Always Includes Depth Attachment** (`src/graphics_vulkan.cpp`)
    The render pass definition unconditionally includes a depth attachment even when no pipeline uses depth testing. On some drivers this can cause issues — the depth attachment should be optional or per-pipeline.

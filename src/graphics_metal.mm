@@ -31,6 +31,8 @@ struct MetalShader {
 struct MetalPipeline {
     id<MTLRenderPipelineState> pipelineState;
     id<MTLDepthStencilState> depthState;
+    Shader vertShader;
+    Shader fragShader;
     VertexFormat vertexFormat;
     RasterState rasterState;
 };
@@ -505,6 +507,21 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
                                   VertexFormat format, RasterState state) {
     if (!vertShader || !fragShader) return NULL;
 
+    /* Cache lookup: return existing pipeline if one matches */
+    for (int i = 0; i < g_pipelineCount; i++) {
+        MetalPipeline *existing = g_pipelines[i];
+        if (existing->vertShader == vertShader &&
+            existing->fragShader == fragShader &&
+            existing->vertexFormat == format &&
+            existing->rasterState.depthWrite == state.depthWrite &&
+            existing->rasterState.depthTest == state.depthTest &&
+            existing->rasterState.backfaceCulling == state.backfaceCulling &&
+            existing->rasterState.blendMode == state.blendMode)
+        {
+            return (Pipeline)existing;
+        }
+    }
+
     MetalShader *vs = (MetalShader *)vertShader;
     MetalShader *fs = (MetalShader *)fragShader;
 
@@ -566,6 +583,8 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
     MetalPipeline *mp = (MetalPipeline *)calloc(1, sizeof(MetalPipeline));
     mp->pipelineState = pso;
     mp->depthState = ds;
+    mp->vertShader = vertShader;
+    mp->fragShader = fragShader;
     mp->vertexFormat = format;
     mp->rasterState = state;
 
