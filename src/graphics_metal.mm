@@ -644,9 +644,7 @@ Shader graphics_get_shader_variant(Shader base, const char **defines, size_t def
     return base;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Render pass management                                             */
-/* ------------------------------------------------------------------ */
+/* Render pass management */
 
 typedef struct {
     RasterState state;
