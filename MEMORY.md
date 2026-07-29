@@ -125,9 +125,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **Multi-Atlas Font Rendering Bug** (`src/font.c`)
   When a shaped line contains glyphs from multiple atlases (after atlas overflow), only the first glyph's atlas texture is bound. Glyphs packed into subsequent atlases render with wrong texture data.
 
-- **`graphics_get_text_shaders()` Only Implemented for Metal**
-  The Vulkan backend has no implementation. `font.c`'s MSL fallback path (line 538) calls this function — on Vulkan, if SPIR-V loading fails, the fallback silently produces no shaders and text rendering breaks.
-
 - **`graphics_opengl_sdl.c` Dead Code**
   The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
