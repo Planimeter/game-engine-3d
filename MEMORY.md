@@ -128,9 +128,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **`graphics_get_text_shaders()` Only Implemented for Metal**
   The Vulkan backend has no implementation. `font.c`'s MSL fallback path (line 538) calls this function — on Vulkan, if SPIR-V loading fails, the fallback silently produces no shaders and text rendering breaks.
 
-- **`image_stb.c` Depends on Assimp Internal Structure** (`src/image_stb.c`)
-  `#include "assimp-6.0.4/contrib/stb/stb_image.h"` — if Assimp updates or restructures its vendored stb_image location, this include breaks.
-
 - **`graphics_opengl_sdl.c` Dead Code**
   The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
