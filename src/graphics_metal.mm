@@ -648,12 +648,107 @@ Shader graphics_get_shader_variant(Shader base, const char **defines, size_t def
 /*  Render pass management                                             */
 /* ------------------------------------------------------------------ */
 
+typedef struct {
+    RasterState state;
+    MetalTexture *colorTextures[4];
+    int colorCount;
+    MetalTexture *depthTexture;
+    int hasDepth;
+} MetalRenderPass;
+
 RenderPass graphics_createpass(const char *name, RasterState state) {
-    (void)name; (void)state;
-    return (RenderPass)1;
+    (void)name;
+    MetalRenderPass *pass = (MetalRenderPass *)calloc(1, sizeof(MetalRenderPass));
+    if (!pass) return NULL;
+    pass->state = state;
+    return (RenderPass)pass;
 }
 
-void graphics_beginpass(RenderPass pass) { (void)pass; g_inPass = 1; }
+void graphics_pass_set_color_texture(RenderPass pass, Texture tex, unsigned slot) {
+    if (!pass || !tex) return;
+    MetalRenderPass *mp = (MetalRenderPass *)pass;
+    MetalTexture *mt = (MetalTexture *)tex;
+    if (slot < 4) {
+        mp->colorTextures[slot] = mt;
+        if ((int)slot + 1 > mp->colorCount) mp->colorCount = (int)slot + 1;
+    }
+}
+
+void graphics_pass_set_depth_texture(RenderPass pass, Texture tex) {
+    if (!pass || !tex) return;
+    MetalRenderPass *mp = (MetalRenderPass *)pass;
+    mp->depthTexture = (MetalTexture *)tex;
+    mp->hasDepth = 1;
+}
+
+void graphics_beginpass(RenderPass pass) {
+    if (pass) {
+        /* End current encoder if one is active (e.g. switching from swapchain to offscreen) */
+        if (g_currentEncoder) {
+            metal_encoder_end_encoding(g_currentEncoder);
+            g_currentEncoder = nil;
+        }
+
+        MetalRenderPass *mp = (MetalRenderPass *)pass;
+        MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor new];
+
+        /* Set color attachments */
+        for (int i = 0; i < mp->colorCount; i++) {
+            if (mp->colorTextures[i]) {
+                rpd.colorAttachments[i].texture = mp->colorTextures[i]->texture;
+                rpd.colorAttachments[i].loadAction = MTLLoadActionClear;
+                rpd.colorAttachments[i].storeAction = MTLStoreActionStore;
+                rpd.colorAttachments[i].clearColor = MTLClearColorMake(0.0f, 0.0f, 0.0f, 0.0f);
+            }
+        }
+
+        /* Set depth attachment */
+        if (mp->hasDepth && mp->depthTexture) {
+            rpd.depthAttachment.texture = mp->depthTexture->texture;
+            rpd.depthAttachment.loadAction = MTLLoadActionClear;
+            rpd.depthAttachment.storeAction = MTLStoreActionStore;
+            rpd.depthAttachment.clearDepth = 1.0;
+        }
+
+        g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(
+            g_currentCommandBuffer, rpd);
+        [rpd release];
+
+        /* Set viewport to match attachment size */
+        int width = g_windowWidth;
+        int height = g_windowHeight;
+        if (mp->colorCount > 0 && mp->colorTextures[0]) {
+            width = mp->colorTextures[0]->width;
+            height = mp->colorTextures[0]->height;
+        }
+        double vp[6] = { 0.0, 0.0, (double)width, (double)height, 0.0, 1.0 };
+        metal_encoder_set_viewport(g_currentEncoder, vp);
+
+        g_currentPipeline = NULL;
+        g_inPass = 1;
+    } else {
+        /* NULL pass = resume swapchain rendering */
+        if (g_currentEncoder) {
+            metal_encoder_end_encoding(g_currentEncoder);
+            g_currentEncoder = nil;
+        }
+
+        /* Re-create encoder with swapchain drawable */
+        g_renderPassDescriptor.colorAttachments[0].texture = g_currentDrawable.texture;
+        g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(
+            g_currentCommandBuffer, g_renderPassDescriptor);
+
+        double vp[6] = {
+            0.0, 0.0,
+            (double)g_windowWidth, (double)g_windowHeight,
+            0.0, 1.0
+        };
+        metal_encoder_set_viewport(g_currentEncoder, vp);
+
+        g_currentPipeline = NULL;
+        g_inPass = 1;
+    }
+}
 
 void graphics_endpass(RenderPass pass) {
     (void)pass;
@@ -662,6 +757,12 @@ void graphics_endpass(RenderPass pass) {
         g_currentEncoder = nil;
     }
     g_inPass = 0;
+}
+
+void graphics_destroypass(RenderPass pass) {
+    if (pass) {
+        free(pass);
+    }
 }
 
 /* ------------------------------------------------------------------ */

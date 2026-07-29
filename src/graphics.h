@@ -106,8 +106,11 @@ void        graphics_destroytexture(Texture tex);
 void        graphics_bindtexture(Texture tex, unsigned slot);
 
 RenderPass  graphics_createpass(const char *name, RasterState state);
+void        graphics_pass_set_color_texture(RenderPass pass, Texture tex, unsigned slot);
+void        graphics_pass_set_depth_texture(RenderPass pass, Texture tex);
 void        graphics_beginpass(RenderPass pass);
 void        graphics_endpass(RenderPass pass);
+void        graphics_destroypass(RenderPass pass);
 
 Pipeline    graphics_createpipeline(Shader vertShader,
                                     Shader fragShader,

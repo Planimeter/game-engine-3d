@@ -366,6 +366,16 @@ RenderPass graphics_createpass(const char *name, RasterState state)
     return pass;
 }
 
+void graphics_pass_set_color_texture(RenderPass pass, Texture tex, unsigned slot)
+{
+    (void)pass; (void)tex; (void)slot;
+}
+
+void graphics_pass_set_depth_texture(RenderPass pass, Texture tex)
+{
+    (void)pass; (void)tex;
+}
+
 void graphics_beginpass(RenderPass pass)
 {
     (void)pass;
@@ -374,6 +384,11 @@ void graphics_beginpass(RenderPass pass)
 void graphics_endpass(RenderPass pass)
 {
     (void)pass;
+}
+
+void graphics_destroypass(RenderPass pass)
+{
+    free(pass);
 }
 
 Shader graphics_get_shader_variant(Shader base,

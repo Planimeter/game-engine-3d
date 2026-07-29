@@ -1713,7 +1713,16 @@ typedef struct {
 
 typedef struct {
     RasterState state;
+    GPUTexture *colorTextures[4];
+    int colorCount;
+    GPUTexture *depthTexture;
+    int hasDepth;
+    VkRenderPass renderPass;
+    VkFramebuffer framebuffer;
+    int initialized;
 } GPURenderPass;
+
+static GPURenderPass *g_currentRenderPass = NULL;
 
 static GPUMaterial *currentMaterial;
 
@@ -2766,15 +2775,254 @@ RenderPass graphics_createpass(const char *name, RasterState state)
 
     (void)name;
     pass->state = state;
+    pass->renderPass = VK_NULL_HANDLE;
+    pass->framebuffer = VK_NULL_HANDLE;
+    pass->initialized = 0;
     return pass;
+}
+
+void graphics_pass_set_color_texture(RenderPass pass, Texture tex, unsigned slot)
+{
+    if (!pass || !tex) return;
+    GPURenderPass *gp = (GPURenderPass *)pass;
+    GPUTexture *gt = (GPUTexture *)tex;
+    if (slot < 4) {
+        gp->colorTextures[slot] = gt;
+        if ((int)slot + 1 > gp->colorCount) gp->colorCount = (int)slot + 1;
+    }
+}
+
+void graphics_pass_set_depth_texture(RenderPass pass, Texture tex)
+{
+    if (!pass || !tex) return;
+    GPURenderPass *gp = (GPURenderPass *)pass;
+    gp->depthTexture = (GPUTexture *)tex;
+    gp->hasDepth = 1;
+}
+
+static void graphics_pass_build(GPURenderPass *gp)
+{
+    if (gp->initialized) return;
+
+    /* Determine attachment count and formats */
+    int attachmentCount = gp->colorCount + (gp->hasDepth ? 1 : 0);
+    if (attachmentCount == 0) {
+        gp->initialized = 1;
+        return;
+    }
+
+    VkAttachmentDescription attachments[5] = {};
+    VkAttachmentReference colorRefs[4] = {};
+    VkAttachmentReference depthRef = {};
+    int hasDepth = gp->hasDepth;
+
+    for (int i = 0; i < gp->colorCount; i++) {
+        if (!gp->colorTextures[i]) continue;
+        attachments[i].format = VK_FORMAT_R8G8B8A8_UNORM;
+        attachments[i].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[i].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[i].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[i].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[i].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[i].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        colorRefs[i].attachment = (uint32_t)i;
+        colorRefs[i].layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
+
+    if (hasDepth) {
+        int depthIdx = gp->colorCount;
+        attachments[depthIdx].format = VK_FORMAT_D32_SFLOAT;
+        attachments[depthIdx].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[depthIdx].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[depthIdx].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[depthIdx].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[depthIdx].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[depthIdx].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[depthIdx].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        depthRef.attachment = (uint32_t)depthIdx;
+        depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    }
+
+    VkSubpassDescription subpass = {};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = (uint32_t)gp->colorCount;
+    subpass.pColorAttachments = colorRefs;
+    if (hasDepth) {
+        subpass.pDepthStencilAttachment = &depthRef;
+    }
+
+    VkRenderPassCreateInfo rpInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+    rpInfo.attachmentCount = (uint32_t)attachmentCount;
+    rpInfo.pAttachments = attachments;
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+
+    if (vkCreateRenderPass(device, &rpInfo, NULL, &gp->renderPass) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create offscreen render pass\n");
+        return;
+    }
+
+    /* Create framebuffer */
+    VkImageView attachmentsViews[5] = {};
+    for (int i = 0; i < gp->colorCount; i++) {
+        if (gp->colorTextures[i]) {
+            attachmentsViews[i] = gp->colorTextures[i]->view;
+        }
+    }
+    if (hasDepth && gp->depthTexture) {
+        attachmentsViews[gp->colorCount] = gp->depthTexture->view;
+    }
+
+    VkFramebufferCreateInfo fbInfo = { VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+    fbInfo.renderPass = gp->renderPass;
+    fbInfo.attachmentCount = (uint32_t)attachmentCount;
+    fbInfo.pAttachments = attachmentsViews;
+    fbInfo.width = (uint32_t)(gp->colorCount > 0 && gp->colorTextures[0] ? gp->colorTextures[0]->width : w);
+    fbInfo.height = (uint32_t)(gp->colorCount > 0 && gp->colorTextures[0] ? gp->colorTextures[0]->height : h);
+    fbInfo.layers = 1;
+
+    if (vkCreateFramebuffer(device, &fbInfo, NULL, &gp->framebuffer) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create offscreen framebuffer\n");
+        vkDestroyRenderPass(device, gp->renderPass, NULL);
+        gp->renderPass = VK_NULL_HANDLE;
+        return;
+    }
+
+    gp->initialized = 1;
 }
 
 void graphics_beginpass(RenderPass pass)
 {
-    (void)pass;
+    if (pass) {
+        GPURenderPass *gp = (GPURenderPass *)pass;
 
-    if (!inPass) {
-        graphics_predraw();
+        /* If currently in the swapchain pass, end just the render pass (not the command buffer) */
+        if (inPass && !g_currentRenderPass) {
+            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+            inPass = 0;
+        }
+
+        /* Build Vulkan render pass + framebuffer lazily */
+        graphics_pass_build(gp);
+
+        if (gp->renderPass == VK_NULL_HANDLE) {
+            inPass = 1;
+            g_currentRenderPass = gp;
+            return;
+        }
+
+        /* Transition color attachments to color attachment layout */
+        VkCommandBuffer cmd = commandBuffers[imageIndex];
+        for (int i = 0; i < gp->colorCount; i++) {
+            if (gp->colorTextures[i]) {
+                graphics_transition_image(cmd, gp->colorTextures[i]->image,
+                    VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+            }
+        }
+        if (gp->hasDepth && gp->depthTexture) {
+            graphics_transition_image(cmd, gp->depthTexture->image,
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        }
+
+        VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        beginInfo.renderPass = gp->renderPass;
+        beginInfo.framebuffer = gp->framebuffer;
+        beginInfo.renderArea.extent.width = (uint32_t)(gp->colorCount > 0 && gp->colorTextures[0] ? gp->colorTextures[0]->width : w);
+        beginInfo.renderArea.extent.height = (uint32_t)(gp->colorCount > 0 && gp->colorTextures[0] ? gp->colorTextures[0]->height : h);
+
+        VkClearValue clearValues[5] = {};
+        for (int i = 0; i < gp->colorCount; i++) {
+            clearValues[i].color.float32[0] = 0.0f;
+            clearValues[i].color.float32[1] = 0.0f;
+            clearValues[i].color.float32[2] = 0.0f;
+            clearValues[i].color.float32[3] = 0.0f;
+        }
+        if (gp->hasDepth) {
+            clearValues[gp->colorCount].depthStencil.depth = 1.0f;
+        }
+        beginInfo.clearValueCount = (uint32_t)(gp->colorCount + (gp->hasDepth ? 1 : 0));
+        beginInfo.pClearValues = clearValues;
+
+        vkCmdBeginRenderPass(cmd, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        /* Bind descriptor sets */
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+
+        VkViewport vp = {};
+        vp.width = (float)beginInfo.renderArea.extent.width;
+        vp.height = (float)beginInfo.renderArea.extent.height;
+        vp.minDepth = 0.0f;
+        vp.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+
+        VkRect2D scissor = {};
+        scissor.extent = beginInfo.renderArea.extent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        g_currentRenderPass = gp;
+        inPass = 1;
+    } else {
+        /* NULL pass = resume swapchain rendering after offscreen pass */
+        if (inPass && g_currentRenderPass) {
+            /* End offscreen render pass */
+            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+
+            /* Transition color attachments back to shader-read layout */
+            VkCommandBuffer cmd = commandBuffers[imageIndex];
+            for (int i = 0; i < g_currentRenderPass->colorCount; i++) {
+                if (g_currentRenderPass->colorTextures[i]) {
+                    graphics_transition_image(cmd, g_currentRenderPass->colorTextures[i]->image,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+            }
+            g_currentRenderPass = NULL;
+            inPass = 0;
+        }
+
+        /* Re-begin the swapchain render pass that graphics_predraw() set up */
+        VkRenderPassBeginInfo beginInfo = { VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+        beginInfo.renderPass = renderPass;
+        beginInfo.framebuffer = framebuffers[imageIndex];
+        beginInfo.renderArea.extent.width = w;
+        beginInfo.renderArea.extent.height = h;
+
+        VkClearValue clearValues[2];
+        clearValues[0].color.float32[0] = CLEAR_COLOR[0];
+        clearValues[0].color.float32[1] = CLEAR_COLOR[1];
+        clearValues[0].color.float32[2] = CLEAR_COLOR[2];
+        clearValues[0].color.float32[3] = CLEAR_COLOR[3];
+        clearValues[1].depthStencil.depth = 1.0f;
+        clearValues[1].depthStencil.stencil = 0;
+        beginInfo.clearValueCount = 2;
+        beginInfo.pClearValues = clearValues;
+
+        vkCmdBeginRenderPass(commandBuffers[imageIndex], &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        /* Re-bind descriptor sets */
+        vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+        vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+            pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+
+        VkViewport vp = {};
+        vp.width = (float)w;
+        vp.height = (float)h;
+        vp.minDepth = 0.0f;
+        vp.maxDepth = 1.0f;
+        vkCmdSetViewport(commandBuffers[imageIndex], 0, 1, &vp);
+
+        VkRect2D scissor = {};
+        scissor.extent.width = w;
+        scissor.extent.height = h;
+        vkCmdSetScissor(commandBuffers[imageIndex], 0, 1, &scissor);
+
+        inPass = 1;
     }
 }
 
@@ -2783,8 +3031,35 @@ void graphics_endpass(RenderPass pass)
     (void)pass;
 
     if (inPass) {
-        graphics_postdraw();
+        if (g_currentRenderPass) {
+            /* End offscreen render pass */
+            vkCmdEndRenderPass(commandBuffers[imageIndex]);
+
+            /* Transition color attachments back to shader-read layout */
+            VkCommandBuffer cmd = commandBuffers[imageIndex];
+            for (int i = 0; i < g_currentRenderPass->colorCount; i++) {
+                if (g_currentRenderPass->colorTextures[i]) {
+                    graphics_transition_image(cmd, g_currentRenderPass->colorTextures[i]->image,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                }
+            }
+        }
+        inPass = 0;
+        g_currentRenderPass = NULL;
     }
+}
+
+void graphics_destroypass(RenderPass pass)
+{
+    if (!pass) return;
+    GPURenderPass *gp = (GPURenderPass *)pass;
+    if (gp->framebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(device, gp->framebuffer, NULL);
+    }
+    if (gp->renderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(device, gp->renderPass, NULL);
+    }
+    free(gp);
 }
 
 void graphics_get_text_shaders(Shader *out_vert, Shader *out_frag)
