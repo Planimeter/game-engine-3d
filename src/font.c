@@ -532,6 +532,9 @@ Font *font_create(const char *filepath, int size)
         
         if (vert) graphics_destroyshader(vert);
         if (frag) graphics_destroyshader(frag);
+        /* Safety: graphics_createpipeline() must copy shader state internally.
+         * Backends that store raw shader pointers will have dangling pointers
+         * after this point. Both Metal and Vulkan backends satisfy this contract. */
     }
 
     /* Fallback to embedded MSL shaders when SPIR-V unavailable */
