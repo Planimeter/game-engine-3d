@@ -97,9 +97,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **Metal Shader Entry Points Are Hardcoded**
   All shaders must define `vertex_main` and `fragment_main`. Vulkan uses `"main"`. No support for compute shaders or custom entry points. Should be configurable.
 
-- **Batch System Jobs Never Wired Up** (`src/font.c`)
-  The batching system defines `shape_text_job` and `build_vertices_job` functions with job system integration, but `font_end_batch()` processes lines sequentially without using the job system. The parallel shaping infrastructure is defined but dead code.
-
 - **No Error Return Codes — All Errors Call `exit()`**
   Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
 
