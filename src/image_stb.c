@@ -6,9 +6,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-/* Use stb_image bundled with Assimp in third_party. */
+/* Use stb_image vendored in third_party. */
 #define STB_IMAGE_IMPLEMENTATION
-#include "assimp-6.0.4/contrib/stb/stb_image.h"
+#include "stb-2.30/stb_image.h"
 
 Texture image_load(const char *path)
 {
