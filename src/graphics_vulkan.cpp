@@ -2678,6 +2678,14 @@ void graphics_endpass(RenderPass pass)
     }
 }
 
+void graphics_get_text_shaders(Shader *out_vert, Shader *out_frag)
+{
+    fprintf(stderr, "graphics_get_text_shaders: Text shaders not available on Vulkan backend. "
+                    "Ensure SPIR-V shaders are loaded.\n");
+    if (out_vert) *out_vert = NULL;
+    if (out_frag) *out_frag = NULL;
+}
+
 Shader graphics_get_shader_variant(Shader base,
                                    const char **defines,
                                    size_t defineCount)
