@@ -3,6 +3,7 @@
 #include "font.h"
 #include "filesystem.h"
 #include "graphics.h"
+#include "job.h"
 #include "window.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -12,6 +13,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Job system is owned by main_sdl.c */
+extern JobSystem *g_jobSystem;
 
 #define FONT_ATLAS_SIZE 1024
 #define MAX_ATLAS_COUNT 4
@@ -52,6 +56,7 @@ typedef struct {
 typedef struct {
     const char *text;
     size_t text_len;
+    hb_buffer_t *shape_buffer;
     hb_glyph_info_t *infos;
     hb_glyph_position_t *positions;
     unsigned int glyph_count;
@@ -510,6 +515,19 @@ Font *font_create(const char *filepath, int size)
     font->hb_font = hb_ft_font_create_referenced(font->face);
     font->hb_buffer = hb_buffer_create();
 
+    /* Initialize per-worker HarfBuzz buffers for parallel shaping */
+    {
+        size_t worker_count = g_jobSystem ? job_getworkercount(g_jobSystem) : 0;
+        if (worker_count == 0) {
+            worker_count = 1;
+        }
+        font->worker_hb_buffers = (hb_buffer_t **)calloc(worker_count, sizeof(hb_buffer_t *));
+        font->worker_buffer_count = worker_count;
+        for (size_t i = 0; i < worker_count; i++) {
+            font->worker_hb_buffers[i] = hb_buffer_create();
+        }
+    }
+
     font->atlas_count = 0;
     if (!font_add_atlas(font)) {
         font_destroy(font);
@@ -866,8 +884,13 @@ static void shape_text_job(void *context, uint32_t jobIndex)
 {
     ShapeJobContext *ctx = (ShapeJobContext *)context;
     ShapedLine *line = &ctx->lines[jobIndex];
-    hb_buffer_t *buffer = line->infos ? (hb_buffer_t *)line->infos : NULL;
     
+    if (line->glyph_count > 0) {
+        /* Already shaped (e.g. single-threaded fallback) */
+        return;
+    }
+    
+    hb_buffer_t *buffer = line->shape_buffer;
     if (!buffer) {
         return;
     }
@@ -877,8 +900,19 @@ static void shape_text_job(void *context, uint32_t jobIndex)
     hb_buffer_guess_segment_properties(buffer);
     hb_shape(ctx->font->hb_font, buffer, NULL, 0);
     
-    line->infos = hb_buffer_get_glyph_infos(buffer, &line->glyph_count);
-    line->positions = hb_buffer_get_glyph_positions(buffer, &line->glyph_count);
+    unsigned int count = 0;
+    hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(buffer, &count);
+    hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(buffer, &count);
+    
+    if (count > 0) {
+        line->infos = (hb_glyph_info_t *)malloc(count * sizeof(hb_glyph_info_t));
+        line->positions = (hb_glyph_position_t *)malloc(count * sizeof(hb_glyph_position_t));
+        if (line->infos && line->positions) {
+            memcpy(line->infos, infos, count * sizeof(hb_glyph_info_t));
+            memcpy(line->positions, positions, count * sizeof(hb_glyph_position_t));
+            line->glyph_count = count;
+        }
+    }
 }
 
 typedef struct {
@@ -927,7 +961,7 @@ void font_end_batch(Font *font)
         return;
     }
 
-    /* Count total lines and allocate shaped-line storage */
+    /* Phase 1: Count total lines and populate ShapedLine array */
     size_t total_lines = 0;
     for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
         TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
@@ -954,170 +988,229 @@ void font_end_batch(Font *font)
         return;
     }
 
-    /* Single shape pass: shape each line once, store results */
-    size_t total_vertices = 0;
-    size_t total_indices = 0;
-    size_t line_idx = 0;
-
-    for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
-        TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
-        if (!cmd->text) {
-            continue;
-        }
-
-        const char *line_start = cmd->text;
-        float cursor_y = cmd->y;
-
-        while (*line_start) {
-            const char *line_end = strchr(line_start, '\n');
-            if (!line_end) {
-                line_end = line_start + strlen(line_start);
+    {
+        size_t line_idx = 0;
+        for (size_t cmd_idx = 0; cmd_idx < font->batch.count; cmd_idx++) {
+            TextDrawCommand *cmd = &font->batch.commands[cmd_idx];
+            if (!cmd->text) {
+                continue;
             }
 
-            size_t line_len = (size_t)(line_end - line_start);
+            const char *line_start = cmd->text;
+            float cursor_y = cmd->y;
 
-            ShapedLine *line = &lines[line_idx++];
-
-            hb_buffer_clear_contents(font->hb_buffer);
-            hb_buffer_add_utf8(font->hb_buffer, line_start, (int)line_len, 0, (int)line_len);
-            hb_buffer_guess_segment_properties(font->hb_buffer);
-            hb_shape(font->hb_font, font->hb_buffer, NULL, 0);
-
-            unsigned int glyph_count = 0;
-            hb_glyph_info_t *infos = hb_buffer_get_glyph_infos(font->hb_buffer, &glyph_count);
-            hb_glyph_position_t *positions = hb_buffer_get_glyph_positions(font->hb_buffer, &glyph_count);
-
-            line->origin_x = cmd->x;
-            line->origin_y = cursor_y;
-            line->sx = cmd->sx;
-            line->sy = cmd->sy;
-            line->glyph_count = glyph_count;
-
-            if (glyph_count > 0) {
-                line->infos = (hb_glyph_info_t *)malloc(glyph_count * sizeof(hb_glyph_info_t));
-                line->positions = (hb_glyph_position_t *)malloc(glyph_count * sizeof(hb_glyph_position_t));
-                if (line->infos && line->positions) {
-                    memcpy(line->infos, infos, glyph_count * sizeof(hb_glyph_info_t));
-                    memcpy(line->positions, positions, glyph_count * sizeof(hb_glyph_position_t));
-                } else {
-                    free(line->infos);
-                    free(line->positions);
-                    line->infos = NULL;
-                    line->positions = NULL;
-                    line->glyph_count = 0;
+            while (*line_start) {
+                const char *line_end = strchr(line_start, '\n');
+                if (!line_end) {
+                    line_end = line_start + strlen(line_start);
                 }
-            } else {
-                line->infos = NULL;
-                line->positions = NULL;
-            }
 
-            total_vertices += glyph_count * 4;
-            total_indices += glyph_count * 6;
+                size_t line_len = (size_t)(line_end - line_start);
+                ShapedLine *line = &lines[line_idx++];
+                line->text     = line_start;
+                line->text_len = line_len;
+                line->origin_x = cmd->x;
+                line->origin_y = cursor_y;
+                line->sx       = cmd->sx;
+                line->sy       = cmd->sy;
 
-            if (*line_end == '\n') {
-                line_start = line_end + 1;
-                cursor_y += font->height * cmd->sy;
-            } else {
-                break;
+                /* Assign a per-worker HarfBuzz buffer for parallel shaping */
+                if (font->worker_hb_buffers && font->worker_buffer_count > 0) {
+                    line->shape_buffer = font->worker_hb_buffers[(line_idx - 1) % font->worker_buffer_count];
+                }
+
+                if (*line_end == '\n') {
+                    line_start = line_end + 1;
+                    cursor_y += font->height * cmd->sy;
+                } else {
+                    break;
+                }
             }
         }
     }
 
-    if (total_vertices == 0) {
+    /* Phase 2: Shape all lines in parallel via job system */
+    {
+        ShapeJobContext shapeCtx;
+        shapeCtx.font       = font;
+        shapeCtx.lines      = lines;
+        shapeCtx.line_count = total_lines;
+
+        if (g_jobSystem && font->worker_hb_buffers && font->worker_buffer_count > 0 && total_lines > 1) {
+            JobDescriptor shapeJob = {
+                .function = shape_text_job,
+                .context  = &shapeCtx,
+                .jobCount = (uint32_t)total_lines,
+                .name     = "font_shape"
+            };
+            JobHandle shapeHandle = job_submit(g_jobSystem, &shapeJob);
+            job_wait(g_jobSystem, shapeHandle);
+        } else {
+            /* Fallback: shape sequentially */
+            for (size_t i = 0; i < total_lines; i++) {
+                shape_text_job(&shapeCtx, (uint32_t)i);
+            }
+        }
+    }
+
+    /* Phase 3: Count total vertices/indices and compute prefix sums */
+    size_t total_vertices = 0;
+    size_t total_indices  = 0;
+    size_t *vertex_offsets = (size_t *)calloc(total_lines, sizeof(size_t));
+    size_t *index_offsets  = (size_t *)calloc(total_lines, sizeof(size_t));
+    if (!vertex_offsets || !index_offsets) {
+        free(vertex_offsets);
+        free(index_offsets);
         goto cleanup_lines;
     }
 
-    /* Build geometry from stored shaped results (no re-shape needed).
-     * Draw each line independently with the correct atlas binding,
-     * same pattern as font_print(). */
     for (size_t i = 0; i < total_lines; i++) {
-        ShapedLine *line = &lines[i];
-        if (line->glyph_count == 0) {
-            continue;
-        }
+        vertex_offsets[i] = total_vertices;
+        index_offsets[i]  = total_indices;
+        total_vertices   += lines[i].glyph_count * 4;
+        total_indices    += lines[i].glyph_count * 6;
+    }
 
-        size_t line_vertices = line->glyph_count * 4;
-        size_t line_indices = line->glyph_count * 6;
-        size_t line_vertex_bytes = line_vertices * sizeof(TextVertex);
-        size_t line_index_bytes = line_indices * sizeof(uint32_t);
+    if (total_vertices == 0) {
+        free(vertex_offsets);
+        free(index_offsets);
+        goto cleanup_lines;
+    }
 
-        /* Ensure scratch buffers are large enough */
-        if (line_vertex_bytes > font->batch_vertex_capacity) {
-            font->batch_vertices = (TextVertex *)realloc(font->batch_vertices, line_vertex_bytes);
-            font->batch_vertex_capacity = line_vertex_bytes;
-        }
-        if (line_index_bytes > font->batch_index_capacity) {
-            font->batch_indices = (uint32_t *)realloc(font->batch_indices, line_index_bytes);
-            font->batch_index_capacity = line_index_bytes;
-        }
-        if (!font->batch_vertices || !font->batch_indices) {
+    /* Phase 4: Build vertex/index data in parallel */
+    {
+        size_t vertex_bytes = total_vertices * sizeof(TextVertex);
+        size_t index_bytes  = total_indices  * sizeof(uint32_t);
+
+        TextVertex *all_vertices = (TextVertex *)malloc(vertex_bytes);
+        uint32_t   *all_indices  = (uint32_t *)malloc(index_bytes);
+        if (!all_vertices || !all_indices) {
+            free(all_vertices);
+            free(all_indices);
+            free(vertex_offsets);
+            free(index_offsets);
             goto cleanup_lines;
         }
 
-        /* Build vertices for this line (scratch buffers, indices start at 0) */
-        size_t line_index_count = 0;
-        font_build_vertices(font,
-                           line->infos, line->positions, line->glyph_count,
-                           line->origin_x, line->origin_y, line->sx, line->sy,
-                           font->batch_vertices, font->batch_indices,
-                           &line_index_count);
+        if (g_jobSystem && total_lines > 1) {
+            VertexBuildContext vertCtx;
+            vertCtx.font           = font;
+            vertCtx.lines          = lines;
+            vertCtx.vertices       = all_vertices;
+            vertCtx.indices        = all_indices;
+            vertCtx.vertex_offsets = vertex_offsets;
+            vertCtx.index_offsets  = index_offsets;
+            vertCtx.vertex_base    = 0;
 
-        /* Ensure GPU buffers are large enough */
-        if (!font->vertex_buffer || line_vertex_bytes > font->vertex_capacity) {
-            if (font->vertex_buffer) {
-                graphics_destroybuffer(font->vertex_buffer);
+            JobDescriptor vertJob = {
+                .function = build_vertices_job,
+                .context  = &vertCtx,
+                .jobCount = (uint32_t)total_lines,
+                .name     = "font_build_vertices"
+            };
+            JobHandle vertHandle = job_submit(g_jobSystem, &vertJob);
+            job_wait(g_jobSystem, vertHandle);
+        } else {
+            /* Fallback: build vertices sequentially */
+            for (size_t i = 0; i < total_lines; i++) {
+                ShapedLine *line = &lines[i];
+                if (line->glyph_count == 0) {
+                    continue;
+                }
+
+                size_t ic = 0;
+                font_build_vertices(font,
+                    line->infos, line->positions, line->glyph_count,
+                    line->origin_x, line->origin_y, line->sx, line->sy,
+                    &all_vertices[vertex_offsets[i]],
+                    &all_indices[index_offsets[i]],
+                    &ic);
+
+                /* Offset indices to global vertex base */
+                for (size_t j = 0; j < ic; j++) {
+                    all_indices[index_offsets[i] + j] += (uint32_t)vertex_offsets[i];
+                }
             }
-            font->vertex_buffer = graphics_createvertexbuffer(NULL, line_vertex_bytes);
-            font->vertex_capacity = line_vertex_bytes;
-        }
-        if (!font->index_buffer || line_index_bytes > font->index_capacity) {
-            if (font->index_buffer) {
-                graphics_destroybuffer(font->index_buffer);
-            }
-            font->index_buffer = graphics_createindexbuffer(NULL, line_index_bytes);
-            font->index_capacity = line_index_bytes;
         }
 
-        if (!font->vertex_buffer || !font->index_buffer) {
-            goto cleanup_lines;
-        }
-
-        /* Upload and draw this line */
-        graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, line_vertex_bytes);
-        graphics_updatebuffer(font->index_buffer, font->batch_indices, line_index_bytes);
-
-        if (font->pipeline) {
-            graphics_bindpipeline(font->pipeline);
-        }
-
+        /* Phase 5: Single upload and draw */
         {
-            /* Draw glyphs grouped by atlas so each sub-range uses the correct texture */
-            size_t group_start = 0;
-            int current_atlas = -1;
-            for (size_t gi = 0; gi <= line->glyph_count; gi++) {
-                int atlas_idx = 0;
-                if (gi < line->glyph_count) {
-                    uint32_t gid = line->infos[gi].codepoint;
-                    Glyph *g = font_find_glyph(font, gid);
-                    atlas_idx = g ? g->atlas_index : 0;
-                    if (atlas_idx >= font->atlas_count) {
-                        atlas_idx = 0;
+            /* Ensure GPU buffers are large enough */
+            if (!font->vertex_buffer || vertex_bytes > font->vertex_capacity) {
+                if (font->vertex_buffer) {
+                    graphics_destroybuffer(font->vertex_buffer);
+                }
+                font->vertex_buffer = graphics_createvertexbuffer(NULL, vertex_bytes);
+                font->vertex_capacity = vertex_bytes;
+            }
+            if (!font->index_buffer || index_bytes > font->index_capacity) {
+                if (font->index_buffer) {
+                    graphics_destroybuffer(font->index_buffer);
+                }
+                font->index_buffer = graphics_createindexbuffer(NULL, index_bytes);
+                font->index_capacity = index_bytes;
+            }
+
+            if (font->vertex_buffer && font->index_buffer) {
+                graphics_updatebuffer(font->vertex_buffer, all_vertices, vertex_bytes);
+                graphics_updatebuffer(font->index_buffer, all_indices, index_bytes);
+
+                if (font->pipeline) {
+                    graphics_bindpipeline(font->pipeline);
+                }
+
+                /* Draw all glyphs grouped by atlas across all lines */
+                size_t global_glyph_index = 0;
+                size_t group_start = 0;
+                int current_atlas = -1;
+
+                for (size_t i = 0; i < total_lines; i++) {
+                    ShapedLine *line = &lines[i];
+                    if (line->glyph_count == 0) {
+                        continue;
+                    }
+
+                    for (size_t gi = 0; gi < line->glyph_count; gi++) {
+                        uint32_t gid = line->infos[gi].codepoint;
+                        Glyph *g = font_find_glyph(font, gid);
+                        int atlas_idx = g ? g->atlas_index : 0;
+                        if (atlas_idx >= font->atlas_count) {
+                            atlas_idx = 0;
+                        }
+
+                        if (global_glyph_index == 0) {
+                            current_atlas = atlas_idx;
+                        }
+
+                        if (atlas_idx != current_atlas) {
+                            size_t group_count = global_glyph_index - group_start;
+                            graphics_bindtexture(font->atlases[current_atlas].texture, 0);
+                            graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
+                                                  group_count * 6, group_start * 6, NULL, NULL);
+                            group_start = global_glyph_index;
+                            current_atlas = atlas_idx;
+                        }
+
+                        global_glyph_index++;
                     }
                 }
-                if (gi == 0) {
-                    current_atlas = atlas_idx;
-                }
-                if (atlas_idx != current_atlas || gi == line->glyph_count) {
-                    size_t group_count = gi - group_start;
+
+                /* Flush last atlas group */
+                if (global_glyph_index > group_start) {
+                    size_t group_count = global_glyph_index - group_start;
                     graphics_bindtexture(font->atlases[current_atlas].texture, 0);
                     graphics_draw_buffers(font->vertex_buffer, font->index_buffer,
-                                         group_count * 6, group_start * 6, NULL, NULL);
-                    group_start = gi;
-                    current_atlas = atlas_idx;
+                                          group_count * 6, group_start * 6, NULL, NULL);
                 }
             }
         }
+
+        free(all_vertices);
+        free(all_indices);
     }
+
+    free(vertex_offsets);
+    free(index_offsets);
 
 cleanup_lines:
     for (size_t i = 0; i < total_lines; i++) {

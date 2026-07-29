@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-static JobSystem *g_jobSystem = NULL;
+JobSystem *g_jobSystem = NULL;
 static uint64_t g_frameTime = 0;
 
 static void job_update(void *context, uint32_t jobIndex)
@@ -32,13 +32,14 @@ static void job_draw(void *context, uint32_t jobIndex)
 int main(int argc, char *argv[])
 {
     framework_init(argv[0]);
-    framework_load(argc, argv);
-    
+
     g_jobSystem = job_create(0);
     if (!g_jobSystem) {
         fprintf(stderr, "Failed to create job system\n");
         return 1;
     }
+
+    framework_load(argc, argv);
     
     while (event_poll()) {
         g_frameTime = timer_step();
