@@ -100,9 +100,6 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - **No Error Return Codes — All Errors Call `exit()`**
   Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
 
-- **Font Atlas Texture Upload Per-Glyph Performance** (`src/font.c`)
-  Each glyph update calls `graphics_updatetexture()` individually. For a font with 100+ unique glyphs, this means 100+ GPU texture upload commands. A bulk upload after all glyphs are loaded would be significantly more efficient.
-
 - **`graphics_opengl_sdl.c` Dead Code**
   The file exists but is not included in `CMakeLists.txt`'s `SOURCES` list. Not wired into the build system.
 
