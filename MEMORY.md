@@ -64,8 +64,9 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 ### Implemented
 - Full Vulkan pipeline: instance → physical device → logical device → swapchain → render pass → framebuffers → command buffers → semaphores/fences
 - VMA for GPU memory allocation with proper memory type selection
-- Runtime GLSL→SPIR-V compilation via shaderc (no pre-compiled `.spv` files needed)
-- `ShaderStage` enum (`SHADER_STAGE_VERTEX`, `SHADER_STAGE_FRAGMENT`) — maps to `shaderc_shader_kind`
+- Runtime GLSL->SPIR-V compilation via shaderc (no pre-compiled `.spv` files needed)
+- SPIR-V passthrough: `graphics_createshader()` detects pre-compiled SPIR-V (magic number 0x07230203) and skips shaderc
+- `ShaderStage` enum (`SHADER_STAGE_VERTEX`, `SHADER_STAGE_FRAGMENT`) -- maps to `shaderc_shader_kind`
 - Macro definition support: splits `"NAME=VALUE"` at first `=` for shaderc compile options
 - Material system with `GPUMaterial` struct, `vulkan_material_pack()` matching Metal's layout
 - UBO descriptor set (set 1) with 16 slots, global uniform buffer (4096 bytes)
@@ -73,7 +74,7 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - Blend modes: NONE, ALPHA, ADD, PREMULT
 
 ### Remaining Issues
-- Render pass always includes depth attachment even when no pipeline uses depth testing
+- None currently identified
 
 ---
 
@@ -107,7 +108,12 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ## Build System Notes
 
-- CMake 3.21+, auto-downloads CEF from Spotify's builds server
+- CMake 3.22+, auto-downloads CEF from Spotify's builds server
+- MSVC: `CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDLL` (/MD) forced via CMP0091 to avoid debug/release CRT mismatches in third-party libs (especially Assimp which injects `/MTd` via generator expressions)
+- MSVC: `CMAKE_BUILD_TYPE=RelWithDebInfo` forced to prevent debug CRT activation
+- MSVC: vcvarsall.bat path is `Visual Studio\18\Community` (not 2026)
+- SPIRV-Tools: all targets patched to strip `SPIRV-Tools-shared` references, using only `SPIRV-Tools` (static alias) to avoid LNK2005 duplicate symbol errors
+- HarfBuzz: `inttypes.h` detection and `PRIu64`/`PRId64`/`PRIx64` fallback macros for MSVC
 - Windows: links winmm, setupapi, version, imm32, crypt32, wintrust
 - macOS: links AVFoundation, CoreAudio, AudioToolbox, Foundation, CoreGraphics, CoreHaptics, CoreMedia, CoreVideo, ForceFeedback, GameController, IOKit, Carbon, Metal, AppKit, QuartzCore, UniformTypeIdentifiers
 - Linux/Unix: pthreads + pkg-config for XCB/X11/Wayland
@@ -158,10 +164,10 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 - Some backends (Null) exist but are not wired into the build system as primary backends
 
 ### Shader Compilation
-- **Vulkan**: Compiles GLSL→SPIR-V at runtime via shaderc library. Reads raw `.vert`/`.frag` GLSL source files, targets Vulkan 1.1 environment, performance optimization level. Supports macro definitions via `defines`/`defineCount`. Entry point: `main`.
+- **Vulkan**: Compiles GLSL->SPIR-V at runtime via shaderc library, or accepts pre-compiled SPIR-V directly (detected via magic number 0x07230203). Targets Vulkan 1.1 environment, performance optimization level. Supports macro definitions via `defines`/`defineCount`. Entry point: `main`.
 - **Metal**: Compiles MSL source at runtime via helper wrapper (`metal_device_new_library`). Entry points: `vertex_main`/`fragment_main`.
 - Both backends accept the 5-param `graphics_createshader(ShaderStage stage, source, size, defines, defineCount)` API.
-- Shaders directory contains both GLSL sources (all shaders) and pre-compiled SPIR-V (`text.*.spv`, `triangle.*.spv`). The `.spv` files are only used by the font rendering system on macOS; Vulkan always compiles from GLSL source at runtime.
+- Shaders directory contains both GLSL sources (all shaders) and pre-compiled SPIR-V (`text.*.spv`, `triangle.*.spv`). Both formats are supported by the Vulkan backend.
 
 ### Build System Quirks
 - CEF tests directory is deleted before building to avoid C++20 incompatibility
@@ -179,6 +185,6 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ## Rating: 9/10
 
-Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 rendering pipeline defects have been fixed in both Metal and Vulkan backends — the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, and Vulkan runtime GLSL→SPIR-V compilation via shaderc eliminating the need for pre-compiled SPIR-V files.
+Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 and P1 rendering pipeline defects have been fixed in both Metal and Vulkan backends -- the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, Vulkan runtime GLSL->SPIR-V compilation via shaderc with SPIR-V passthrough support, and text rendering fixes (Y-flip correction, glyph upload flush order). The Vulkan render pass now supports optional depth attachment for pipelines that don't need depth testing. Build system hardened for MSVC with consistent /MD runtime, CMP0091 propagation, and SPIRV-Tools static linking.
 
-The most urgent remaining issue is the **Shader Variant System no-op** (P2). The framebuffer/render target abstraction has been implemented on both backends — `graphics_createpass()` now creates offscreen render passes with user-provided texture attachments, `graphics_beginpass(NULL)` resumes swapchain rendering, and `graphics_destroypass()` cleans up. This unlocks shadow maps, post-processing, and deferred rendering patterns.
+Engine has solid foundations for 3D rendering with skeletal animation support. The framebuffer/render target abstraction has been implemented on both backends — `graphics_createpass()` now creates offscreen render passes with user-provided texture attachments, `graphics_beginpass(NULL)` resumes swapchain rendering, and `graphics_destroypass()` cleans up. This unlocks shadow maps, post-processing, and deferred rendering patterns.
