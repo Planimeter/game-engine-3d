@@ -366,7 +366,7 @@ static Glyph *font_get_glyph(Font *font, uint32_t glyph_id)
 static void font_pixel_to_ndc(float px, float py, int w, int h, float *out_x, float *out_y)
 {
     *out_x = (px / (float)w) * 2.0f - 1.0f;
-    *out_y = 1.0f - (py / (float)h) * 2.0f;
+    *out_y = (py / (float)h) * 2.0f - 1.0f;
 }
 
 static void font_build_vertices(Font *font,
@@ -1166,6 +1166,7 @@ void font_end_batch(Font *font)
         }
 
         /* Phase 5: Flush atlas uploads, then single upload and draw */
+        font_flush_glyph_uploads(font);
         font_flush_atlases(font);
         {
             /* Ensure GPU buffers are large enough */
