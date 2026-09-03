@@ -13,6 +13,11 @@
 #include <string.h>
 #include <math.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#define realpath(rel, abs) _fullpath(abs, rel, 4096)
+#endif
+
 static Font *g_testFont = NULL;
 static Text *g_testText = NULL;
 static uint64_t g_accumMs = 0;

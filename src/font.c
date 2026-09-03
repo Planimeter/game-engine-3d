@@ -1166,7 +1166,6 @@ void font_end_batch(Font *font)
         }
 
         /* Phase 5: Flush atlas uploads, then single upload and draw */
-        font_flush_glyph_uploads(font);
         font_flush_atlases(font);
         {
             /* Ensure GPU buffers are large enough */

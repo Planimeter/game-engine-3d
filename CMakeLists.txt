@@ -1,7 +1,11 @@
 cmake_minimum_required(VERSION 3.22)
 
 # set the project name
-project(game LANGUAGES C CXX OBJC OBJCXX)
+if(APPLE)
+    project(game LANGUAGES C CXX OBJC OBJCXX)
+else()
+    project(game LANGUAGES C CXX)
+endif()
 
 # Force dynamic runtime (/MD) for MSVC - set after project() for proper detection
 if (MSVC)
@@ -314,11 +318,9 @@ endif()
 set(SOURCES
     src/audio_openal.c
     src/event_sdl.c
-    src/filesystem_physfs.c
     src/font.c
     src/framework.c
     src/image_stb.c
-    src/job_pthread.c
     src/main_sdl.c
     src/math_glm.cpp
     src/model_assimp.cpp
@@ -327,6 +329,14 @@ set(SOURCES
     src/vk_mem_alloc.cpp
     src/window_sdl.c
     )
+
+# Platform-specific sources
+if(WIN32)
+    # job_pthread.c uses C11 _Atomic and pthreads — not MSVC compatible
+    list(APPEND SOURCES src/filesystem_physfs.c src/job_null.c)
+else()
+    list(APPEND SOURCES src/filesystem_physfs.c src/job_pthread.c)
+endif()
 
 # Graphics backend: Metal on macOS, Vulkan elsewhere (or OpenGL if USE_OPENGL is set)
 option(USE_OPENGL "Use OpenGL backend instead of Vulkan on non-macOS platforms" OFF)
