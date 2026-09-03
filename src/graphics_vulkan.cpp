@@ -1473,6 +1473,28 @@ void graphics_init()
 Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
                              const char **defines, size_t defineCount)
 {
+    /* SPIR-V magic number: 0x07230203. If the input is already compiled SPIR-V,
+     * skip shaderc and use it directly. */
+    static const uint32_t SPIRV_MAGIC = 0x07230203;
+    int isSPIRV = (size >= 4 && size % 4 == 0 &&
+                   *(const uint32_t *)source == SPIRV_MAGIC);
+
+    VkShaderModule shaderModule;
+
+    if (isSPIRV) {
+        /* Input is already SPIR-V — use directly */
+        VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        createInfo.codeSize = size;
+        createInfo.pCode    = (const uint32_t *)source;
+
+        VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create shader module from SPIR-V: %d\n", vkResult);
+            exit(EXIT_FAILURE);
+        }
+        return shaderModule;
+    }
+
     /* Map ShaderStage to shaderc_shader_kind */
     shaderc_shader_kind kind;
     switch (stage) {
@@ -1532,7 +1554,6 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     }
 
     /* Create VkShaderModule from compiled SPIR-V */
-    VkShaderModule shaderModule;
     VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
     createInfo.codeSize = shaderc_result_get_length(result);
     createInfo.pCode    = (const uint32_t *)shaderc_result_get_bytes(result);
