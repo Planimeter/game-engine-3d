@@ -22,6 +22,7 @@ extern JobSystem *g_jobSystem;
 #define FONT_GLYPH_PADDING 1
 #define INITIAL_BATCH_CAPACITY 64
 #define MAX_LINES_PER_TEXT 256
+#define GLYPH_HASH_SIZE 512
 
 typedef struct {
     Texture texture;
@@ -97,6 +98,9 @@ struct Font {
     Glyph *glyphs;
     size_t glyph_count;
     size_t glyph_capacity;
+
+    /* Glyph hash table for O(1) lookup */
+    Glyph *glyph_hash[GLYPH_HASH_SIZE];
     Buffer vertex_buffer;
     Buffer index_buffer;
     size_t vertex_capacity;
@@ -176,8 +180,19 @@ static int font_load_text_shaders()
     return 1;
 }
 
+static inline uint32_t glyph_hash(uint32_t id)
+{
+    return (id * 2654435761u) % GLYPH_HASH_SIZE;
+}
+
 static Glyph *font_find_glyph(Font *font, uint32_t glyph_id)
 {
+    uint32_t h = glyph_hash(glyph_id);
+    Glyph *g = font->glyph_hash[h];
+    if (g && g->glyph_id == glyph_id) {
+        return g;
+    }
+    /* Fallback: linear scan (should be rare) */
     for (size_t i = 0; i < font->glyph_count; i++) {
         if (font->glyphs[i].glyph_id == glyph_id) {
             return &font->glyphs[i];
@@ -198,8 +213,15 @@ static Glyph *font_add_glyph(Font *font, uint32_t glyph_id)
         font->glyph_capacity = new_capacity;
     }
 
-    font->glyphs[font->glyph_count].glyph_id = glyph_id;
-    return &font->glyphs[font->glyph_count++];
+    Glyph *g = &font->glyphs[font->glyph_count];
+    g->glyph_id = glyph_id;
+    font->glyph_count++;
+
+    /* Insert into hash table */
+    uint32_t h = glyph_hash(glyph_id);
+    font->glyph_hash[h] = g;
+
+    return g;
 }
 
 static int font_pack_glyph(Font *font, int atlas_index, int width, int height, int *out_x, int *out_y)

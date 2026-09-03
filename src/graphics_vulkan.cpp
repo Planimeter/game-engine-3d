@@ -2791,10 +2791,16 @@ void graphics_bindtexture(Texture tex, unsigned slot)
     GPUTexture *texture = (GPUTexture *)tex;
     VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     VkDescriptorImageInfo imageInfo;
+    static Texture g_boundTextures[MAX_BINDLESS_RESOURCES] = {0};
 
     if (!texture || slot >= MAX_BINDLESS_RESOURCES) {
         return;
     }
+
+    if (g_boundTextures[slot] == tex) {
+        return; /* already bound */
+    }
+    g_boundTextures[slot] = tex;
 
     imageInfo.sampler = texture->sampler;
     imageInfo.imageView = texture->view;
