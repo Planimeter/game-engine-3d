@@ -129,9 +129,18 @@ static VkDescriptorPool uboDescriptorPool;
 static VkDescriptorSetLayout uboDescriptorSetLayout;
 static VkDescriptorSet uboDescriptorSet;
 
+/* Forward declarations of GPU types used by static globals */
+typedef struct GPUBufferTag { VkBuffer buffer; VmaAllocation allocation; size_t size; void *persistentMap; } GPUBuffer;
+
 /* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
 #define UNIFORM_BUFFER_SIZE 4096
 static GPUBuffer *g_uniformBuffer = NULL;
+
+/* Persistent staging buffer for texture uploads — reused across frames */
+static VkBuffer g_stagingBuffer = VK_NULL_HANDLE;
+static VmaAllocation g_stagingAllocation = VK_NULL_HANDLE;
+static void *g_stagingMap = NULL;
+static size_t g_stagingSize = 0;
 
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
@@ -1718,12 +1727,6 @@ typedef struct {
 } GPUMaterial;
 
 typedef struct {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    size_t size;
-} GPUBuffer;
-
-typedef struct {
     VkImage image;
     VkImageView view;
     VkSampler sampler;
@@ -1799,6 +1802,8 @@ static VkCommandBuffer graphics_begin_one_time_commands()
     return commandBuffer;
 }
 
+static VkFence g_uploadFence = VK_NULL_HANDLE;
+
 static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
 {
     VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -1813,8 +1818,14 @@ static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    if (g_uploadFence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fi = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        vkCreateFence(device, &fi, NULL, &g_uploadFence);
+    }
+
+    vkQueueSubmit(queue, 1, &submit, g_uploadFence);
+    vkWaitForFences(device, 1, &g_uploadFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &g_uploadFence);
 
     vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
 }
@@ -2449,14 +2460,16 @@ Buffer graphics_createuniformbuffer(size_t size)
     }
 
     buffer->size = size;
+
+    /* Persistently map the uniform buffer — avoids map/unmap per update */
+    vmaMapMemory(allocator, buffer->allocation, &buffer->persistentMap);
+
     return buffer;
 }
 
 void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
 {
     GPUBuffer *buffer = (GPUBuffer *)buf;
-    void *mappedData;
-    VkResult result;
     size_t copySize;
 
     if (!buffer || !data || size == 0) {
@@ -2464,13 +2477,18 @@ void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
     }
 
     copySize = size < buffer->size ? size : buffer->size;
-    result = vmaMapMemory(allocator, buffer->allocation, &mappedData);
-    if (result != VK_SUCCESS) {
-        return;
-    }
 
-    memcpy(mappedData, data, copySize);
-    vmaUnmapMemory(allocator, buffer->allocation);
+    if (buffer->persistentMap) {
+        memcpy(buffer->persistentMap, data, copySize);
+    } else {
+        void *mappedData;
+        VkResult result = vmaMapMemory(allocator, buffer->allocation, &mappedData);
+        if (result != VK_SUCCESS) {
+            return;
+        }
+        memcpy(mappedData, data, copySize);
+        vmaUnmapMemory(allocator, buffer->allocation);
+    }
 }
 
 void graphics_destroybuffer(Buffer buf)
@@ -2478,6 +2496,11 @@ void graphics_destroybuffer(Buffer buf)
     GPUBuffer *buffer = (GPUBuffer *)buf;
     if (!buffer) {
         return;
+    }
+
+    if (buffer->persistentMap && allocator != VK_NULL_HANDLE) {
+        vmaUnmapMemory(allocator, buffer->allocation);
+        buffer->persistentMap = NULL;
     }
 
     if (buffer->buffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
@@ -2673,15 +2696,9 @@ void graphics_updatetexture(Texture tex,
                             const unsigned char *pixels)
 {
     GPUTexture *texture = (GPUTexture *)tex;
-    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    VmaAllocationCreateInfo allocInfo = { 0 };
-    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer;
     VkBufferImageCopy region = { 0 };
-    VkResult result;
     size_t pixelSize;
-    void *mappedData = NULL;
 
     if (!texture || !pixels || width <= 0 || height <= 0) {
         return;
@@ -2691,29 +2708,37 @@ void graphics_updatetexture(Texture tex,
     }
 
     pixelSize = (size_t)width * (size_t)height * 4;
-    bufferInfo.size = pixelSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    /* Grow persistent staging buffer if needed */
+    if (pixelSize > g_stagingSize) {
+        VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        VmaAllocationCreateInfo allocInfo = { 0 };
 
-    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, NULL);
-    if (result != VK_SUCCESS) {
-        return;
+        if (g_stagingBuffer != VK_NULL_HANDLE) {
+            vmaUnmapMemory(allocator, g_stagingAllocation);
+            vmaDestroyBuffer(allocator, g_stagingBuffer, g_stagingAllocation);
+        }
+
+        g_stagingSize = pixelSize < 256 * 1024 ? 256 * 1024 : pixelSize;
+        bufferInfo.size = g_stagingSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                            &g_stagingBuffer, &g_stagingAllocation, NULL) != VK_SUCCESS) {
+            g_stagingSize = 0;
+            return;
+        }
+        vmaMapMemory(allocator, g_stagingAllocation, &g_stagingMap);
     }
 
-    if (vmaMapMemory(allocator, stagingAllocation, &mappedData) != VK_SUCCESS) {
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        return;
-    }
-
-    memcpy(mappedData, pixels, pixelSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
+    memcpy(g_stagingMap, pixels, pixelSize);
 
     commandBuffer = graphics_begin_one_time_commands();
     if (commandBuffer == VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
         return;
     }
 
@@ -2731,7 +2756,7 @@ void graphics_updatetexture(Texture tex,
     region.imageExtent.height = (uint32_t)height;
     region.imageExtent.depth = 1;
 
-    vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
+    vkCmdCopyBufferToImage(commandBuffer, g_stagingBuffer, texture->image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     graphics_transition_image(commandBuffer, texture->image,
@@ -2739,8 +2764,6 @@ void graphics_updatetexture(Texture tex,
                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     graphics_end_one_time_commands(commandBuffer);
-
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 }
 
 void graphics_destroytexture(Texture tex)
@@ -3289,8 +3312,23 @@ void graphics_shutdown(void)
             g_uniformBuffer = NULL;
         }
 
+        if (g_stagingBuffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaUnmapMemory(allocator, g_stagingAllocation);
+            vmaDestroyBuffer(allocator, g_stagingBuffer, g_stagingAllocation);
+            g_stagingBuffer = VK_NULL_HANDLE;
+            g_stagingAllocation = VK_NULL_HANDLE;
+            g_stagingMap = NULL;
+            g_stagingSize = 0;
+        }
+
         graphics_destroysemaphores();
         graphics_destroyfences();
+
+        if (g_uploadFence != VK_NULL_HANDLE) {
+            vkDestroyFence(device, g_uploadFence, NULL);
+            g_uploadFence = VK_NULL_HANDLE;
+        }
+
         graphics_freecommandbuffers();
         graphics_destroycommandpools();
 
