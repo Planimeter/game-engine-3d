@@ -3,6 +3,17 @@ cmake_minimum_required(VERSION 3.22)
 # set the project name
 project(game LANGUAGES C CXX OBJC OBJCXX)
 
+# Force dynamic runtime (/MD) for MSVC - set after project() for proper detection
+if (MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL" CACHE STRING "" FORCE)
+    # Force RelWithDebInfo to prevent third-party libraries from injecting /MTd
+    # (e.g. Assimp uses $<$<CONFIG:Debug>:/MTd> which activates when Debug)
+    set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
+endif()
+
+# Enable CMP0091 to allow CMAKE_MSVC_RUNTIME_LIBRARY to propagate to FetchContent subprojects
+cmake_policy(SET CMP0091 NEW)
+
 # Download and extract CEF if not already present
 set(CEF_VERSION "145.0.22+g0fa8d1b+chromium-145.0.7632.45")
 if(WIN32)
@@ -93,6 +104,20 @@ add_subdirectory(third_party/glm)
 add_subdirectory(third_party/freetype)
 # add the HarfBuzz library
 add_subdirectory(third_party/harfbuzz-12.3.2)
+# Fix harfbuzz on MSVC: detect inttypes.h and provide format macro fallbacks.
+# Without this, hb-common.h may fail to compile because PRIu64/PRId64/PRIx64
+# are not defined when inttypes.h is missing.
+include(CheckIncludeFile)
+check_include_file(inttypes.h HAVE_INTTYPES_H)
+if(HAVE_INTTYPES_H)
+    target_compile_definitions(harfbuzz PUBLIC HAVE_INTTYPES_H)
+elseif(MSVC)
+    target_compile_definitions(harfbuzz PUBLIC
+        "PRIu64=\"llu\""
+        "PRId64=\"lld\""
+        "PRIx64=\"llx\""
+    )
+endif()
 # add the shaderc library
 include(FetchContent)
 
@@ -110,16 +135,19 @@ FetchContent_Declare(
   glslang
   GIT_REPOSITORY https://github.com/KhronosGroup/glslang.git
   GIT_TAG ${SHADERC_GLSLANG_REVISION}
+  CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/msvc_toolchain.cmake -DENABLE_OPT=OFF
 )
 FetchContent_Declare(
   spirv_headers
   GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Headers.git
   GIT_TAG ${SHADERC_SPIRV_HEADERS_REVISION}
+  CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/msvc_toolchain.cmake
 )
 FetchContent_Declare(
   spirv_tools
   GIT_REPOSITORY https://github.com/KhronosGroup/SPIRV-Tools.git
   GIT_TAG ${SHADERC_SPIRV_TOOLS_REVISION}
+  CMAKE_ARGS -DCMAKE_TOOLCHAIN_FILE=${CMAKE_CURRENT_SOURCE_DIR}/cmake/msvc_toolchain.cmake -DSPIRV_TOOLS_BUILD_TOOLS=OFF -DSPIRV_TOOLS_BUILD_FUZZ=OFF -DSPIRV_TOOLS_BUILD_TESTS=OFF -DSPIRV_TOOLS_BUILD_EXES=OFF -DSPIRV_WERROR=OFF -DSPIRV_TOOLS_BUILD_STATIC=OFF -DSPIRV_TOOLS_LIBRARY_TYPE=SHARED -DBUILD_SHARED_LIBS=ON -DSPIRV_SKIP_STATIC_LIBRARY=ON
 )
 
 # Download only — do not add_subdirectory (shaderc handles that).
@@ -127,7 +155,7 @@ FetchContent_Populate(glslang)
 FetchContent_Populate(spirv_headers)
 FetchContent_Populate(spirv_tools)
 
-# Point shaderc's third_party resolver at the fetched sources
+# Point shaderc's third_party resolver at the fetched sources directly
 set(SHADERC_GLSLANG_DIR "${glslang_SOURCE_DIR}" CACHE INTERNAL "")
 set(SHADERC_SPIRV_HEADERS_DIR "${spirv_headers_SOURCE_DIR}" CACHE INTERNAL "")
 set(SHADERC_SPIRV_TOOLS_DIR "${spirv_tools_SOURCE_DIR}" CACHE INTERNAL "")
@@ -143,10 +171,94 @@ set(SHADERC_SKIP_TESTS ON CACHE BOOL "" FORCE)
 set(SHADERC_SKIP_EXAMPLES ON CACHE BOOL "" FORCE)
 set(SHADERC_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
 set(SHADERC_SKIP_COPYRIGHT_CHECK ON CACHE BOOL "" FORCE)
+# Force shaderc to use shared CRT (/MD) instead of static (/MT)
+set(SHADERC_ENABLE_SHARED_CRT ON CACHE BOOL "" FORCE)
+
+# SPIRV-Tools: FetchContent_Populate only downloads sources — it never runs
+# cmake configure, so the CMAKE_ARGS we passed earlier are ignored. Set these
+# as cache variables here so they take effect when shaderc's third_party/
+# CMakeLists.txt does add_subdirectory() on the spirv-tools source tree.
+#
+# Use STATIC for everything.  With SPIRV_TOOLS_BUILD_STATIC=ON:
+#   SPIRV-Tools-static  = STATIC lib (full symbol visibility)
+#   SPIRV-Tools-shared  = SHARED lib (hidden symbol visibility)
+#   SPIRV-Tools         = alias → SPIRV-Tools-static
+# shaderc's SHADERC_LIBS links SPIRV-Tools-shared, but after add_subdirectory
+# we patch the shaderc targets to use SPIRV-Tools (static) instead.
+#
+# FORCE is required because a previous configure may have cached OFF.
+set(SPIRV_TOOLS_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_FUZZ OFF CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_EXES OFF CACHE BOOL "" FORCE)
+set(SPIRV_WERROR OFF CACHE BOOL "" FORCE)
+set(SPIRV_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SKIP_SPIRV_TOOLS_INSTALL ON CACHE BOOL "" FORCE)
+
 add_subdirectory(third_party/shaderc-2026.1)
+
+# Strip every reference to SPIRV-Tools-shared (the SHARED library) from all
+# targets, so that only SPIRV-Tools (alias -> SPIRV-Tools-static) remains.
+# This avoids LNK2005 duplicate-symbol errors when both a static .lib and an
+# import library for the shared DLL land on the same link line.
+if(TARGET SPIRV-Tools-shared)
+  set_target_properties(SPIRV-Tools-shared PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
+
+# Helper: remove SPIRV-Tools-shared from a target's LINK_LIBRARIES.
+macro(_strip_shared_spv_tools _tgt)
+  if(TARGET ${_tgt})
+    get_target_property(_libs ${_tgt} LINK_LIBRARIES)
+    if(_libs)
+      set(_new_libs "")
+      set(_dirty FALSE)
+      foreach(_lib IN LISTS _libs)
+        if("${_lib}" MATCHES "SPIRV-Tools-shared")
+          set(_dirty TRUE)
+        else()
+          list(APPEND _new_libs "${_lib}")
+        endif()
+      endforeach()
+      if(_dirty)
+        set_target_properties(${_tgt} PROPERTIES LINK_LIBRARIES "${_new_libs}")
+      endif()
+    endif()
+    get_target_property(_ilibs ${_tgt} INTERFACE_LINK_LIBRARIES)
+    if(_ilibs)
+      set(_new_libs "")
+      set(_dirty FALSE)
+      foreach(_lib IN LISTS _ilibs)
+        if("${_lib}" MATCHES "SPIRV-Tools-shared")
+          set(_dirty TRUE)
+        else()
+          list(APPEND _new_libs "${_lib}")
+        endif()
+      endforeach()
+      if(_dirty)
+        set_target_properties(${_tgt} PROPERTIES INTERFACE_LINK_LIBRARIES "${_new_libs}")
+      endif()
+    endif()
+  endif()
+endmacro()
+
+foreach(_tgt shaderc shaderc_shared shaderc_util glslang SPIRV-Tools-opt)
+  _strip_shared_spv_tools(${_tgt})
+endforeach()
 # add the Assimp library
+if (MSVC)
+    # Assimp uses C++ exception handlers without /EHsc, causing C4530 treated as error with /WX
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+endif()
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INSTALL OFF CACHE BOOL "" FORCE)
+set(ASSIMP_INJECT_DEBUG_POSTFIX OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/assimp-6.0.4)
+# Force Assimp to use release CRT regardless of its own generator expressions
+if(TARGET assimp)
+    set_target_properties(assimp PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
 # add the OpenAL library
 set(ALSOFT_UTILS OFF CACHE BOOL "" FORCE)
 set(ALSOFT_EXAMPLES OFF CACHE BOOL "" FORCE)
