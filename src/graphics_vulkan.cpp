@@ -198,7 +198,7 @@ static void graphics_createinstance()
     VkResult result = volkInitialize();
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to initialize Vulkan loader: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     // Check for portability enumeration extension (required for MoltenVK).
@@ -207,7 +207,7 @@ static void graphics_createinstance()
     VkExtensionProperties* availableExtensions = (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
     if (!availableExtensions) {
         fprintf(stderr, "Failed to allocate memory for extension properties\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, availableExtensions);
     
@@ -268,7 +268,7 @@ static void graphics_createinstance()
     result = vkCreateInstance(&createInfo, NULL, &instance);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create Vulkan instance: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
     volkLoadInstance(instance);
 }
@@ -283,17 +283,17 @@ static void graphics_enumeratephysicaldevices()
     // Validate device count
     if (physicalDeviceCount == 0) {
         fprintf(stderr, "No Vulkan physical devices found\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     if (physicalDeviceCount > 64) { // Reasonable upper bound
         fprintf(stderr, "Too many physical devices: %u\n", physicalDeviceCount);
-        exit(EXIT_FAILURE);
+        return;
     }
     
     physicalDevices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     if (!physicalDevices) {
         fprintf(stderr, "Failed to allocate memory for physical devices\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
@@ -306,13 +306,13 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     
     if (queueFamilyCount == 0) {
         fprintf(stderr, "No queue families found\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     VkQueueFamilyProperties *queueFamilies = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * queueFamilyCount);
     if (!queueFamilies) {
         fprintf(stderr, "Failed to allocate memory for queue families\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &queueFamilyCount, queueFamilies);
@@ -337,7 +337,7 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     
     if (selectedFamily == UINT32_MAX) {
         fprintf(stderr, "Failed to find suitable queue family\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     return selectedFamily;
@@ -351,13 +351,15 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
     
     if (formatCount == 0) {
         fprintf(stderr, "No surface formats available\n");
-        exit(EXIT_FAILURE);
+        VkSurfaceFormatKHR fallback = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        return fallback;
     }
     
     VkSurfaceFormatKHR *availableFormats = (VkSurfaceFormatKHR*)malloc(sizeof(VkSurfaceFormatKHR) * formatCount);
     if (!availableFormats) {
         fprintf(stderr, "Failed to allocate memory for surface formats\n");
-        exit(EXIT_FAILURE);
+        VkSurfaceFormatKHR fallback = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        return fallback;
     }
     
     vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surface, &formatCount, availableFormats);
@@ -412,7 +414,7 @@ static VkFormat graphics_finddepthformat(VkPhysicalDevice physDevice)
     }
 
     fprintf(stderr, "Failed to find supported depth format\n");
-    exit(EXIT_FAILURE);
+    return VK_FORMAT_UNDEFINED;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
@@ -452,7 +454,7 @@ static void graphics_createdevice()
     result = vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create Vulkan device: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
     volkLoadDevice(device);
 }
@@ -515,7 +517,7 @@ static void graphics_createallocator()
     VkResult result = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create VMA allocator: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -535,13 +537,13 @@ static void graphics_createcommandpools()
     // Validate swapchain image count before allocation
     if (swapchainImageCount == 0 || swapchainImageCount > 16) {
         fprintf(stderr, "Invalid swapchain image count for command pools: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
     if (!commandPools) {
         fprintf(stderr, "Failed to allocate memory for command pools\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
@@ -558,7 +560,7 @@ static void graphics_createcommandpools()
             }
             free(commandPools);
             commandPools = NULL;
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -573,13 +575,13 @@ static void graphics_allocatecommandbuffers()
     // Validate swapchain image count before allocation
     if (swapchainImageCount == 0 || swapchainImageCount > 16) {
         fprintf(stderr, "Invalid swapchain image count for command buffers: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     commandBuffers = (VkCommandBuffer *)malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
     if (!commandBuffers) {
         fprintf(stderr, "Failed to allocate memory for command buffers\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -599,7 +601,7 @@ static void graphics_allocatecommandbuffers()
             }
             free(commandBuffers);
             commandBuffers = NULL;
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -614,7 +616,7 @@ static void graphics_createfences()
     fences = (VkFence *)malloc(sizeof(VkFence) * swapchainImageCount);
     if (!fences) {
         fprintf(stderr, "Failed to allocate memory for fences\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
@@ -626,7 +628,7 @@ static void graphics_createfences()
         result = vkCreateFence(device, &createInfo, NULL, &fences[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create fence %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -641,12 +643,12 @@ static void graphics_createsemaphores()
     result = vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create acquire semaphore: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
     result = vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create release semaphore: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -686,7 +688,7 @@ static void graphics_createbindlessdescriptors()
     result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &bindlessDescriptorSetLayout);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create bindless descriptor set layout: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-pools */
@@ -702,7 +704,7 @@ static void graphics_createbindlessdescriptors()
     result = vkCreateDescriptorPool(device, &poolInfo, NULL, &bindlessDescriptorPool);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create bindless descriptor pool: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-allocation */
@@ -720,7 +722,7 @@ static void graphics_createbindlessdescriptors()
     result = vkAllocateDescriptorSets(device, &allocInfo, &bindlessDescriptorSet);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to allocate bindless descriptor set: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -748,7 +750,7 @@ static void graphics_createubodescriptors()
     result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &uboDescriptorSetLayout);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create UBO descriptor set layout: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -761,7 +763,7 @@ static void graphics_createubodescriptors()
     result = vkCreateDescriptorPool(device, &poolInfo, NULL, &uboDescriptorPool);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create UBO descriptor pool: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     allocInfo.descriptorPool = uboDescriptorPool;
@@ -771,7 +773,7 @@ static void graphics_createubodescriptors()
     result = vkAllocateDescriptorSets(device, &allocInfo, &uboDescriptorSet);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to allocate UBO descriptor set: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -842,7 +844,7 @@ static void graphics_createrenderpass()
     VkResult result = vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create render pass: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -856,7 +858,7 @@ static void graphics_createframebuffers()
     framebuffers = (VkFramebuffer *)malloc(sizeof(VkFramebuffer) * swapchainImageCount);
     if (!framebuffers) {
         fprintf(stderr, "Failed to allocate memory for framebuffers\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -873,7 +875,7 @@ static void graphics_createframebuffers()
         result = vkCreateFramebuffer(device, &createInfo, NULL, &framebuffers[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create framebuffer %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -890,7 +892,7 @@ static void graphics_createshaders()
         VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&vertShader);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create cached vert shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return;
         }
 
         createInfo.codeSize = g_cachedFragSPIRV.size;
@@ -898,7 +900,7 @@ static void graphics_createshaders()
         vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&fragShader);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create cached frag shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return;
         }
         return;
     }
@@ -925,7 +927,7 @@ static void graphics_createshaders()
             fprintf(stderr, "Vertex shader compilation failed:\n%s\n",
                     shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            exit(EXIT_FAILURE);
+            return;
         }
 
         size_t spvSize = shaderc_result_get_length(result);
@@ -940,7 +942,7 @@ static void graphics_createshaders()
         shaderc_result_release(result);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create vert shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 
@@ -958,7 +960,7 @@ static void graphics_createshaders()
             fprintf(stderr, "Fragment shader compilation failed:\n%s\n",
                     shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            exit(EXIT_FAILURE);
+            return;
         }
 
         size_t spvSize = shaderc_result_get_length(result);
@@ -973,7 +975,7 @@ static void graphics_createshaders()
         shaderc_result_release(result);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create frag shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 
@@ -1085,7 +1087,7 @@ static void graphics_creategraphicspipeline()
     VkResult result = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create pipeline layout: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     createInfo.stageCount                       = 2;
@@ -1109,7 +1111,7 @@ static void graphics_creategraphicspipeline()
     result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create graphics pipeline: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     graphics_destroyshader(vertShader);
@@ -1123,7 +1125,7 @@ static void graphics_createsurface()
 {
     if (!window_vulkan_createsurface(instance, &surface)) {
         fprintf(stderr, "Failed to create Vulkan surface\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -1173,7 +1175,7 @@ static void graphics_createswapchain()
     VkResult result = vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create swapchain: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     if (oldSwapchain != VK_NULL_HANDLE)
@@ -1197,17 +1199,17 @@ static void graphics_getswapchainimages()
     // Validate swapchain image count
     if (swapchainImageCount == 0) {
         fprintf(stderr, "No swapchain images available\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     if (swapchainImageCount > 16) {
         fprintf(stderr, "Too many swapchain images: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
     
     swapchainImages = (VkImage *)malloc(sizeof(VkImage) * swapchainImageCount);
     if (!swapchainImages) {
         fprintf(stderr, "Failed to allocate memory for swapchain images\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
@@ -1245,7 +1247,7 @@ static void graphics_createdepthresources()
     result = vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthAllocation, NULL);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create depth image: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     viewInfo.image = depthImage;
@@ -1260,7 +1262,7 @@ static void graphics_createdepthresources()
     result = vkCreateImageView(device, &viewInfo, NULL, &depthImageView);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create depth image view: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -1299,7 +1301,7 @@ static void graphics_createimageviews()
     swapchainImageViews = (VkImageView *)malloc(sizeof(VkImageView) * swapchainImageCount);
     if (!swapchainImageViews) {
         fprintf(stderr, "Failed to allocate memory for swapchain image views\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -1309,7 +1311,7 @@ static void graphics_createimageviews()
         result = vkCreateImageView(device, &createInfo, NULL, &swapchainImageViews[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create image view %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -1452,7 +1454,7 @@ void graphics_init()
     g_shaderc_compiler = shaderc_compiler_initialize();
     if (!g_shaderc_compiler) {
         fprintf(stderr, "Failed to initialize shaderc compiler\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
@@ -1499,7 +1501,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
         VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create shader module from SPIR-V: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return NULL;
         }
         return shaderModule;
     }
@@ -1515,14 +1517,14 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
             break;
         default:
             fprintf(stderr, "Unknown shader stage: %d\n", stage);
-            exit(EXIT_FAILURE);
+            return NULL;
     }
 
     /* Set up compilation options */
     shaderc_compile_options_t options = shaderc_compile_options_initialize();
     if (!options) {
         fprintf(stderr, "Failed to create shaderc compile options\n");
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     shaderc_compile_options_set_target_env(
@@ -1559,7 +1561,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
         fprintf(stderr, "Shader compilation failed:\n%s\n",
                 shaderc_result_get_error_message(result));
         shaderc_result_release(result);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     /* Create VkShaderModule from compiled SPIR-V */
@@ -1571,7 +1573,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     if (vkResult != VK_SUCCESS) {
         fprintf(stderr, "Failed to create shader module: %d\n", vkResult);
         shaderc_result_release(result);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     shaderc_result_release(result);
