@@ -31,6 +31,7 @@ typedef enum {
 
 typedef enum {
 	VERTEX_FORMAT_FULL,     // Position, Normal, UV, Tangent, Bitangent
+	VERTEX_FORMAT_SKINNED,  // Position, Normal, UV, Tangent, Bitangent, BoneIDs, BoneWeights
 	VERTEX_FORMAT_POS_UV,   // Position, UV only (for text/UI)
 	VERTEX_FORMAT_POS_COLOR // Position, Color only (for debug)
 } VertexFormat;

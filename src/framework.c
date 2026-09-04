@@ -6,6 +6,7 @@
 #include "audio.h"
 #include "font.h"
 #include "text.h"
+#include "model.h"
 #include "math_c.h"
 #include <stdint.h>
 #include <stdlib.h>
@@ -109,6 +110,11 @@ void framework_update(uint64_t deltaTime)
     }
 
     g_elapsed += (float)deltaTime / 1000.0f;
+
+    /* Update model animation */
+    if (g_testModel) {
+        model_update(g_testModel, (float)deltaTime / 1000.0f);
+    }
 }
 
 void framework_draw(void)
@@ -134,6 +140,22 @@ void framework_draw(void)
         /* MVP = proj * view * model */
         math_multiply(temp, view, model);
         math_multiply(mvp, proj, temp);
+
+        /* Upload bone matrices to UBO slot 2 for skinning */
+        if (model_get_bone_count(g_testModel) > 0) {
+            const float *boneMatrices = model_get_bone_matrices(g_testModel);
+            if (boneMatrices) {
+                static Buffer g_boneBuffer = NULL;
+                if (!g_boneBuffer) {
+                    g_boneBuffer = graphics_createuniformbuffer(16 * 256 * sizeof(float));
+                }
+                if (g_boneBuffer) {
+                    graphics_updatebuffer(g_boneBuffer, boneMatrices,
+                                         model_get_bone_count(g_testModel) * 16 * sizeof(float));
+                    graphics_binduniformbuffer(g_boneBuffer, 2);
+                }
+            }
+        }
 
         graphics_drawmodel(g_testModel, NULL, mvp);
     }

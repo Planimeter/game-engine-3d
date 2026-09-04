@@ -3407,6 +3407,53 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[4].offset = offsetof(Vertex, texCoords);
             break;
 
+        case VERTEX_FORMAT_SKINNED:
+            bindingDesc->stride = sizeof(Vertex);
+            *attrCount = 7;
+
+            // Position
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = offsetof(Vertex, position);
+
+            // Normal
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[1].offset = offsetof(Vertex, normal);
+
+            // Tangent
+            attrDescs[2].binding = 0;
+            attrDescs[2].location = 2;
+            attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[2].offset = offsetof(Vertex, tangent);
+
+            // Bitangent
+            attrDescs[3].binding = 0;
+            attrDescs[3].location = 3;
+            attrDescs[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[3].offset = offsetof(Vertex, bitangent);
+
+            // TexCoords
+            attrDescs[4].binding = 0;
+            attrDescs[4].location = 4;
+            attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
+            attrDescs[4].offset = offsetof(Vertex, texCoords);
+
+            // BoneIDs
+            attrDescs[5].binding = 0;
+            attrDescs[5].location = 5;
+            attrDescs[5].format = VK_FORMAT_R32G32B32A32_UINT;
+            attrDescs[5].offset = offsetof(Vertex, boneIDs);
+
+            // BoneWeights
+            attrDescs[6].binding = 0;
+            attrDescs[6].location = 6;
+            attrDescs[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attrDescs[6].offset = offsetof(Vertex, boneWeights);
+            break;
+
         case VERTEX_FORMAT_POS_UV:
             bindingDesc->stride = sizeof(float) * 5; // vec3 pos + vec2 uv
             *attrCount = 2;
