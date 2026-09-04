@@ -731,21 +731,25 @@ static void graphics_createbindlessdescriptors()
  * Used for transforms (slot 0), material data (slot 1), etc. */
 static void graphics_createubodescriptors()
 {
-    VkDescriptorSetLayoutBinding binding = {};
+    VkDescriptorSetLayoutBinding bindings[2] = {};
     VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    VkDescriptorPoolSize poolSize = {};
+    VkDescriptorPoolSize poolSizes[2] = {};
     VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     VkResult result;
 
-    /* One binding with MAX_UBO_SLOTS descriptors for uniform buffers */
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    binding.descriptorCount = MAX_UBO_SLOTS;
-    binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[0].descriptorCount = MAX_UBO_SLOTS;
+    bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &binding;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+    layoutInfo.bindingCount = 2;
+    layoutInfo.pBindings = bindings;
 
     result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &uboDescriptorSetLayout);
     if (result != VK_SUCCESS) {
@@ -753,12 +757,14 @@ static void graphics_createubodescriptors()
         return;
     }
 
-    poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = MAX_UBO_SLOTS;
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = MAX_UBO_SLOTS;
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[1].descriptorCount = 1;
 
     poolInfo.maxSets = 1;
-    poolInfo.poolSizeCount = 1;
-    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.poolSizeCount = 2;
+    poolInfo.pPoolSizes = poolSizes;
 
     result = vkCreateDescriptorPool(device, &poolInfo, NULL, &uboDescriptorPool);
     if (result != VK_SUCCESS) {
@@ -1011,7 +1017,7 @@ static void graphics_creategraphicspipeline()
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attributeDescriptions[5] = {};
+    VkVertexInputAttributeDescription attributeDescriptions[7] = {};
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -1032,6 +1038,14 @@ static void graphics_creategraphicspipeline()
     attributeDescriptions[4].location = 4;
     attributeDescriptions[4].format = VK_FORMAT_R32G32_SFLOAT;
     attributeDescriptions[4].offset = offsetof(Vertex, texCoords);
+    attributeDescriptions[5].binding = 0;
+    attributeDescriptions[5].location = 5;
+    attributeDescriptions[5].format = VK_FORMAT_R32G32B32A32_UINT;
+    attributeDescriptions[5].offset = offsetof(Vertex, boneIDs);
+    attributeDescriptions[6].binding = 0;
+    attributeDescriptions[6].location = 6;
+    attributeDescriptions[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[6].offset = offsetof(Vertex, boneWeights);
 
     vertShaderStage.stage                       = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module                      = (VkShaderModule)vertShader;
@@ -1046,7 +1060,7 @@ static void graphics_creategraphicspipeline()
 
     vertexInput.vertexBindingDescriptionCount   = 1;
     vertexInput.pVertexBindingDescriptions      = &bindingDescription;
-    vertexInput.vertexAttributeDescriptionCount = 5;
+    vertexInput.vertexAttributeDescriptionCount = 7;
     vertexInput.pVertexAttributeDescriptions    = attributeDescriptions;
 
     inputAssembly.topology                      = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
