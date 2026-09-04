@@ -861,7 +861,7 @@ void graphics_init() {
     g_window = (SDL_Window *)window_getwindow();
     if (!g_window) {
         fprintf(stderr, "GL: No SDL window available\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -873,12 +873,12 @@ void graphics_init() {
     g_context = SDL_GL_CreateContext(g_window);
     if (!g_context) {
         fprintf(stderr, "GL: Failed to create context: %s\n", SDL_GetError());
-        exit(EXIT_FAILURE);
+        return;
     }
 
     if (!gl_load_functions()) {
         fprintf(stderr, "GL: Failed to load OpenGL functions\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     atexit(graphics_shutdown);

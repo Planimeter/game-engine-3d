@@ -772,7 +772,7 @@ void graphics_init() {
     g_device = MTLCreateSystemDefaultDevice();
     if (!g_device) {
         fprintf(stderr, "Failed to create Metal device\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     printf("Metal device: %s\n", [[g_device name] UTF8String]);
 
@@ -786,13 +786,13 @@ void graphics_init() {
     SDL_MetalView metalView = (SDL_MetalView)(uintptr_t)(size_t)window_get_metal_view();
     if (!metalView) {
         fprintf(stderr, "Metal: No Metal view available\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     g_metalLayer = (CAMetalLayer *)SDL_Metal_GetLayer(metalView);
     if (!g_metalLayer) {
         fprintf(stderr, "Metal: Could not get CAMetalLayer from SDL\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* Configure the Metal layer */
