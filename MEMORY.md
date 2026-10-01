@@ -24,9 +24,9 @@ event_poll() → timer_step() → job_submit(update) → job_wait(update)
            → job_submit(draw)  → job_wait(draw)  → graphics_present()
 ```
 
-## Metal Backend Status (2026-07-29)
+## Metal Backend Status (2026-10-01)
 
-The Metal backend (`src/graphics_metal.mm`, ~1030 lines) is a complete port of the Vulkan backend for macOS. FPS text rendering and 3D model rendering (spinning cube with normal visualization) are working end-to-end at ~119 FPS.
+The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of the Vulkan backend for macOS. FPS text rendering and 3D model rendering (spinning cube with Blinn-Phong lighting and depth testing) are working end-to-end.
 
 ### Implemented
 - Device initialization, command queue, swapchain via CAMetalLayer
@@ -42,20 +42,24 @@ The Metal backend (`src/graphics_metal.mm`, ~1030 lines) is a complete port of t
 - Transform matrix upload in all 3 draw calls (`graphics_drawmodel`, `graphics_draw_instanced`, `graphics_draw_buffers`)
 - Default 3D fallback shader with `VERTEX_FORMAT_FULL` support (position, normal, tangent, bitangent, texcoord)
 - `graphics_loadmodel()` GPU buffer creation (vertex + index buffer upload per mesh)
-- End-to-end 3D model rendering test (spinning cube with MVP matrix, normal visualization)
+- End-to-end 3D model rendering test (spinning cube with MVP matrix)
 - `graphics_binduniformbuffer()` API (binds a Buffer to both vertex and fragment stages at a given slot)
 - `model_get_mesh_count()` C-compatible accessor for opaque Model struct
 - Material system — `MetalMaterial` struct with CPU-side storage, per-material uniform buffer, `metal_material_pack()` for GPU upload, `graphics_setmaterial()` binds material buffer at slot 2 + textures
+- Depth testing — every pass (swapchain + offscreen) carries a `Depth32Float` attachment: swapchain lazily creates/resizes `g_depthTexture`, offscreen passes use `internalDepth` or a user depth texture; `graphics_createpipeline()` always declares `depthAttachmentPixelFormat` so pipeline/pass formats match
+- Blinn-Phong lighting in the embedded MSL default shader — floats[0..2] = ambient/specular/shininess, vec3s[0..2] = lightDir (points away from light)/cameraPos/albedo, model matrix normal transform from `extraMatrix` upper 3x3
+- Framework lit material (`g_litMaterial` in `framework.c`) — orange albedo cube drawn with per-frame model matrix
+- `graphics_setmaterial()` fallback — draw calls bind `g_defaultMaterial` when passed NULL, and use the embedded default shader when a material has no shader
 
 ### Refactoring Completed
 - Extracted direct Metal message sends into C wrappers in `graphics_metal_helpers.m` to work around ObjC++ dispatch issues
 - Texture storage mode: `MTLStorageModePrivate` + blit encoder upload (fixes AGX GPU crash)
 - `metal_buffer_update()` wraps `memcpy([buf contents], data, size)`
 - `metal_texture_update_region()` uses staging buffer + blit encoder
+- `metal_encoder_set_buffer()` sets the buffer on BOTH vertex and fragment stages — render encoders have no `setBuffer:offset:atIndex:` (only compute/blit do), which previously crashed with `unrecognized selector` as soon as a material was bound
 
 ### Remaining Issues
-- No depth texture created — depth attachment only enabled when depthTest/depthWrite is set
-- `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded.
+- `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded. (No current callers, so low priority.)
 
 ## Vulkan Backend Status (2026-07-29)
 
@@ -68,12 +72,15 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - `ShaderStage` enum (`SHADER_STAGE_VERTEX`, `SHADER_STAGE_FRAGMENT`) — maps to `shaderc_shader_kind`
 - Macro definition support: splits `"NAME=VALUE"` at first `=` for shaderc compile options
 - Material system with `GPUMaterial` struct, `vulkan_material_pack()` matching Metal's layout
-- UBO descriptor set (set 1) with 16 slots, global uniform buffer (4096 bytes)
+- UBO descriptor set (set 1) as 16 discrete bindings (binding = slot, 1 UBO each) — `graphics_binduniformbuffer()` writes `dstBinding = slot`; matches the GLSL `layout(set = 1, binding = N)` blocks
+- Default 3D pipeline reads `shaders/triangle.vert`/`triangle.frag` — rewritten as a 3D Blinn-Phong pair (MVP at set1/binding0, Material at set1/binding1, y-flip for Vulkan NDC) to match the Metal default shader; both validate clean with `glslangValidator -V`
 - Pipeline creation supports multiple vertex formats (`VERTEX_FORMAT_FULL`, `POS_UV`, `POS_COLOR`)
 - Blend modes: NONE, ALPHA, ADD, PREMULT
 
 ### Remaining Issues
 - Render pass always includes depth attachment even when no pipeline uses depth testing
+- Vulkan backend only syntax-checked on macOS (`clang++ -fsyntax-only`) — never runtime-tested on this machine
+- Pre-existing compile break fixed: `GPUBuffer` typedef used at line 134 but declared ~1700 — moved the typedef up so the file compiles again
 
 ---
 
@@ -140,10 +147,10 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ## Additional Observations
 
 ### Engine State at Runtime
-- `framework.c` creates a test font and displays an FPS counter, plus loads and renders a spinning cube with normal-visualization colors
+- `framework.c` creates a test font and displays an FPS counter, plus loads and renders a spinning cube with Blinn-Phong directional lighting
 - Matrix math is provided by `math_c.h` / `math_glm.cpp` wrapping real GLM calls (SIMD, etc.) behind `extern "C"` functions
 - 3D model rendering is working via the Metal backend with MVP matrix pipeline
-- The default 3D shader visualizes normals as color (`normal * 0.5 + 0.5`) — debug quality, no proper lighting yet
+- The default 3D shader applies Blinn-Phong lighting (ambient + diffuse + specular) with material-provided light direction, camera position, and albedo
 
 ### Memory Management
 - VMA (Vulkan Memory Allocator) is used for all GPU allocations
@@ -154,7 +161,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ### Portable API Design
 - Graphics API is C99 with opaque handles (`typedef void* Shader, Texture, Material, Buffer, RenderPass, Pipeline`)
 - Dual backend: `#ifdef APPLE` selects Metal, else Vulkan
-- The Metal backend is slightly less feature-complete — the render pass abstraction was recently implemented but depth texture creation is still pending — but all core rendering paths (model drawing, text, materials) are working
+- The Metal backend is slightly less feature-complete than Vulkan — but all core rendering paths (model drawing, text, materials, depth testing, lighting) are working
 - Some backends (Null) exist but are not wired into the build system as primary backends
 
 ### Shader Compilation

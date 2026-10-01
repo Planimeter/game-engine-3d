@@ -129,6 +129,12 @@ static VkDescriptorPool uboDescriptorPool;
 static VkDescriptorSetLayout uboDescriptorSetLayout;
 static VkDescriptorSet uboDescriptorSet;
 
+typedef struct {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+    size_t size;
+} GPUBuffer;
+
 /* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
 #define UNIFORM_BUFFER_SIZE 4096
 static GPUBuffer *g_uniformBuffer = NULL;
@@ -720,21 +726,26 @@ static void graphics_createbindlessdescriptors()
  * Used for transforms (slot 0), material data (slot 1), etc. */
 static void graphics_createubodescriptors()
 {
-    VkDescriptorSetLayoutBinding binding = {};
+    VkDescriptorSetLayoutBinding bindings[MAX_UBO_SLOTS];
     VkDescriptorSetLayoutCreateInfo layoutInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     VkDescriptorPoolSize poolSize = {};
     VkDescriptorPoolCreateInfo poolInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     VkDescriptorSetAllocateInfo allocInfo = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
     VkResult result;
+    int i;
 
-    /* One binding with MAX_UBO_SLOTS descriptors for uniform buffers */
-    binding.binding = 0;
-    binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    binding.descriptorCount = MAX_UBO_SLOTS;
-    binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    /* One discrete binding per slot so shaders can declare individual
+     * layout(set = 1, binding = slot) uniform blocks */
+    for (i = 0; i < MAX_UBO_SLOTS; i++) {
+        bindings[i].binding = (uint32_t)i;
+        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        bindings[i].descriptorCount = 1;
+        bindings[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        bindings[i].pImmutableSamplers = NULL;
+    }
 
-    layoutInfo.bindingCount = 1;
-    layoutInfo.pBindings = &binding;
+    layoutInfo.bindingCount = MAX_UBO_SLOTS;
+    layoutInfo.pBindings = bindings;
 
     result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &uboDescriptorSetLayout);
     if (result != VK_SUCCESS) {
@@ -1697,12 +1708,6 @@ typedef struct {
 } GPUMaterial;
 
 typedef struct {
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    size_t size;
-} GPUBuffer;
-
-typedef struct {
     VkImage image;
     VkImageView view;
     VkSampler sampler;
@@ -2481,8 +2486,8 @@ void graphics_binduniformbuffer(Buffer buf, unsigned slot)
     bufferInfo.range = buffer->size;
 
     write.dstSet = uboDescriptorSet;
-    write.dstBinding = 0;
-    write.dstArrayElement = slot;
+    write.dstBinding = slot;
+    write.dstArrayElement = 0;
     write.descriptorCount = 1;
     write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     write.pBufferInfo = &bufferInfo;

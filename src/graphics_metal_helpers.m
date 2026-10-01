@@ -77,9 +77,14 @@ void   metal_encoder_set_buffer(void *enc,
                                  void *buf,
                                  unsigned long offset,
                                  unsigned long index) {
-    [(id<MTLRenderCommandEncoder>)enc setBuffer:(id<MTLBuffer>)buf
-                                         offset:(NSUInteger)offset
-                                        atIndex:(NSUInteger)index];
+    /* Render command encoders have no setBuffer: — bind on both stages so
+     * vertex and fragment functions see the same buffer at this index */
+    [(id<MTLRenderCommandEncoder>)enc setVertexBuffer:(id<MTLBuffer>)buf
+                                               offset:(NSUInteger)offset
+                                              atIndex:(NSUInteger)index];
+    [(id<MTLRenderCommandEncoder>)enc setFragmentBuffer:(id<MTLBuffer>)buf
+                                               offset:(NSUInteger)offset
+                                              atIndex:(NSUInteger)index];
 }
 
 void   metal_encoder_set_viewport(void *enc, const double vp[6]) {

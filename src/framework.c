@@ -22,6 +22,7 @@ static const uint64_t g_fpsUpdateIntervalMs = 1000;
 
 /* 3D test model */
 static Model *g_testModel = NULL;
+static Material g_litMaterial = NULL;
 static float g_elapsed = 0.0f;
 
 void framework_init(const char *argv0)
@@ -84,6 +85,20 @@ void framework_load(int argc, char *argv[])
             }
         }
     }
+
+    /* Lit material: floats are ambient/specular/shininess, vec3s are
+     * light direction/camera position/albedo (slot order matters — the
+     * material API packs by slot, not by name). The model matrix is
+     * updated per frame via graphics_material_set_mat4. */
+    g_litMaterial = graphics_creatematerial(NULL);
+    if (g_litMaterial) {
+        graphics_material_set_float(g_litMaterial, "ambient", 0.15f);
+        graphics_material_set_float(g_litMaterial, "specular", 0.45f);
+        graphics_material_set_float(g_litMaterial, "shininess", 32.0f);
+        graphics_material_set_vec3(g_litMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
+        graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
+    }
 }
 
 void framework_update(uint64_t deltaTime)
@@ -130,7 +145,11 @@ void framework_draw(void)
         math_multiply(temp, view, model);
         math_multiply(mvp, proj, temp);
 
-        graphics_drawmodel(g_testModel, NULL, mvp);
+        /* Model matrix drives world-space normals in the lit shader */
+        if (g_litMaterial) {
+            graphics_material_set_mat4(g_litMaterial, model);
+        }
+        graphics_drawmodel(g_testModel, g_litMaterial, mvp);
     }
 
     /* Draw FPS text overlay */

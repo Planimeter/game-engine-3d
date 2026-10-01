@@ -100,6 +100,13 @@ typedef struct {
     int dirty;
 } MetalMaterial;
 
+/* Default material bound when a draw call passes mat == NULL, so the
+ * default shader always has valid data at buffer(2). */
+static MetalMaterial *g_defaultMaterial = NULL;
+
+/* Swapchain depth attachment (recreated when the drawable size changes) */
+static MetalTexture *g_depthTexture = NULL;
+
 static int g_windowWidth = 640;
 static int g_windowHeight = 480;
 static int g_minimized = 0;
@@ -179,6 +186,36 @@ static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
     desc.depthCompareFunction = state.depthTest ? MTLCompareFunctionLess : MTLCompareFunctionAlways;
     desc.depthWriteEnabled = state.depthWrite;
     return (id<MTLDepthStencilState>)metal_device_new_depth_stencil_state(g_device, desc);
+}
+
+static MetalTexture *metal_make_depth_texture(int width, int height) {
+    MetalTexture *t = (MetalTexture *)calloc(1, sizeof(MetalTexture));
+    if (!t) return NULL;
+
+    MTLTextureDescriptor *desc = [[MTLTextureDescriptor alloc] init];
+    desc.pixelFormat = MTLPixelFormatDepth32Float;
+    desc.width = (NSUInteger)width;
+    desc.height = (NSUInteger)height;
+    desc.usage = MTLTextureUsageRenderTarget;
+    desc.storageMode = MTLStorageModePrivate;
+    t->texture = [g_device newTextureWithDescriptor:desc];
+    t->width = width;
+    t->height = height;
+    [desc release];
+
+    if (!t->texture) {
+        fprintf(stderr, "Failed to create Metal depth texture %dx%d\n", width, height);
+        free(t);
+        return NULL;
+    }
+    return t;
+}
+
+static void metal_destroy_depth_texture(MetalTexture **t) {
+    if (!t || !*t) return;
+    if ((*t)->texture) [(*t)->texture release];
+    free(*t);
+    *t = NULL;
 }
 
 Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
@@ -581,10 +618,10 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
     }
 
     desc.colorAttachments[0] = colorAtt;
-    /* Only set depth format if depth test/write is enabled */
-    if (state.depthTest || state.depthWrite) {
-        desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
-    }
+    /* Every render pass (swapchain and offscreen) carries a Depth32Float
+     * attachment, so every pipeline must declare the same format. Depth
+     * testing itself is controlled by the depth-stencil state. */
+    desc.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
 
     NSError *error = nil;
     id<MTLRenderPipelineState> pso = (id<MTLRenderPipelineState>)metal_device_new_pipeline_state(g_device, desc, (void **)&error);
@@ -652,6 +689,7 @@ typedef struct {
     int colorCount;
     MetalTexture *depthTexture;
     int hasDepth;
+    MetalTexture *internalDepth; /* engine-created depth when none provided */
 } MetalRenderPass;
 
 RenderPass graphics_createpass(const char *name, RasterState state) {
@@ -700,9 +738,29 @@ void graphics_beginpass(RenderPass pass) {
             }
         }
 
-        /* Set depth attachment */
-        if (mp->hasDepth && mp->depthTexture) {
-            rpd.depthAttachment.texture = mp->depthTexture->texture;
+        int width = g_windowWidth;
+        int height = g_windowHeight;
+        if (mp->colorCount > 0 && mp->colorTextures[0]) {
+            width = mp->colorTextures[0]->width;
+            height = mp->colorTextures[0]->height;
+        }
+        if (width < 1) width = 1;
+        if (height < 1) height = 1;
+
+        /* Set depth attachment — use the user-provided texture, or create an
+         * internal one sized to the pass so pipeline depth formats always
+         * match the render pass. */
+        MetalTexture *depth = mp->hasDepth ? mp->depthTexture : mp->internalDepth;
+        if (!mp->hasDepth &&
+            (!mp->internalDepth ||
+             mp->internalDepth->width != width ||
+             mp->internalDepth->height != height)) {
+            metal_destroy_depth_texture(&mp->internalDepth);
+            mp->internalDepth = metal_make_depth_texture(width, height);
+            depth = mp->internalDepth;
+        }
+        if (depth) {
+            rpd.depthAttachment.texture = depth->texture;
             rpd.depthAttachment.loadAction = MTLLoadActionClear;
             rpd.depthAttachment.storeAction = MTLStoreActionStore;
             rpd.depthAttachment.clearDepth = 1.0;
@@ -713,12 +771,6 @@ void graphics_beginpass(RenderPass pass) {
         [rpd release];
 
         /* Set viewport to match attachment size */
-        int width = g_windowWidth;
-        int height = g_windowHeight;
-        if (mp->colorCount > 0 && mp->colorTextures[0]) {
-            width = mp->colorTextures[0]->width;
-            height = mp->colorTextures[0]->height;
-        }
         double vp[6] = { 0.0, 0.0, (double)width, (double)height, 0.0, 1.0 };
         metal_encoder_set_viewport(g_currentEncoder, vp);
 
@@ -759,6 +811,8 @@ void graphics_endpass(RenderPass pass) {
 
 void graphics_destroypass(RenderPass pass) {
     if (pass) {
+        MetalRenderPass *mp = (MetalRenderPass *)pass;
+        metal_destroy_depth_texture(&mp->internalDepth);
         free(pass);
     }
 }
@@ -814,9 +868,14 @@ void graphics_init() {
     g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];
     [sampDesc release];
     
-    /* Embedded 3D fallback shader (combined vertex + fragment in one MSL source).
+    /* Embedded 3D default shader (combined vertex + fragment in one MSL source).
      * Handles VERTEX_FORMAT_FULL: position(0), normal(1), tangent(2), bitangent(3), texcoord(4).
-     * Model matrix at buffer(1), material uniforms at buffer(2). */
+     * MVP matrix at buffer(1), material uniforms at buffer(2).
+     *
+     * Material layout (must match metal_material_pack()):
+     *   floats[0..2]      — ambient, specular strength, shininess
+     *   vec3s_padded[0..2] — light direction, camera position, albedo
+     *   extraMatrix        — model matrix (world position/normal) */
     const char *default3dCombined =
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
@@ -831,8 +890,8 @@ void graphics_init() {
         "\n"
         "struct VertexOut {\n"
         "    float4 position [[position]];\n"
-        "    float2 texcoord;\n"
-        "    float3 normal;\n"
+        "    float3 worldPos;\n"
+        "    float3 worldNormal;\n"
         "};\n"
         "\n"
         "struct MaterialData {\n"
@@ -843,24 +902,76 @@ void graphics_init() {
         "\n"
         "vertex VertexOut vertex_main(\n"
         "    VertexIn v [[stage_in]],\n"
-        "    constant float4x4 &model [[buffer(1)]]\n"
+        "    constant float4x4 &mvp [[buffer(1)]],\n"
+        "    constant MaterialData &material [[buffer(2)]]\n"
         ") {\n"
         "    VertexOut out;\n"
-        "    out.position = model * float4(v.position, 1.0);\n"
-        "    out.texcoord = v.texcoord;\n"
-        "    out.normal = v.normal;\n"
+        "    out.position = mvp * float4(v.position, 1.0);\n"
+        "    float4 worldPos = material.extraMatrix * float4(v.position, 1.0);\n"
+        "    out.worldPos = worldPos.xyz;\n"
+        "    /* Model matrices are rotation+translation, so the upper 3x3 works as a normal matrix */\n"
+        "    float3x3 normalMat = float3x3(material.extraMatrix[0].xyz,\n"
+        "                                 material.extraMatrix[1].xyz,\n"
+        "                                 material.extraMatrix[2].xyz);\n"
+        "    out.worldNormal = normalize(normalMat * v.normal);\n"
         "    return out;\n"
         "}\n"
         "\n"
         "fragment float4 fragment_main(\n"
-        "    VertexOut in [[stage_in]]\n"
+        "    VertexOut in [[stage_in]],\n"
+        "    constant MaterialData &material [[buffer(2)]]\n"
         ") {\n"
-        "    /* Visualize normals as color for debugging */\n"
-        "    return float4(in.normal * 0.5 + 0.5, 1.0);\n"
+        "    float ambient  = material.floats[0];\n"
+        "    float specular = material.floats[1];\n"
+        "    float shininess = material.floats[2];\n"
+        "    float3 lightDir = material.vec3s_padded[0].xyz;\n"
+        "    float3 cameraPos = material.vec3s_padded[1].xyz;\n"
+        "    float3 albedo = material.vec3s_padded[2].xyz;\n"
+        "\n"
+        "    float3 N = normalize(in.worldNormal);\n"
+        "    float3 L = normalize(-lightDir);\n"   /* direction toward the light */
+        "    float3 V = normalize(cameraPos - in.worldPos);\n"
+        "    float3 H = normalize(L + V);\n"
+        "\n"
+        "    float ndl = max(dot(N, L), 0.0);\n"
+        "    float spec = pow(max(dot(N, H), 0.0), max(shininess, 1.0)) * specular;\n"
+        "    float3 color = albedo * (ambient + (1.0 - ambient) * ndl) + spec;\n"
+        "    return float4(color, 1.0);\n"
         "}\n";
 
     g_defaultVertShader = (MetalShader *)graphics_createshader(SHADER_STAGE_VERTEX, default3dCombined, strlen(default3dCombined), NULL, 0);
     g_defaultFragShader = (MetalShader *)graphics_createshader(SHADER_STAGE_FRAGMENT, default3dCombined, strlen(default3dCombined), NULL, 0);
+
+    /* Default material with sane lighting so draws without a material still
+     * shade correctly (layout must match graphics_material_set_* order). */
+    g_defaultMaterial = (MetalMaterial *)graphics_creatematerial(NULL);
+    if (g_defaultMaterial) {
+        g_defaultMaterial->floats[0] = 0.15f;  /* ambient */
+        g_defaultMaterial->floats[1] = 0.4f;   /* specular strength */
+        g_defaultMaterial->floats[2] = 32.0f;  /* shininess */
+        g_defaultMaterial->floatCount = 3;
+
+        g_defaultMaterial->vec3s[0] = 0.35f;   /* light direction */
+        g_defaultMaterial->vec3s[1] = -0.8f;
+        g_defaultMaterial->vec3s[2] = -0.45f;
+        g_defaultMaterial->vec3s[3] = 0.0f;    /* camera position */
+        g_defaultMaterial->vec3s[4] = 0.0f;
+        g_defaultMaterial->vec3s[5] = 3.0f;
+        g_defaultMaterial->vec3s[6] = 0.75f;   /* albedo */
+        g_defaultMaterial->vec3s[7] = 0.75f;
+        g_defaultMaterial->vec3s[8] = 0.78f;
+        g_defaultMaterial->vec3Count = 3;
+
+        const float identity[16] = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        memcpy(g_defaultMaterial->mat4, identity, sizeof(identity));
+        g_defaultMaterial->hasMat4 = 1;
+        g_defaultMaterial->dirty = 1;
+    }
 
     /* Embedded text shaders (combined vertex + fragment in one MSL source) */
     const char *textCombined =
@@ -910,6 +1021,13 @@ void graphics_get_text_shaders(Shader *out_vert, Shader *out_frag) {
 
 void graphics_shutdown() {
     if (g_uniformBuffer) [g_uniformBuffer release];
+
+    metal_destroy_depth_texture(&g_depthTexture);
+
+    if (g_defaultMaterial) {
+        graphics_destroymaterial((Material)g_defaultMaterial);
+        g_defaultMaterial = NULL;
+    }
 
     for (int i = 0; i < g_pipelineCount; i++) {
         MetalPipeline *mp = g_pipelines[i];
@@ -979,6 +1097,19 @@ void graphics_predraw() {
     g_renderPassDescriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
     g_renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColorMake(
         CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]);
+
+    /* Depth attachment — created lazily and resized with the drawable */
+    int drawableW = (int)g_currentDrawable.texture.width;
+    int drawableH = (int)g_currentDrawable.texture.height;
+    if (!g_depthTexture ||
+        g_depthTexture->width != drawableW ||
+        g_depthTexture->height != drawableH) {
+        metal_destroy_depth_texture(&g_depthTexture);
+        g_depthTexture = metal_make_depth_texture(drawableW, drawableH);
+    }
+    g_renderPassDescriptor.depthAttachment.texture = g_depthTexture ? g_depthTexture->texture : nil;
+    g_renderPassDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
+    g_renderPassDescriptor.depthAttachment.storeAction = MTLStoreActionStore;
     g_renderPassDescriptor.depthAttachment.clearDepth = 1.0;
 
     /* Begin command buffer and render encoder */
@@ -1061,8 +1192,8 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
 
     /* Resolve shaders from material or use defaults */
     MetalMaterial *mm = (MetalMaterial *)mat;
-    Shader vertShader = mm ? mm->shader : (Shader)g_defaultVertShader;
-    Shader fragShader = mm ? mm->shader : (Shader)g_defaultFragShader;
+    Shader vertShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultVertShader;
+    Shader fragShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultFragShader;
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
@@ -1075,10 +1206,8 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
     }
 
-    /* Bind material uniforms */
-    if (mat) {
-        graphics_setmaterial(mat);
-    }
+    /* Bind material uniforms (fall back to the default material) */
+    graphics_setmaterial(mat ? mat : (Material)g_defaultMaterial);
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
@@ -1104,8 +1233,8 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
     if (!model || !g_currentEncoder) return;
 
     MetalMaterial *mm = (MetalMaterial *)mat;
-    Shader vertShader = mm ? mm->shader : (Shader)g_defaultVertShader;
-    Shader fragShader = mm ? mm->shader : (Shader)g_defaultFragShader;
+    Shader vertShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultVertShader;
+    Shader fragShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultFragShader;
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
@@ -1118,10 +1247,8 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
     }
 
-    /* Bind material uniforms */
-    if (mat) {
-        graphics_setmaterial(mat);
-    }
+    /* Bind material uniforms (fall back to the default material) */
+    graphics_setmaterial(mat ? mat : (Material)g_defaultMaterial);
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
@@ -1153,10 +1280,8 @@ void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t index
         metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
     }
 
-    /* Bind material uniforms */
-    if (mat) {
-        graphics_setmaterial(mat);
-    }
+    /* Bind material uniforms (fall back to the default material) */
+    graphics_setmaterial(mat ? mat : (Material)g_defaultMaterial);
 
     if (indexBuffer && indexCount > 0) {
         MetalBuffer *ib = (MetalBuffer *)indexBuffer;
