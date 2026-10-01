@@ -7,7 +7,7 @@
 ### Key Modules
 | Module | API Header | Primary Impl | Null/Stub Impl |
 |--------|-----------|-------------|----------------|
-| Graphics | `src/graphics.h` | `src/graphics_metal.mm` (macOS), `src/graphics_vulkan.cpp` (Linux/Windows), `src/graphics_opengl_sdl.c` (Linux/Windows with `-DUSE_OPENGL=ON`) | `src/graphics_null.c` |
+| Graphics | `src/graphics.h` | `src/graphics_metal.mm` (macOS), `src/graphics_vulkan.cpp` (Linux/Windows) | `src/graphics_null.c` |
 | Window/Input | `src/window.h`, `src/event.h` | `src/window_sdl.c`, `src/event_sdl.c` | `src/window_null.c`, `src/event_null.c` |
 | Audio | `src/audio.h` | `src/audio_openal.c` | `src/audio_null.c` |
 | Font/Text | `src/font.h`, `src/text.h` | `src/font.c`, `src/text.c` | — (font has no stub) |
@@ -153,7 +153,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ### Portable API Design
 - Graphics API is C99 with opaque handles (`typedef void* Shader, Texture, Material, Buffer, RenderPass, Pipeline`)
-- Dual backend: `#ifdef APPLE` selects Metal, else Vulkan (or OpenGL with `-DUSE_OPENGL=ON`)
+- Dual backend: `#ifdef APPLE` selects Metal, else Vulkan
 - The Metal backend is slightly less feature-complete — the render pass abstraction was recently implemented but depth texture creation is still pending — but all core rendering paths (model drawing, text, materials) are working
 - Some backends (Null) exist but are not wired into the build system as primary backends
 
