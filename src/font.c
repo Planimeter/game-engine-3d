@@ -23,6 +23,8 @@ extern JobSystem *g_jobSystem;
 #define INITIAL_BATCH_CAPACITY 64
 #define MAX_LINES_PER_TEXT 256
 
+static unsigned g_atlas_evictions;
+
 typedef struct {
     Texture texture;
     int width;
@@ -32,6 +34,7 @@ typedef struct {
     int row_height;
     unsigned char *pixels;
     int dirty;
+    uint64_t last_used;
 } Atlas;
 
 typedef struct {
@@ -95,6 +98,7 @@ struct Font {
     int height;
     Atlas atlases[MAX_ATLAS_COUNT];
     int atlas_count;
+    uint64_t atlas_clock;
     Glyph *glyphs;
     size_t glyph_count;
     size_t glyph_capacity;
@@ -206,6 +210,7 @@ static Glyph *font_add_glyph(Font *font, uint32_t glyph_id)
         font->glyph_capacity = new_capacity;
     }
 
+    memset(&font->glyphs[font->glyph_count], 0, sizeof(Glyph));
     font->glyphs[font->glyph_count].glyph_id = glyph_id;
     return &font->glyphs[font->glyph_count++];
 }
@@ -217,6 +222,7 @@ static int font_pack_glyph(Font *font, int atlas_index, int width, int height, i
     if (width == 0 || height == 0) {
         *out_x = atlas->pen_x;
         *out_y = atlas->pen_y;
+        atlas->last_used = ++font->atlas_clock;
         return 1;
     }
 
@@ -237,6 +243,7 @@ static int font_pack_glyph(Font *font, int atlas_index, int width, int height, i
     if (height > atlas->row_height) {
         atlas->row_height = height;
     }
+    atlas->last_used = ++font->atlas_clock;
 
     return 1;
 }
@@ -262,6 +269,7 @@ static int font_add_atlas(Font *font)
     atlas->texture = graphics_createtexture_rgba(atlas->width, atlas->height, pixels);
     atlas->pixels = pixels;
     atlas->dirty = 0;
+    atlas->last_used = ++font->atlas_clock;
 
     if (!atlas->texture) {
         return 0;
@@ -271,14 +279,41 @@ static int font_add_atlas(Font *font)
     return 1;
 }
 
+/* Clear a full atlas page and drop every glyph that referenced it so the
+ * glyphs re-rasterize on next use. Lets the fixed MAX_ATLAS_COUNT pages act
+ * as an LRU cache instead of failing permanently once they fill up. */
+static void font_evict_atlas(Font *font, int atlas_index)
+{
+    Atlas *atlas = &font->atlases[atlas_index];
+    size_t write = 0;
+
+    for (size_t i = 0; i < font->glyph_count; i++) {
+        if (font->glyphs[i].atlas_index == atlas_index) {
+            continue;
+        }
+        font->glyphs[write++] = font->glyphs[i];
+    }
+    font->glyph_count = write;
+
+    if (atlas->pixels) {
+        memset(atlas->pixels, 0, (size_t)atlas->width * atlas->height * 4);
+    }
+    atlas->pen_x = FONT_GLYPH_PADDING;
+    atlas->pen_y = FONT_GLYPH_PADDING;
+    atlas->row_height = 0;
+    atlas->dirty = 1;
+    atlas->last_used = ++font->atlas_clock;
+    g_atlas_evictions++;
+}
+
 static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
 {
     FT_GlyphSlot slot = font->face->glyph;
-    Glyph *glyph = font_add_glyph(font, glyph_id);
-
-    if (!glyph) {
-        return NULL;
-    }
+    int atlas_index = -1;
+    int packed = 0;
+    int x = 0;
+    int y = 0;
+    Glyph *glyph;
 
     if (FT_Load_Glyph(font->face, glyph_id, FT_LOAD_DEFAULT) != 0) {
         return NULL;
@@ -288,17 +323,11 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
         return NULL;
     }
 
-    glyph->width = (int)slot->bitmap.width;
-    glyph->height = (int)slot->bitmap.rows;
-    glyph->bearing_x = slot->bitmap_left;
-    glyph->bearing_y = slot->bitmap_top;
-    glyph->advance_x = slot->advance.x / 64.0f;
-
-    /* Try to pack in existing atlases, round-robin */
-    int packed = 0;
+    /* Resolve packing before touching the glyphs array: font_evict_atlas
+     * compacts that array, so no pointer into it may be held across a pack. */
     for (int i = 0; i < font->atlas_count; i++) {
-        if (font_pack_glyph(font, i, glyph->width, glyph->height, &glyph->x, &glyph->y)) {
-            glyph->atlas_index = i;
+        if (font_pack_glyph(font, i, (int)slot->bitmap.width, (int)slot->bitmap.rows, &x, &y)) {
+            atlas_index = i;
             packed = 1;
             break;
         }
@@ -308,16 +337,45 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
     if (!packed) {
         if (font_add_atlas(font)) {
             int new_idx = font->atlas_count - 1;
-            if (font_pack_glyph(font, new_idx, glyph->width, glyph->height, &glyph->x, &glyph->y)) {
-                glyph->atlas_index = new_idx;
+            if (font_pack_glyph(font, new_idx, (int)slot->bitmap.width, (int)slot->bitmap.rows, &x, &y)) {
+                atlas_index = new_idx;
                 packed = 1;
             }
+        }
+    }
+
+    /* All pages full and at the cap — evict the least-recently-used page */
+    if (!packed && font->atlas_count > 0) {
+        int lru = 0;
+        for (int i = 1; i < font->atlas_count; i++) {
+            if (font->atlases[i].last_used < font->atlases[lru].last_used) {
+                lru = i;
+            }
+        }
+        font_evict_atlas(font, lru);
+        if (font_pack_glyph(font, lru, (int)slot->bitmap.width, (int)slot->bitmap.rows, &x, &y)) {
+            atlas_index = lru;
+            packed = 1;
         }
     }
 
     if (!packed) {
         return NULL;
     }
+
+    glyph = font_add_glyph(font, glyph_id);
+    if (!glyph) {
+        return NULL;
+    }
+
+    glyph->width = (int)slot->bitmap.width;
+    glyph->height = (int)slot->bitmap.rows;
+    glyph->bearing_x = slot->bitmap_left;
+    glyph->bearing_y = slot->bitmap_top;
+    glyph->advance_x = slot->advance.x / 64.0f;
+    glyph->atlas_index = atlas_index;
+    glyph->x = x;
+    glyph->y = y;
 
     if (glyph->width > 0 && glyph->height > 0) {
         Atlas *atlas = &font->atlases[glyph->atlas_index];
@@ -326,6 +384,7 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
         unsigned char *rgba = (unsigned char *)malloc(rgba_size);
 
         if (!rgba) {
+            font->glyph_count--;
             return NULL;
         }
 
@@ -559,6 +618,24 @@ Font *font_create(const char *filepath, int size)
         return NULL;
     }
 
+    /* FONT_ATLAS_STRESS=<n> forces glyph ids 0..n-1 into the atlas at startup
+     * to exercise packing/eviction diagnostics. */
+    {
+        const char *stress = getenv("FONT_ATLAS_STRESS");
+        if (stress) {
+            long limit = strtol(stress, NULL, 10);
+            if (limit <= 0 || limit > (long)font->face->num_glyphs) {
+                limit = (long)font->face->num_glyphs;
+            }
+            for (long i = 0; i < limit; i++) {
+                font_get_glyph(font, (uint32_t)i);
+            }
+            fprintf(stderr,
+                    "font stress: %ld glyphs, %d atlases, %u evictions\n",
+                    limit, font->atlas_count, g_atlas_evictions);
+        }
+    }
+
     if (g_text_spv_ready) {
         Shader vert = graphics_createshader(SHADER_STAGE_VERTEX, (const char *)g_text_vert_spv, g_text_vert_spv_size, NULL, 0);
         Shader frag = graphics_createshader(SHADER_STAGE_FRAGMENT, (const char *)g_text_frag_spv, g_text_frag_spv_size, NULL, 0);
@@ -756,8 +833,6 @@ void font_print(Font *font,
         sy = 1.0f;
     }
 
-    font_flush_atlases(font);
-
     line_start = text;
     while (*line_start) {
         size_t line_len;
@@ -782,6 +857,12 @@ void font_print(Font *font,
 
         infos = hb_buffer_get_glyph_infos(font->hb_buffer, &glyph_count);
         positions = hb_buffer_get_glyph_positions(font->hb_buffer, &glyph_count);
+
+        /* Resolve all glyphs single-threaded before building vertices so
+         * atlas eviction can never invalidate UVs mid-line. */
+        for (unsigned int gi = 0; gi < glyph_count; gi++) {
+            font_get_glyph(font, infos[gi].codepoint);
+        }
 
         if (glyph_count == 0) {
             if (*line_end == '\n') {
@@ -830,6 +911,9 @@ void font_print(Font *font,
 
         font_build_vertices(font, infos, positions, glyph_count, origin_x, cursor_y, sx, sy,
                             font->batch_vertices, font->batch_indices, &index_count);
+
+        /* Upload any glyphs rasterized during this line's build */
+        font_flush_atlases(font);
 
         graphics_updatebuffer(font->vertex_buffer, font->batch_vertices, vertex_bytes);
         graphics_updatebuffer(font->index_buffer, font->batch_indices, index_bytes);
@@ -1097,6 +1181,16 @@ void font_end_batch(Font *font)
             for (size_t i = 0; i < total_lines; i++) {
                 shape_text_job(&shapeCtx, (uint32_t)i);
             }
+        }
+    }
+
+    /* Phase 2.5: Resolve every glyph single-threaded so the parallel vertex
+     * build only reads shared atlas state (font_get_glyph can rasterize and
+     * evict LRU pages, which must never run concurrently with workers). */
+    for (size_t i = 0; i < total_lines; i++) {
+        ShapedLine *line = &lines[i];
+        for (unsigned int gi = 0; gi < line->glyph_count; gi++) {
+            font_get_glyph(font, line->infos[gi].codepoint);
         }
     }
 

@@ -170,6 +170,11 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 - **Long-term**: MSDF for production-quality text
 - Engine already has industry-standard FreeType + HarfBuzz stack
 
+### Atlas implementation (2026-10-01)
+- 4×1024 pages, shelf packing, glyphs grouped per-atlas at draw time; when all pages fill, the LRU page is evicted (cleared, its glyphs dropped so they re-rasterize on next use) instead of failing forever
+- Glyph resolution is single-threaded (warm-up pass in `font_print`/`font_end_batch` before the parallel vertex build) so eviction can't race worker threads or invalidate UVs mid-build
+- `FONT_ATLAS_STRESS=<n>` env var at startup force-loads glyph ids 0..n-1 (0 = whole font) and prints atlas/eviction counts — used to verify eviction (Geneva full font: 3742 glyphs, 2 pages, 1 eviction under a temporary cap of 2; production cap 4, 0 evictions)
+
 ---
 
 ## Additional Observations
