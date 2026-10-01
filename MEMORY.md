@@ -13,6 +13,8 @@
 | Font/Text | `src/font.h`, `src/text.h` | `src/font.c`, `src/text.c` | — (font has no stub) |
 | Model | `src/model.h` | `src/model_assimp.cpp` | `src/model_null.c` |
 | Math (C wrappers) | `src/math_c.h` | `src/math_glm.cpp` | `src/math_null.c` |
+| Camera | `src/camera.h` | `src/camera.c` | — |
+| Scene graph | `src/scene.h` | `src/scene.c` | — |
 | Filesystem | `src/filesystem.h` | `src/filesystem_physfs.c` | `src/filesystem_null.c`, `src/filesystem_posix.c` |
 | Timer | `src/timer.h` | `src/timer_sdl.c` | `src/timer_null.c` |
 | Image | `src/image.h` | `src/image_stb.c` | `src/image_null.c` |
@@ -39,16 +41,17 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 - Font atlas texture upload via staging buffer + blit encoder
 - Alpha channel glyph rendering (FreeType alpha in `.a` channel)
 - NDC-correct glyph positioning (Y-axis flip fixed)
-- Transform matrix upload in all 3 draw calls (`graphics_drawmodel`, `graphics_draw_instanced`, `graphics_draw_buffers`)
+- Transform matrix upload in all 3 draw calls — `graphics_drawmodel()` now copies {mvp, world} (128B) via `metal_encoder_set_vertex_bytes()` (encode-time copy, immune to later CPU writes); `graphics_draw_instanced()`/`graphics_draw_buffers()` still use the legacy shared `g_uniformBuffer` upload (see Remaining Issues)
 - Default 3D fallback shader with `VERTEX_FORMAT_FULL` support (position, normal, tangent, bitangent, texcoord)
 - `graphics_loadmodel()` GPU buffer creation (vertex + index buffer upload per mesh)
 - End-to-end 3D model rendering test (spinning cube with MVP matrix)
 - `graphics_binduniformbuffer()` API (binds a Buffer to both vertex and fragment stages at a given slot)
 - `model_get_mesh_count()` C-compatible accessor for opaque Model struct
 - Material system — `MetalMaterial` struct with CPU-side storage, per-material uniform buffer, `metal_material_pack()` for GPU upload, `graphics_setmaterial()` binds material buffer at slot 2 + textures
+- Material setters update-by-name — `MetalMaterial` carries `floatNames`/`vec3Names`/`textureNames`; `graphics_material_set_float/vec3/texture()` search by `strcmp` and update in place, else append with a `graphics_copy_name()` helper (mirrors the Vulkan backend). Before this fix every call appended, so per-frame `cameraPos` updates would have overflowed and frozen. Default material records names too.
 - Depth testing — every pass (swapchain + offscreen) carries a `Depth32Float` attachment: swapchain lazily creates/resizes `g_depthTexture`, offscreen passes use `internalDepth` or a user depth texture; `graphics_createpipeline()` always declares `depthAttachmentPixelFormat` so pipeline/pass formats match
-- Blinn-Phong lighting in the embedded MSL default shader — floats[0..2] = ambient/specular/shininess, vec3s[0..2] = lightDir (points away from light)/cameraPos/albedo, model matrix normal transform from `extraMatrix` upper 3x3
-- Framework lit material (`g_litMaterial` in `framework.c`) — orange albedo cube drawn with per-frame model matrix
+- Blinn-Phong lighting in the embedded MSL default shader — floats[0..2] = ambient/specular/shininess, vec3s[0..2] = lightDir (points away from light)/cameraPos/albedo; world matrix now comes from `TransformData.model` at buffer(1) (per-draw), `MaterialData.extraMatrix` retained for layout parity but no longer read
+- Framework lit material (`g_litMaterial` in `framework.c`) — orange albedo, per-frame cameraPos + per-node world matrix
 - `graphics_setmaterial()` fallback — draw calls bind `g_defaultMaterial` when passed NULL, and use the embedded default shader when a material has no shader
 
 ### Refactoring Completed
@@ -60,6 +63,31 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 
 ### Remaining Issues
 - `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded. (No current callers, so low priority.)
+- `graphics_draw_instanced()`/`graphics_draw_buffers()` still write the legacy shared uniform path (single `g_uniformBuffer` region / descriptor binding 0). Only `graphics_drawmodel()` got the per-draw fix below; if these are revived with the 3D shader they need the same treatment. (`graphics_draw_buffers()` today is font/text only and its text shaders ignore the transform.)
+- Retina/pixel-density handling may be wrong — `window_getwindowsizeinpixels()` vs logical size mismatch suspected (user report, 2026-10-01, uninvestigated).
+
+## Camera & Scene System (2026-10-01)
+
+Fly camera + fixed-pool scene graph replacing the hardcoded look-at in `framework_draw`.
+
+### New modules
+- `src/camera.c|h` — `Camera {position[3], yaw, pitch, fovY, zNear, zFar}` (radians). `camera_view()` builds `math_lookat` from yaw/pitch basis (yaw 0 = down -Z, positive turns right; pitch clamped ±~89°, yaw wrapped to ±π); `camera_projection()` wraps `math_perspective`; `camera_basis()` returns forward/right/up (up derived from pitch so look-at never degenerates); `camera_look(dx,dy,sens)`; `camera_move(fwd,right,up,dist)` strides along the basis; `camera_zoom(wheelY)` adjusts fovY clamped to 20°–100°.
+- `src/scene.c|h` — `Scene` is a fixed pool of `SCENE_MAX_NODES 64` `SceneNode {parent, position, rotation(euler XYZ radians), scale, world[16], active}`. `scene_create(parent)` claims an inactive slot (-1 = root); `scene_setparent()` rejects cycles by walking the proposed parent's ancestor chain; `scene_update()` resolves each active node recursively (depth-guarded): `world = parentWorld * T * R_x * R_y * R_z * S` using `math_translate/rotate/scale/multiply`; `scene_world()` returns NULL for inactive handles.
+
+### Framework wiring (`framework.c`)
+- Scene: spinning root node (`rotation.y = elapsed*0.5`) with 3 children at (±1.3, 0, 0) and (0, 1.3, 0), each scaled 0.5 — children orbit the root, proving parent-child composition. 4 cubes drawn per frame, each with its own mvp and world matrix pushed to `g_litMaterial`.
+- Controls: WASD strafe/fly + E/Q up/down (3 u/s, applied in `framework_update`), right-mouse-drag look (0.0025 rad/px, engages `window_setmouserelative(1)` — new `window.h`/`window_sdl.c` wrapper for `SDL_SetWindowRelativeMouseMode`), wheel zoom. Scancode names from `SDL_GetScancodeName` ("W" etc.), ignores repeats.
+- Per frame: `cameraPos` vec3 re-set on `g_litMaterial` (works because Metal setters are update-by-name now); `camera_projection`/`camera_view` replace the hardcoded perspective/look-at.
+- Verified on Metal: 4 cubes spinning, keyboard strafe works, lit correctly, FPS 59–119.
+
+### Per-draw uniform aliasing fix (critical, both backends)
+Previously `graphics_drawmodel` wrote mvp into one shared `g_uniformBuffer` region and the material's model mat4 into one shared pack — but the GPU reads uniforms when the frame *executes*, after all CPU writes, so N draws in one frame would all render with the last draw's matrices. Fixed only in `graphics_drawmodel()` (the only multi-draw path):
+- **Metal**: bundles `{mvp[16], model[16]}` = 128B and copies it into the command buffer with new helper `metal_encoder_set_vertex_bytes()` (`setVertexBytes:length:atIndex:`, index 1); MSL `TransformData {float4x4 mvp; float4x4 model;}` at buffer(1), normals/worldPos from `transform.model`. Material block unchanged (pack still writes `extraMatrix`, now unread).
+- **Vulkan**: `VkPushConstantRange {VERTEX, 0, 128}` added to the single pipeline layout (`graphics_creategraphicspipeline`); `graphics_drawmodel` records `vkCmdPushConstants` with `{mvp, model}` *after* binding the pipeline (material's `mat4`, identity if mat NULL). `shaders/triangle.vert` now reads `layout(push_constant) uniform Transform {mat4 mvp; mat4 model;}` — binding0 UBO removed from the shader (descriptor layout keeps the binding, unused). `.spv` regenerated (`glslangValidator -V` + `spirv-val` clean), file passes `clang++ -fsyntax-only`.
+- API unchanged: `graphics_drawmodel(model, mat, mvp)` + `graphics_material_set_mat4(mat, world)` per node still works — backends read the CPU-side mat4 at draw time.
+
+### font.c SPIR-V guard (fixes startup noise)
+`font_load_text_shaders()` on Apple now returns 1 immediately without loading `text.*.spv` — previously SPIR-V bytes were fed to the MSL compiler every startup, printing two bogus `Metal shader compilation failed ... <U+0003><U+0002>#<U+0007>` errors (SPIR-V magic 0x07230203) before the embedded MSL fallback succeeded.
 
 ## Vulkan Backend Status (2026-07-29)
 
@@ -73,7 +101,7 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - Macro definition support: splits `"NAME=VALUE"` at first `=` for shaderc compile options
 - Material system with `GPUMaterial` struct, `vulkan_material_pack()` matching Metal's layout
 - UBO descriptor set (set 1) as 16 discrete bindings (binding = slot, 1 UBO each) — `graphics_binduniformbuffer()` writes `dstBinding = slot`; matches the GLSL `layout(set = 1, binding = N)` blocks
-- Default 3D pipeline reads `shaders/triangle.vert`/`triangle.frag` — rewritten as a 3D Blinn-Phong pair (MVP at set1/binding0, Material at set1/binding1, y-flip for Vulkan NDC) to match the Metal default shader; both validate clean with `glslangValidator -V`
+- Default 3D pipeline reads `shaders/triangle.vert`/`triangle.frag` — 3D Blinn-Phong pair; per-draw {mvp, model} come from a `layout(push_constant)` block (128B vertex-stage range in the pipeline layout, pushed by `graphics_drawmodel`), Material at set1/binding1, y-flip for Vulkan NDC; both validate clean with `glslangValidator -V` + `spirv-val`
 - Pipeline creation supports multiple vertex formats (`VERTEX_FORMAT_FULL`, `POS_UV`, `POS_COLOR`)
 - Blend modes: NONE, ALPHA, ADD, PREMULT
 
@@ -147,10 +175,10 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 ## Additional Observations
 
 ### Engine State at Runtime
-- `framework.c` creates a test font and displays an FPS counter, plus loads and renders a spinning cube with Blinn-Phong directional lighting
+- `framework.c` creates a test font and displays an FPS counter, plus renders a 4-cube scene graph (spinning root + 3 orbiting children) through a fly camera (WASD/EQ, right-drag look, wheel zoom) with Blinn-Phong directional lighting
 - Matrix math is provided by `math_c.h` / `math_glm.cpp` wrapping real GLM calls (SIMD, etc.) behind `extern "C"` functions
 - 3D model rendering is working via the Metal backend with MVP matrix pipeline
-- The default 3D shader applies Blinn-Phong lighting (ambient + diffuse + specular) with material-provided light direction, camera position, and albedo
+- The default 3D shader applies Blinn-Phong lighting (ambient + diffuse + specular) with material-provided light direction, camera position, and albedo; camera position is re-uploaded to the material every frame
 
 ### Memory Management
 - VMA (Vulkan Memory Allocator) is used for all GPU allocations
@@ -168,7 +196,7 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 - **Vulkan**: Compiles GLSL→SPIR-V at runtime via shaderc library. Reads raw `.vert`/`.frag` GLSL source files, targets Vulkan 1.1 environment, performance optimization level. Supports macro definitions via `defines`/`defineCount`. Entry point: `main`.
 - **Metal**: Compiles MSL source at runtime via helper wrapper (`metal_device_new_library`). Entry points: `vertex_main`/`fragment_main`.
 - Both backends accept the 5-param `graphics_createshader(ShaderStage stage, source, size, defines, defineCount)` API.
-- Shaders directory contains both GLSL sources (all shaders) and pre-compiled SPIR-V (`text.*.spv`, `triangle.*.spv`). The `.spv` files are only used by the font rendering system on macOS; Vulkan always compiles from GLSL source at runtime.
+- Shaders directory contains both GLSL sources (all shaders) and pre-compiled SPIR-V (`text.*.spv`, `triangle.*.spv`). The `.spv` files are no longer used at runtime on macOS (`font_load_text_shaders()` skips them on Apple — they were being fed to the MSL compiler and failing); Vulkan always compiles from GLSL source at runtime via shaderc.
 
 ### Build System Quirks
 - CEF tests directory is deleted before building to avoid C++20 incompatibility

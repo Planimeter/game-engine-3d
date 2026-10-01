@@ -89,10 +89,13 @@ static id<MTLBuffer> g_uniformBuffer = nil;
 typedef struct {
     Shader shader;
     MetalBuffer *uniformBuffer;
+    char floatNames[METAL_MATERIAL_FLOAT_COUNT][64];
     float floats[METAL_MATERIAL_FLOAT_COUNT];
     size_t floatCount;
+    char vec3Names[METAL_MATERIAL_VEC3_COUNT][64];
     float vec3s[METAL_MATERIAL_VEC3_COUNT * 3];
     size_t vec3Count;
+    char textureNames[METAL_MATERIAL_TEXTURE_COUNT][64];
     MetalTexture *textures[METAL_MATERIAL_TEXTURE_COUNT];
     size_t textureCount;
     float mat4[16];
@@ -282,6 +285,14 @@ void graphics_destroyshader(Shader shader) {
 /*  Material management                                                */
 /* ------------------------------------------------------------------ */
 
+static void graphics_copy_name(char *dst, size_t dstSize, const char *src)
+{
+    if (!dst || dstSize == 0) return;
+    if (!src) { dst[0] = '\0'; return; }
+    strncpy(dst, src, dstSize - 1);
+    dst[dstSize - 1] = '\0';
+}
+
 Material graphics_creatematerial(Shader shader) {
     MetalMaterial *m = (MetalMaterial *)calloc(1, sizeof(MetalMaterial));
     if (!m) return NULL;
@@ -301,8 +312,17 @@ void graphics_destroymaterial(Material mat) {
 void graphics_material_set_texture(Material mat, const char *name, Texture tex) {
     MetalMaterial *m = (MetalMaterial *)mat;
     if (!m || !name || !tex) return;
+    for (size_t i = 0; i < m->textureCount; i++) {
+        if (strcmp(m->textureNames[i], name) == 0) {
+            m->textures[i] = (MetalTexture *)tex;
+            m->dirty = 1;
+            return;
+        }
+    }
     if (m->textureCount < METAL_MATERIAL_TEXTURE_COUNT) {
-        m->textures[m->textureCount++] = (MetalTexture *)tex;
+        size_t i = m->textureCount++;
+        graphics_copy_name(m->textureNames[i], sizeof(m->textureNames[i]), name);
+        m->textures[i] = (MetalTexture *)tex;
         m->dirty = 1;
     }
 }
@@ -310,8 +330,17 @@ void graphics_material_set_texture(Material mat, const char *name, Texture tex) 
 void graphics_material_set_float(Material mat, const char *name, float value) {
     MetalMaterial *m = (MetalMaterial *)mat;
     if (!m || !name) return;
+    for (size_t i = 0; i < m->floatCount; i++) {
+        if (strcmp(m->floatNames[i], name) == 0) {
+            m->floats[i] = value;
+            m->dirty = 1;
+            return;
+        }
+    }
     if (m->floatCount < METAL_MATERIAL_FLOAT_COUNT) {
-        m->floats[m->floatCount++] = value;
+        size_t i = m->floatCount++;
+        graphics_copy_name(m->floatNames[i], sizeof(m->floatNames[i]), name);
+        m->floats[i] = value;
         m->dirty = 1;
     }
 }
@@ -320,12 +349,21 @@ void graphics_material_set_vec3(Material mat, const char *name,
                                 float x, float y, float z) {
     MetalMaterial *m = (MetalMaterial *)mat;
     if (!m || !name) return;
+    for (size_t i = 0; i < m->vec3Count; i++) {
+        if (strcmp(m->vec3Names[i], name) == 0) {
+            m->vec3s[i * 3 + 0] = x;
+            m->vec3s[i * 3 + 1] = y;
+            m->vec3s[i * 3 + 2] = z;
+            m->dirty = 1;
+            return;
+        }
+    }
     if (m->vec3Count < METAL_MATERIAL_VEC3_COUNT) {
-        size_t idx = m->vec3Count * 3;
-        m->vec3s[idx + 0] = x;
-        m->vec3s[idx + 1] = y;
-        m->vec3s[idx + 2] = z;
-        m->vec3Count++;
+        size_t i = m->vec3Count++;
+        graphics_copy_name(m->vec3Names[i], sizeof(m->vec3Names[i]), name);
+        m->vec3s[i * 3 + 0] = x;
+        m->vec3s[i * 3 + 1] = y;
+        m->vec3s[i * 3 + 2] = z;
         m->dirty = 1;
     }
 }
@@ -870,12 +908,15 @@ void graphics_init() {
     
     /* Embedded 3D default shader (combined vertex + fragment in one MSL source).
      * Handles VERTEX_FORMAT_FULL: position(0), normal(1), tangent(2), bitangent(3), texcoord(4).
-     * MVP matrix at buffer(1), material uniforms at buffer(2).
+     * Per-draw mvp + world matrix at buffer(1) (setVertexBytes, so several
+     * draws per frame can't clobber shared uniform memory), material uniforms
+     * at buffer(2).
      *
      * Material layout (must match metal_material_pack()):
      *   floats[0..2]      — ambient, specular strength, shininess
      *   vec3s_padded[0..2] — light direction, camera position, albedo
-     *   extraMatrix        — model matrix (world position/normal) */
+     *   extraMatrix        — kept for layout parity; world matrix comes from
+     *                        buffer(1) */
     const char *default3dCombined =
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
@@ -894,6 +935,11 @@ void graphics_init() {
         "    float3 worldNormal;\n"
         "};\n"
         "\n"
+        "struct TransformData {\n"
+        "    float4x4 mvp;\n"
+        "    float4x4 model;\n"
+        "};\n"
+        "\n"
         "struct MaterialData {\n"
         "    float floats[32];\n"
         "    float4 vec3s_padded[16];\n"
@@ -902,17 +948,17 @@ void graphics_init() {
         "\n"
         "vertex VertexOut vertex_main(\n"
         "    VertexIn v [[stage_in]],\n"
-        "    constant float4x4 &mvp [[buffer(1)]],\n"
+        "    constant TransformData &transform [[buffer(1)]],\n"
         "    constant MaterialData &material [[buffer(2)]]\n"
         ") {\n"
         "    VertexOut out;\n"
-        "    out.position = mvp * float4(v.position, 1.0);\n"
-        "    float4 worldPos = material.extraMatrix * float4(v.position, 1.0);\n"
+        "    out.position = transform.mvp * float4(v.position, 1.0);\n"
+        "    float4 worldPos = transform.model * float4(v.position, 1.0);\n"
         "    out.worldPos = worldPos.xyz;\n"
         "    /* Model matrices are rotation+translation, so the upper 3x3 works as a normal matrix */\n"
-        "    float3x3 normalMat = float3x3(material.extraMatrix[0].xyz,\n"
-        "                                 material.extraMatrix[1].xyz,\n"
-        "                                 material.extraMatrix[2].xyz);\n"
+        "    float3x3 normalMat = float3x3(transform.model[0].xyz,\n"
+        "                                 transform.model[1].xyz,\n"
+        "                                 transform.model[2].xyz);\n"
         "    out.worldNormal = normalize(normalMat * v.normal);\n"
         "    return out;\n"
         "}\n"
@@ -946,17 +992,23 @@ void graphics_init() {
      * shade correctly (layout must match graphics_material_set_* order). */
     g_defaultMaterial = (MetalMaterial *)graphics_creatematerial(NULL);
     if (g_defaultMaterial) {
+        graphics_copy_name(g_defaultMaterial->floatNames[0], sizeof(g_defaultMaterial->floatNames[0]), "ambient");
         g_defaultMaterial->floats[0] = 0.15f;  /* ambient */
+        graphics_copy_name(g_defaultMaterial->floatNames[1], sizeof(g_defaultMaterial->floatNames[1]), "specular");
         g_defaultMaterial->floats[1] = 0.4f;   /* specular strength */
+        graphics_copy_name(g_defaultMaterial->floatNames[2], sizeof(g_defaultMaterial->floatNames[2]), "shininess");
         g_defaultMaterial->floats[2] = 32.0f;  /* shininess */
         g_defaultMaterial->floatCount = 3;
 
+        graphics_copy_name(g_defaultMaterial->vec3Names[0], sizeof(g_defaultMaterial->vec3Names[0]), "lightDir");
         g_defaultMaterial->vec3s[0] = 0.35f;   /* light direction */
         g_defaultMaterial->vec3s[1] = -0.8f;
         g_defaultMaterial->vec3s[2] = -0.45f;
+        graphics_copy_name(g_defaultMaterial->vec3Names[1], sizeof(g_defaultMaterial->vec3Names[1]), "cameraPos");
         g_defaultMaterial->vec3s[3] = 0.0f;    /* camera position */
         g_defaultMaterial->vec3s[4] = 0.0f;
         g_defaultMaterial->vec3s[5] = 3.0f;
+        graphics_copy_name(g_defaultMaterial->vec3Names[2], sizeof(g_defaultMaterial->vec3Names[2]), "albedo");
         g_defaultMaterial->vec3s[6] = 0.75f;   /* albedo */
         g_defaultMaterial->vec3s[7] = 0.75f;
         g_defaultMaterial->vec3s[8] = 0.78f;
@@ -1200,10 +1252,19 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_FULL, state);
     if (p) graphics_bindpipeline(p);
 
-    /* Upload transform matrix to uniform buffer and bind at index 1 */
-    if (transform4x4 && g_uniformBuffer) {
-        memcpy(metal_buffer_get_contents(g_uniformBuffer), transform4x4, 64);
-        metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    /* Per-draw transforms: mvp + world copied into the command buffer at
+     * encode time, so several draws in one frame can't clobber shared
+     * uniform memory (the GPU reads uniforms when the frame executes). */
+    if (transform4x4) {
+        float perDraw[32];
+        memcpy(perDraw, transform4x4, 64);
+        const MetalMaterial *src = mm ? mm : g_defaultMaterial;
+        if (src) {
+            memcpy(&perDraw[16], src->mat4, 64);
+        } else {
+            memset(&perDraw[16], 0, 64);
+        }
+        metal_encoder_set_vertex_bytes(g_currentEncoder, perDraw, sizeof(perDraw), 1);
     }
 
     /* Bind material uniforms (fall back to the default material) */

@@ -43,6 +43,8 @@ void   metal_buffer_update(void *buf, const void *data, size_t size);
 void   metal_encoder_set_vertex_buffer(void *enc, void *buf, unsigned long offset, unsigned long index);
 void   metal_encoder_set_buffer(void *enc, void *buf, unsigned long offset, unsigned long index);
 void   metal_encoder_set_buffer(void *enc, void *buf, unsigned long offset, unsigned long index);
+/* Copy bytes into the command buffer at encode time (immune to later CPU writes) */
+void   metal_encoder_set_vertex_bytes(void *enc, const void *bytes, size_t length, unsigned long index);
 /* Viewport is passed as 6 doubles: originX, originY, width, height, znear, zfar */
 void   metal_encoder_set_viewport(void *enc, const double vp[6]);
 void   metal_encoder_set_render_pipeline_state(void *enc, void *pso);

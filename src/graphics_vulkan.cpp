@@ -1077,8 +1077,17 @@ static void graphics_creategraphicspipeline()
 
     VkDescriptorSetLayout setLayouts[2] = { bindlessDescriptorSetLayout, uboDescriptorSetLayout };
 
+    /* Per-draw transforms (mvp + world) via push constants so several draws
+     * per frame can't clobber shared uniform memory */
+    VkPushConstantRange transformRange = {};
+    transformRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    transformRange.offset = 0;
+    transformRange.size = 128;
+
     pipelineLayoutCreateInfo.setLayoutCount = 2;
     pipelineLayoutCreateInfo.pSetLayouts = setLayouts;
+    pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
+    pipelineLayoutCreateInfo.pPushConstantRanges = &transformRange;
 
     if (pipelineLayout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(device, pipelineLayout, NULL);
@@ -2068,16 +2077,30 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
         return;
     }
 
-    /* Upload transform matrix to global uniform buffer and bind at slot 0 */
-    if (transform4x4 && g_uniformBuffer) {
-        graphics_updatebuffer((Buffer)g_uniformBuffer, transform4x4, 64);
-        graphics_binduniformbuffer((Buffer)g_uniformBuffer, 0);
-    }
-
     // Bind default 3D pipeline if no custom pipeline is bound
     if (currentPipeline != graphicsPipeline) {
         vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
         currentPipeline = graphicsPipeline;
+    }
+
+    /* Per-draw transforms: mvp + world via push constants, so several draws
+     * in one frame can't clobber shared uniform memory */
+    if (transform4x4) {
+        static const float identityModel[16] = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        struct {
+            float mvp[16];
+            float model[16];
+        } pushData;
+        memcpy(pushData.mvp, transform4x4, sizeof(pushData.mvp));
+        const GPUMaterial *pushMat = (const GPUMaterial *)mat;
+        memcpy(pushData.model, pushMat ? pushMat->mat4 : identityModel, sizeof(pushData.model));
+        vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushData), &pushData);
     }
 
     VkDeviceSize offsets[] = {0};

@@ -201,6 +201,7 @@ endif()
 # specify the list of paths to source files
 set(SOURCES
     src/audio_openal.c
+    src/camera.c
     src/event_sdl.c
     src/filesystem_physfs.c
     src/font.c
@@ -210,6 +211,7 @@ set(SOURCES
     src/main_sdl.c
     src/math_glm.cpp
     src/model_assimp.cpp
+    src/scene.c
     src/text.c
     src/timer_sdl.c
     src/vk_mem_alloc.cpp

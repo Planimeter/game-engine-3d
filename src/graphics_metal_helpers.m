@@ -73,6 +73,15 @@ void   metal_encoder_set_vertex_buffer(void *enc,
                                               atIndex:(NSUInteger)index];
 }
 
+void   metal_encoder_set_vertex_bytes(void *enc,
+                                      const void *bytes,
+                                      size_t length,
+                                      unsigned long index) {
+    [(id<MTLRenderCommandEncoder>)enc setVertexBytes:bytes
+                                               length:(NSUInteger)length
+                                              atIndex:(NSUInteger)index];
+}
+
 void   metal_encoder_set_buffer(void *enc,
                                  void *buf,
                                  unsigned long offset,

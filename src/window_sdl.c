@@ -93,6 +93,11 @@ void window_getwindowsizeinpixels(int *w, int *h)
     SDL_GetWindowSizeInPixels(window, w, h);
 }
 
+void window_setmouserelative(int enabled)
+{
+    SDL_SetWindowRelativeMouseMode(window, enabled != 0);
+}
+
 void window_shutdown(void)
 {
 #ifdef __APPLE__

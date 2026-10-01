@@ -7,6 +7,8 @@
 #include "font.h"
 #include "text.h"
 #include "math_c.h"
+#include "camera.h"
+#include "scene.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,6 +26,22 @@ static const uint64_t g_fpsUpdateIntervalMs = 1000;
 static Model *g_testModel = NULL;
 static Material g_litMaterial = NULL;
 static float g_elapsed = 0.0f;
+
+/* Camera + scene graph */
+static Camera g_camera;
+static Scene g_scene;
+static int g_rootNode = -1;
+
+/* Camera control input state (see framework_keypressed/keyreleased) */
+static int g_keyForward = 0;
+static int g_keyBack = 0;
+static int g_keyLeft = 0;
+static int g_keyRight = 0;
+static int g_keyUp = 0;
+static int g_keyDown = 0;
+static int g_lookActive = 0;
+static const float g_moveSpeed = 3.0f;      /* world units per second */
+static const float g_lookSensitivity = 0.0025f; /* radians per pixel */
 
 void framework_init(const char *argv0)
 {
@@ -99,6 +117,26 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
     }
+
+    /* Fly camera: WASD + E/Q to move, right-drag to look, wheel to zoom */
+    camera_init(&g_camera, 0.0f, 0.6f, 4.0f);
+
+    /* Scene graph: spinning root with three children, so parent->child
+     * transform composition is visible (children orbit the root). */
+    scene_init(&g_scene);
+    g_rootNode = scene_create(&g_scene, -1);
+    if (g_rootNode >= 0) {
+        int childLeft = scene_create(&g_scene, g_rootNode);
+        int childRight = scene_create(&g_scene, g_rootNode);
+        int childTop = scene_create(&g_scene, g_rootNode);
+
+        scene_setposition(&g_scene, childLeft, -1.3f, 0.0f, 0.0f);
+        scene_setscale(&g_scene, childLeft, 0.5f, 0.5f, 0.5f);
+        scene_setposition(&g_scene, childRight, 1.3f, 0.0f, 0.0f);
+        scene_setscale(&g_scene, childRight, 0.5f, 0.5f, 0.5f);
+        scene_setposition(&g_scene, childTop, 0.0f, 1.3f, 0.0f);
+        scene_setscale(&g_scene, childTop, 0.5f, 0.5f, 0.5f);
+    }
 }
 
 void framework_update(uint64_t deltaTime)
@@ -118,38 +156,60 @@ void framework_update(uint64_t deltaTime)
         }
     }
 
-    g_elapsed += (float)deltaTime / 1000.0f;
+    float dt = (float)deltaTime / 1000.0f;
+    g_elapsed += dt;
+
+    /* Spin the scene root; the children orbit with it */
+    if (g_rootNode >= 0) {
+        scene_setrotation(&g_scene, g_rootNode, 0.0f, g_elapsed * 0.5f, 0.0f);
+    }
+
+    /* Fly movement along the camera basis */
+    float fwd = (g_keyForward ? 1.0f : 0.0f) - (g_keyBack ? 1.0f : 0.0f);
+    float rgt = (g_keyRight ? 1.0f : 0.0f) - (g_keyLeft ? 1.0f : 0.0f);
+    float up = (g_keyUp ? 1.0f : 0.0f) - (g_keyDown ? 1.0f : 0.0f);
+    if (fwd != 0.0f || rgt != 0.0f || up != 0.0f) {
+        camera_move(&g_camera, fwd, rgt, up, g_moveSpeed * dt);
+    }
 }
 
 void framework_draw(void)
 {
-    /* Draw 3D test model */
+    /* Draw 3D scene */
     if (g_testModel) {
         int w, h;
         window_getwindowsizeinpixels(&w, &h);
         float aspect = (float)w / (float)h;
 
-        float proj[16], view[16], model[16], mvp[16], temp[16];
+        float proj[16], view[16], mvp[16], temp[16];
 
-        /* Perspective projection */
-        math_perspective(proj, 3.14159f * 0.5f, aspect, 0.1f, 100.0f);
+        /* Camera-driven projection and view */
+        camera_projection(&g_camera, aspect, proj);
+        camera_view(&g_camera, view);
 
-        /* View: camera at (0, 0, 3) looking at origin */
-        math_lookat(view, 0.0f, 0.0f, 3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
-
-        /* Model: rotate around Y axis */
-        math_identity(model);
-        math_rotate(model, model, g_elapsed * 0.5f, 0.0f, 1.0f, 0.0f);
-
-        /* MVP = proj * view * model */
-        math_multiply(temp, view, model);
-        math_multiply(mvp, proj, temp);
-
-        /* Model matrix drives world-space normals in the lit shader */
+        /* Specular highlight tracks the camera */
         if (g_litMaterial) {
-            graphics_material_set_mat4(g_litMaterial, model);
+            graphics_material_set_vec3(g_litMaterial, "cameraPos",
+                                       g_camera.position[0],
+                                       g_camera.position[1],
+                                       g_camera.position[2]);
         }
-        graphics_drawmodel(g_testModel, g_litMaterial, mvp);
+
+        scene_update(&g_scene);
+        for (int i = 0; i < SCENE_MAX_NODES; i++) {
+            const float *world = scene_world(&g_scene, i);
+            if (!world) continue;
+
+            /* mvp = proj * view * world */
+            math_multiply(temp, view, world);
+            math_multiply(mvp, proj, temp);
+
+            /* World matrix drives world-space normals in the lit shader */
+            if (g_litMaterial) {
+                graphics_material_set_mat4(g_litMaterial, world);
+            }
+            graphics_drawmodel(g_testModel, g_litMaterial, mvp);
+        }
     }
 
     /* Draw FPS text overlay */
@@ -209,10 +269,27 @@ void framework_focus(int focus)
 
 void framework_keypressed(const char *key, const char *scancode, int isrepeat)
 {
+    (void)key;
+    if (isrepeat) return;
+
+    if (!strcmp(scancode, "W")) g_keyForward = 1;
+    else if (!strcmp(scancode, "S")) g_keyBack = 1;
+    else if (!strcmp(scancode, "A")) g_keyLeft = 1;
+    else if (!strcmp(scancode, "D")) g_keyRight = 1;
+    else if (!strcmp(scancode, "E")) g_keyUp = 1;
+    else if (!strcmp(scancode, "Q")) g_keyDown = 1;
 }
 
 void framework_keyreleased(const char *key, const char *scancode)
 {
+    (void)key;
+
+    if (!strcmp(scancode, "W")) g_keyForward = 0;
+    else if (!strcmp(scancode, "S")) g_keyBack = 0;
+    else if (!strcmp(scancode, "A")) g_keyLeft = 0;
+    else if (!strcmp(scancode, "D")) g_keyRight = 0;
+    else if (!strcmp(scancode, "E")) g_keyUp = 0;
+    else if (!strcmp(scancode, "Q")) g_keyDown = 0;
 }
 
 void framework_textedited(const char *text, int start, int length)
@@ -225,18 +302,31 @@ void framework_textinput(const char *text)
 
 void framework_mousemoved(int x, int y, int dx, int dy, int istouch)
 {
+    if (g_lookActive && !istouch) {
+        camera_look(&g_camera, (float)dx, (float)dy, g_lookSensitivity);
+    }
 }
 
 void framework_mousepressed(int x, int y, const char *button, int istouch)
 {
+    if (!istouch && button && !strcmp(button, "right")) {
+        g_lookActive = 1;
+        window_setmouserelative(1);
+    }
 }
 
 void framework_mousereleased(int x, int y, const char *button, int istouch)
 {
+    if (!istouch && button && !strcmp(button, "right")) {
+        g_lookActive = 0;
+        window_setmouserelative(0);
+    }
 }
 
 void framework_wheelmoved(int x, int y)
 {
+    (void)x;
+    camera_zoom(&g_camera, (float)y);
 }
 
 void framework_joystick_axis_motion(int which, int axis, int value) { (void)which; (void)axis; (void)value; }
