@@ -26,6 +26,9 @@ void window_init()
     /* On other platforms, request a Vulkan surface for the Vulkan backend */
     Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 #endif
+    /* Render at the display's native pixel density (Retina/HiDPI) instead of
+     * letting the OS upscale a point-sized drawable. */
+    windowFlags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
 
     /* Create an application window with the following settings: */
     window = SDL_CreateWindow(
@@ -91,6 +94,11 @@ int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 void window_getwindowsizeinpixels(int *w, int *h)
 {
     SDL_GetWindowSizeInPixels(window, w, h);
+}
+
+float window_getpixeldensity(void)
+{
+    return SDL_GetWindowPixelDensity(window);
 }
 
 void window_setmouserelative(int enabled)

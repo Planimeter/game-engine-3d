@@ -89,6 +89,7 @@ struct Font {
     unsigned char *file_data;
     size_t file_size;
     int size_px;
+    float density;
     int ascent;
     int descent;
     int height;
@@ -514,7 +515,13 @@ Font *font_create(const char *filepath, int size)
 
     font->file_data = (unsigned char *)file_data;
     font->file_size = file_size;
-    pixel_size = size;
+    /* Rasterize glyphs for the drawable's pixel density so text keeps its
+     * logical size on Retina/HiDPI displays. */
+    font->density = window_getpixeldensity();
+    if (font->density < 1.0f) {
+        font->density = 1.0f;
+    }
+    pixel_size = (int)((float)size * font->density + 0.5f);
 
     if (FT_New_Memory_Face(g_ft_library, font->file_data, (FT_Long)font->file_size, 0, &font->face) != 0) {
         fprintf(stderr, "font_create: FreeType failed to load font '%s'\n", filepath);
@@ -728,8 +735,9 @@ void font_print(Font *font,
 {
     const char *line_start;
     const char *line_end;
-    float origin_x = x;
-    float cursor_y = y;
+    /* Callers pass logical coordinates; glyph metrics are in drawable pixels */
+    float origin_x = x * font->density;
+    float cursor_y = y * font->density;
 
     (void)r;
     (void)ox;
@@ -907,8 +915,8 @@ void font_batch_print(Font *font,
     
     TextDrawCommand *cmd = &font->batch.commands[font->batch.count++];
     cmd->text = strdup(text);
-    cmd->x = x;
-    cmd->y = y;
+    cmd->x = x * font->density;
+    cmd->y = y * font->density;
     cmd->sx = (sx == 0.0f) ? 1.0f : sx;
     cmd->sy = (sy == 0.0f) ? 1.0f : sy;
 }

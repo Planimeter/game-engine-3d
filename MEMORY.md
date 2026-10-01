@@ -64,7 +64,7 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 ### Remaining Issues
 - `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded. (No current callers, so low priority.)
 - `graphics_draw_instanced()`/`graphics_draw_buffers()` still write the legacy shared uniform path (single `g_uniformBuffer` region / descriptor binding 0). Only `graphics_drawmodel()` got the per-draw fix below; if these are revived with the 3D shader they need the same treatment. (`graphics_draw_buffers()` today is font/text only and its text shaders ignore the transform.)
-- Retina/pixel-density handling may be wrong — `window_getwindowsizeinpixels()` vs logical size mismatch suspected (user report, 2026-10-01, uninvestigated).
+- ~~Retina/pixel-density handling wrong~~ — fixed 2026-10-01: `SDL_WINDOW_HIGH_PIXEL_DENSITY` window flag + `NSHighResolutionCapable` in `cmake/MacOSXBundleInfo.plist.in` (CMake's default plist omits it) + `window_getpixeldensity()` + font rasterization/coords scaled by density. Verified: 640×480-pt window now renders at 1280×960.
 
 ## Camera & Scene System (2026-10-01)
 

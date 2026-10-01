@@ -42,6 +42,7 @@ void   window_init();
 Window window_getwindow();
 int    window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
 void   window_getwindowsizeinpixels(int *w, int *h);
+float  window_getpixeldensity(void);
 void   window_setmouserelative(int enabled);
 void   window_shutdown(void);
 

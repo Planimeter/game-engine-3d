@@ -24,6 +24,13 @@ int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 
 void window_getwindowsizeinpixels(int *w, int *h)
 {
+    (void)w;
+    (void)h;
+}
+
+float window_getpixeldensity(void)
+{
+    return 1.0f;
 }
 
 void window_shutdown(void)

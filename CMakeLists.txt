@@ -230,6 +230,10 @@ if(WIN32)
     add_executable(game WIN32 ${SOURCES})
 elseif(APPLE)
     add_executable(game MACOSX_BUNDLE ${SOURCES})
+    # Custom plist template: CMake's default omits NSHighResolutionCapable,
+    # which macOS requires before it will give the app a Retina backing store.
+    set_target_properties(game PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/cmake/MacOSXBundleInfo.plist.in")
 else()
     add_executable(game ${SOURCES})
 endif()
