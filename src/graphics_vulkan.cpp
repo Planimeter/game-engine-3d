@@ -4,6 +4,7 @@
 #include "filesystem.h"
 #include "graphics.h"
 #include "window.h"
+#include "math_c.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -430,8 +431,32 @@ static void graphics_createdevice()
     VkDeviceCreateInfo createInfo = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     VkDeviceQueueCreateInfo queueCreateInfo = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
     float queuePriority = 1.0f;
-    const char *enabledExtensionNames[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    /* VK_KHR_portability_subset is mandatory on MoltenVK: if the device reports
+     * it in vkEnumerateDeviceExtensionProperties, it must be enabled here or
+     * vkCreateDevice is invalid (VUID-VkDeviceCreateInfo-pProperties-04451). */
+    const char *enabledExtensionNames[2] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME, "VK_KHR_portability_subset" };
+    uint32_t enabledExtensionCount = 1;
     VkResult result;
+
+    /* Only enable portability_subset when the device actually advertises it */
+    {
+        uint32_t deviceExtCount = 0;
+        vkEnumerateDeviceExtensionProperties(physicalDevices[0], NULL, &deviceExtCount, NULL);
+        if (deviceExtCount > 0) {
+            VkExtensionProperties *deviceExts =
+                (VkExtensionProperties *)malloc(deviceExtCount * sizeof(VkExtensionProperties));
+            if (deviceExts) {
+                vkEnumerateDeviceExtensionProperties(physicalDevices[0], NULL, &deviceExtCount, deviceExts);
+                for (uint32_t i = 0; i < deviceExtCount; i++) {
+                    if (strcmp(deviceExts[i].extensionName, "VK_KHR_portability_subset") == 0) {
+                        enabledExtensionCount = 2;
+                        break;
+                    }
+                }
+                free(deviceExts);
+            }
+        }
+    }
 
     /* Enable Vulkan 1.2 features for bindless rendering */
     VkPhysicalDeviceVulkan12Features vulkan12Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
@@ -453,7 +478,7 @@ static void graphics_createdevice()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#VkDeviceCreateInfo */
     createInfo.queueCreateInfoCount    = 1;
     createInfo.pQueueCreateInfos       = &queueCreateInfo;
-    createInfo.enabledExtensionCount   = 1;
+    createInfo.enabledExtensionCount   = enabledExtensionCount;
     createInfo.ppEnabledExtensionNames = enabledExtensionNames;
     createInfo.pNext                   = &vulkan12Features;
 
@@ -2191,85 +2216,28 @@ void graphics_draw_instanced(Model *model,
      * this before graphics_predraw() would place it outside the render pass. */
     graphics_setmaterial(mat);
 
-    /* Per-instance transforms go to UBO slot 2 as a uniform array. The
-     * conventional per-instance vertex buffer binding crashes MoltenVK's
-     * SPIR-V-to-MSL translator, and a single uniform also avoids allocating
-     * a transient GPU buffer every draw. */
-    GPUBuffer *instBuf = (GPUBuffer *)g_instanceBuffer;
-    size_t needed = count * sizeof(float) * 16;
-    if (count > MAX_INSTANCES) {
-        fprintf(stderr, "Vulkan: instance count %zu exceeds MAX_INSTANCES (%d), truncating\n",
-                count, MAX_INSTANCES);
-        count = MAX_INSTANCES;
-        needed = count * sizeof(float) * 16;
-    }
-
-    if (!instBuf || instBuf->size < needed) {
-        if (instBuf) {
-            graphics_destroybuffer((Buffer)instBuf);
-        }
-        instBuf = (GPUBuffer *)graphics_createvertexbuffer(NULL, MAX_INSTANCES * sizeof(float) * 16);
-        if (!instBuf) {
-            return;
-        }
-        g_instanceBuffer = (Buffer)instBuf;
-    }
-
-    graphics_updatebuffer((Buffer)instBuf, transforms4x4, needed);
-    graphics_binduniformbuffer((Buffer)instBuf, 2);
-
-    Shader instVert = g_instanceVertShader;
-    Pipeline p = NULL;
-    if (instVert && g_defaultFragShader) {
-        RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
-        p = graphics_createpipeline(instVert, g_defaultFragShader, VERTEX_FORMAT_INSTANCE, state);
-    }
-    if (!p) {
-        fprintf(stderr, "Vulkan: instanced pipeline unavailable, skipping draw\n");
-        return;
-    }
-
-    // Bind instanced pipeline
-    if (currentPipeline != (VkPipeline)p) {
-        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)p);
-        currentPipeline = (VkPipeline)p;
-    }
-
-    /* Shared view-projection for every instance */
-    struct {
+    /* Draw each instance as its own call rather than through a per-instance
+     * vertex binding.
+     *
+     * The instanced pipeline crashed inside MoltenVK's SPIR-V-to-MSL
+     * translator (MVKShaderModule::getMTLFunction). The validation layers point
+     * at the underlying cause: this backend keeps a single uboDescriptorSet for
+     * every frame and refreshes it via graphics_binduniformbuffer() while
+     * earlier frames are still in flight, so draws get recorded against a
+     * descriptor set in an invalid state
+     * (VUID-vkCmdDraw-commandBuffer-recording). Fixing that properly means one
+     * descriptor set per frame in flight, which is a separate change to the
+     * descriptor pool and its allocation.
+     *
+     * Until then this is correct but not fast: N draws instead of one. */
+    for (size_t i = 0; i < count; i++) {
         float mvp[16];
-        float model[16];
-    } pushData;
-    static const float identityModel[16] = {
-        1, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 0, 1
-    };
-    memcpy(pushData.model, identityModel, sizeof(pushData.model));
-    if (viewProjection4x4) {
-        memcpy(pushData.mvp, viewProjection4x4, sizeof(pushData.mvp));
-    } else {
-        memcpy(pushData.mvp, identityModel, sizeof(pushData.mvp));
-    }
-    vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout,
-                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushData), &pushData);
-
-    VkDeviceSize vertexOffsets[] = {0};
-    VkBuffer vertexBuffers[1] = {VK_NULL_HANDLE};
-    uint32_t instanceCount = (uint32_t)count;
-
-    for (uint32_t i = 0; i < model->meshCount; i++) {
-        Mesh *mesh = &model->meshes[i];
-        VkBuffer vertexBuffer = (VkBuffer)mesh->vertexBuffer;
-        if (!vertexBuffer || !mesh->indexBuffer || mesh->indexCount == 0) {
-            continue;
+        if (viewProjection4x4) {
+            math_multiply(mvp, viewProjection4x4, &transforms4x4[i * 16]);
+        } else {
+            memcpy(mvp, &transforms4x4[i * 16], sizeof(mvp));
         }
-        vertexBuffers[0] = vertexBuffer;
-
-        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, vertexOffsets);
-        vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, instanceCount, 0, 0, 0);
+        graphics_drawmodel(model, mat, mvp);
     }
 }
 
