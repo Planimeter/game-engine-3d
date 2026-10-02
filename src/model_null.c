@@ -50,6 +50,11 @@ void model_normalize(Model *model, float targetHeight)
 {
 }
 
+int model_loadtextures(Model *model, const char *modelDir)
+{
+    return 0;
+}
+
 int model_pose_by_index(Model *model, int clipIndex, float time, float *out16)
 {
     return 0;

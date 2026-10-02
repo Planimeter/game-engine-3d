@@ -51,6 +51,10 @@ typedef struct {
     void *indexBuffer;
     void *vertexBufferMemory;
     void *indexBufferMemory;
+    /* Loaded GPU texture and its slot in the bindless array, or NULL when
+     * the material had no diffuse map. Populated by model_loadtextures(). */
+    void *diffuseTexture;
+    int diffuseTextureSlot;
 } Mesh;
 
 typedef struct ModelAnimation ModelAnimation;
@@ -115,6 +119,12 @@ const ModelAnimation *model_get_animation(const Model *model, uint32_t index);
  * imported asset lands somewhere the default camera can see it.
  * Does nothing for a model with no meshes. */
 void model_normalize(Model *model, float targetHeight);
+
+/* Load each mesh's diffuse texture named in its material, relative to
+ * `modelDir` (usually the model file's directory), and assign bindless
+ * slots. Slot 0 is reserved for the font atlas, so model textures start
+ * at 1. Returns the number of textures loaded. */
+int model_loadtextures(Model *model, const char *modelDir);
 
 /* Same pose query addressed by clip index, so C callers do not need the
  * C++-only ModelAnimation type. Pass clipIndex < 0 for the rest pose.

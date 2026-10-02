@@ -1,6 +1,8 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "model.h"
+#include "image.h"
+#include "graphics.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -613,6 +615,50 @@ void model_normalize(Model *model, float targetHeight)
     }
 
     printf("  normalized: scale=%.4f height=%.3f\n", scale, height);
+}
+
+int model_loadtextures(Model *model, const char *modelDir)
+{
+    if (!model || !model->meshes || model->meshCount == 0) {
+        return 0;
+    }
+
+    /* Slot 0 belongs to the font atlas, so model textures start at 1.
+     * MAX_BINDLESS_RESOURCES in the graphics backends caps the array. */
+    int slot = 1;
+    int loaded = 0;
+
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        mesh->diffuseTexture = NULL;
+        mesh->diffuseTextureSlot = -1;
+
+        if (!mesh->material.diffuseTexture || slot >= 64) {
+            continue;
+        }
+
+        char full[4096];
+        if (modelDir && modelDir[0]) {
+            snprintf(full, sizeof(full), "%s/%s", modelDir, mesh->material.diffuseTexture);
+        } else {
+            snprintf(full, sizeof(full), "%s", mesh->material.diffuseTexture);
+        }
+
+        Texture tex = image_load(full);
+        if (!tex) {
+            /* Textures are optional; a missing file should not fail the load. */
+            continue;
+        }
+
+        mesh->diffuseTexture = (void *)tex;
+        mesh->diffuseTextureSlot = slot++;
+        loaded++;
+    }
+
+    if (loaded > 0) {
+        printf("  loaded %d material texture(s)\n", loaded);
+    }
+    return loaded;
 }
 
 int model_pose_by_index(Model *model, int clipIndex, float time, float *out16)

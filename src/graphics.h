@@ -76,6 +76,12 @@ void        graphics_setmaterial(Material mat);
 Model      *graphics_loadmodel(const char *filepath);
 void        graphics_destroymodel(Model *model);
 
+/* Bind every mesh texture the model owns and tell the shader which
+ * bindless slot to sample. Safe to call for untextured models (passes -1).
+ * Call before graphics_drawmodel(), since the slot goes in the material's
+ * float block. */
+void        graphics_bindmodeltexture(Model *model, Material mat);
+
 /* Re-upload a model's vertices after the CPU-side mesh data changed (e.g.
  * model_normalize), keeping the existing GPU buffer allocations. */
 void        graphics_reuploadmodel(Model *model);
@@ -86,6 +92,11 @@ void        graphics_reuploadmodel(Model *model);
  * shader collapses to the identity. The upload is per draw, so a frame with
  * several skinned models must call this before each one. */
 void        graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount);
+
+/* Bind an identity skin matrix set. Vertex shaders read bone matrices
+ * unconditionally, so this must be called for draws that have none, or the
+ * skinning buffer is unbound and all geometry collapses to the origin. */
+void        graphics_bindskinidentity(void);
 void        graphics_drawmodel(Model *model,
                                Material mat,
                                const float *transform4x4);

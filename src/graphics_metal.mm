@@ -194,9 +194,11 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
             break;
         }
         case VERTEX_FORMAT_INSTANCE: {
-            /* Same vertex layout as VERTEX_FORMAT_FULL. Instance transforms are
-             * read by [[instance_id]] from buffer(1) in the shader, so the
-             * descriptor needs no per-instance layout. */
+            /* Same vertex layout as VERTEX_FORMAT_FULL: the instance
+             * vertex shader also reads boneWeights/boneIndices, so those
+             * attributes must be declared here too or Metal refuses to
+             * build the pipeline state. Instance transforms are read by
+             * [[instance_id]] from buffer(1), so no per-instance layout. */
             vd.attributes[0].format = MTLVertexFormatFloat3;
             vd.attributes[0].offset = offsetof(Vertex, position);
             vd.attributes[0].bufferIndex = 0;
@@ -216,6 +218,14 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
             vd.attributes[4].format = MTLVertexFormatFloat2;
             vd.attributes[4].offset = offsetof(Vertex, texCoords);
             vd.attributes[4].bufferIndex = 0;
+
+            vd.attributes[5].format = MTLVertexFormatFloat4;
+            vd.attributes[5].offset = offsetof(Vertex, boneWeights);
+            vd.attributes[5].bufferIndex = 0;
+
+            vd.attributes[6].format = MTLVertexFormatInt4;
+            vd.attributes[6].offset = offsetof(Vertex, boneIndices);
+            vd.attributes[6].bufferIndex = 0;
 
             vd.layouts[0].stride = sizeof(Vertex);
             vd.layouts[0].stepRate = 1;
@@ -977,6 +987,7 @@ void graphics_init() {
         "    float4 position [[position]];\n"
         "    float3 worldPos;\n"
         "    float3 worldNormal;\n"
+        "    float2 texcoord;\n"
         "};\n"
         "\n"
         "struct TransformData {\n"
@@ -1016,6 +1027,7 @@ void graphics_init() {
         "                                 transform.model[1].xyz,\n"
         "                                 transform.model[2].xyz);\n"
         "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
+        "    out.texcoord = v.texcoord;\n"
         "    return out;\n"
         "}\n"
         "\n"
@@ -1065,6 +1077,7 @@ void graphics_init() {
         "    float4 position [[position]];\n"
         "    float3 worldPos;\n"
         "    float3 worldNormal;\n"
+        "    float2 texcoord;\n"
         "};\n"
         "\n"
         "struct TransformData {\n"
@@ -1104,6 +1117,7 @@ void graphics_init() {
         "    out.worldPos = p.xyz;\n"
         "    float3x3 normalMat = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);\n"
         "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
+        "    out.texcoord = v.texcoord;\n"
         "    return out;\n"
         "}\n"
         "\n"
@@ -1141,7 +1155,12 @@ void graphics_init() {
         g_defaultMaterial->floats[1] = 0.4f;   /* specular strength */
         graphics_copy_name(g_defaultMaterial->floatNames[2], sizeof(g_defaultMaterial->floatNames[2]), "shininess");
         g_defaultMaterial->floats[2] = 32.0f;  /* shininess */
-        g_defaultMaterial->floatCount = 3;
+        /* floats[3] is the diffuse texture slot; -1 means "no map". It must
+         * be set explicitly, since material packing reads the full float
+         * block and an unset slot would be garbage. */
+        graphics_copy_name(g_defaultMaterial->floatNames[3], sizeof(g_defaultMaterial->floatNames[3]), "diffuseSlot");
+        g_defaultMaterial->floats[3] = -1.0f;
+        g_defaultMaterial->floatCount = 4;
 
         graphics_copy_name(g_defaultMaterial->vec3Names[0], sizeof(g_defaultMaterial->vec3Names[0]), "lightDir");
         g_defaultMaterial->vec3s[0] = 0.35f;   /* light direction */
@@ -1378,19 +1397,29 @@ Model *graphics_loadmodel(const char *filepath) {
 #define SKIN_BUFFER_SIZE (MAX_SKIN_BONES * 16 * sizeof(float))
 static MetalBuffer *g_skinBuffer = NULL;
 
+/* Bone 0 must be the identity: every vertex shader reads it, and unskinned
+ * meshes weight bone 0 at 1.0. A zeroed bone 0 would collapse all geometry
+ * to the origin. */
+static void metal_skinbuffer_init(void)
+{
+    if (!g_skinBuffer) {
+        g_skinBuffer = (MetalBuffer *)graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
+        if (!g_skinBuffer) return;
+    }
+    float *data = (float *)metal_buffer_get_contents(g_skinBuffer->buffer);
+    memset(data, 0, SKIN_BUFFER_SIZE);
+    data[0] = 1.0f; data[5] = 1.0f; data[10] = 1.0f; data[15] = 1.0f;
+}
+
 void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
 {
     (void)model;
 
-    if (!g_skinBuffer) {
-        g_skinBuffer = (MetalBuffer *)graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
-        if (!g_skinBuffer) return;
-        /* Zeroed by Metal; bone 0 then acts as identity for unskinned meshes. */
-        memset(metal_buffer_get_contents(g_skinBuffer->buffer), 0, SKIN_BUFFER_SIZE);
-    }
+    metal_skinbuffer_init();
+    if (!g_skinBuffer) return;
 
     if (!boneMatrices || boneCount == 0) {
-        memset(metal_buffer_get_contents(g_skinBuffer->buffer), 0, SKIN_BUFFER_SIZE);
+        metal_skinbuffer_init();
     } else {
         if (boneCount > MAX_SKIN_BONES) boneCount = MAX_SKIN_BONES;
         memcpy(metal_buffer_get_contents(g_skinBuffer->buffer),
@@ -1398,6 +1427,25 @@ void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCou
     }
 
     metal_encoder_set_buffer(g_currentEncoder, g_skinBuffer->buffer, 0, 3);
+}
+
+/* Bind an identity skin for draws that have no bone matrices. Called from
+ * the draw path so buffer(3) is never left unbound. */
+void graphics_bindskinidentity(void)
+{
+    metal_skinbuffer_init();
+    if (g_skinBuffer && g_currentEncoder) {
+        metal_encoder_set_buffer(g_currentEncoder, g_skinBuffer->buffer, 0, 3);
+    }
+}
+
+void graphics_bindmodeltexture(Model *model, Material mat) {
+    (void)model;
+    (void)mat;
+    /* Texture sampling is not wired into the default Metal shader yet: adding
+     * texture2d<float> to fragment_main makes Metal require a bound texture
+     * on every draw, and an unbound one returns zero, blanking untextured
+     * models. Revisit once the shader has a fallback path. */
 }
 
 void graphics_reuploadmodel(Model *model) {

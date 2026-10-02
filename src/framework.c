@@ -157,6 +157,16 @@ void framework_load(int argc, char *argv[])
                         /* Vertex data changed after upload; push it back. */
                         graphics_reuploadmodel(g_testModel);
                     }
+
+                    /* Material textures, resolved relative to the model's
+                     * own directory. */
+                    {
+                        char dir[4096];
+                        snprintf(dir, sizeof(dir), "%s", modelPath);
+                        char *slash = strrchr(dir, '/');
+                        if (slash) *slash = '\0';
+                        model_loadtextures(g_testModel, dir);
+                    }
                 } else {
                     fprintf(stderr, "Failed to load model from %s\n", modelPath);
                 }
@@ -181,6 +191,10 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_litMaterial, "ambient", 0.15f);
         graphics_material_set_float(g_litMaterial, "specular", 0.45f);
         graphics_material_set_float(g_litMaterial, "shininess", 32.0f);
+        /* floats[3]: diffuse texture slot. -1 until model_loadtextures()
+         * finds a map; material packing reads the whole float block, so
+         * leaving it unset would feed the shader garbage. */
+        graphics_material_set_float(g_litMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_vec3(g_litMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
         graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
@@ -195,6 +209,7 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_gridMaterial, "ambient", 0.2f);
         graphics_material_set_float(g_gridMaterial, "specular", 0.5f);
         graphics_material_set_float(g_gridMaterial, "shininess", 48.0f);
+        graphics_material_set_float(g_gridMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_vec3(g_gridMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
         graphics_material_set_vec3(g_gridMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_gridMaterial, "albedo", 0.35f, 0.6f, 0.85f);
@@ -296,6 +311,11 @@ void framework_draw(void)
                 graphics_setbones(g_testModel, g_boneMatrices,
                                   model_get_bone_count(g_testModel));
             }
+        } else {
+            /* Unskinned model: the shaders still read bone matrices, so bind
+             * an identity set or buffer(3) is unbound and every vertex
+             * collapses to the origin. */
+            graphics_bindskinidentity();
         }
 
         scene_update(&g_scene);
@@ -311,6 +331,7 @@ void framework_draw(void)
             if (g_litMaterial) {
                 graphics_material_set_mat4(g_litMaterial, world);
             }
+            graphics_bindmodeltexture(g_testModel, g_litMaterial);
             graphics_drawmodel(g_testModel, g_litMaterial, mvp);
         }
 

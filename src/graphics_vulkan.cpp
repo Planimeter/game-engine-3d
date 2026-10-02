@@ -2281,16 +2281,33 @@ Model *graphics_loadmodel(const char *filepath)
 #define MAX_SKIN_BONES 64
 #define SKIN_BUFFER_SIZE (MAX_SKIN_BONES * 16 * sizeof(float))
 
+/* Bone 0 must be the identity: every vertex shader reads it, and unskinned
+ * meshes weight bone 0 at 1.0. A zeroed bone 0 collapses all geometry. */
+static void vulkan_skinbuffer_init(void)
+{
+    if (!g_skinBuffer) {
+        g_skinBuffer = graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
+        if (!g_skinBuffer) return;
+    }
+    float data[16] = {0};
+    data[0] = 1.0f; data[5] = 1.0f; data[10] = 1.0f; data[15] = 1.0f;
+    graphics_updatebuffer(g_skinBuffer, data, sizeof(data));
+}
+
+void graphics_bindskinidentity(void)
+{
+    vulkan_skinbuffer_init();
+    if (g_skinBuffer) {
+        graphics_binduniformbuffer(g_skinBuffer, 2);
+    }
+}
+
 void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
 {
     (void)model;
 
-    if (!g_skinBuffer) {
-        g_skinBuffer = graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
-        if (!g_skinBuffer) return;
-        /* Zeroed so bone 0 is identity; unskinned vertices all use bone 0. */
-        graphics_updatebuffer(g_skinBuffer, NULL, 0);
-    }
+    vulkan_skinbuffer_init();
+    if (!g_skinBuffer) return;
 
     if (boneMatrices && boneCount > 0) {
         if (boneCount > MAX_SKIN_BONES) boneCount = MAX_SKIN_BONES;
@@ -2298,6 +2315,28 @@ void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCou
                               boneCount * 16 * sizeof(float));
     }
     graphics_binduniformbuffer(g_skinBuffer, 2);
+}
+
+void graphics_bindmodeltexture(Model *model, Material mat)
+{
+    if (!model || !mat) {
+        return;
+    }
+
+    int slot = -1;
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (!mesh->diffuseTexture) continue;
+        if (slot < 0) {
+            slot = mesh->diffuseTextureSlot;
+            graphics_material_set_float(mat, "diffuseSlot", (float)slot);
+        }
+        graphics_bindtexture((Texture)mesh->diffuseTexture,
+                             (unsigned)mesh->diffuseTextureSlot);
+    }
+    if (slot < 0) {
+        graphics_material_set_float(mat, "diffuseSlot", -1.0f);
+    }
 }
 
 void graphics_reuploadmodel(Model *model)

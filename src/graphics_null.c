@@ -165,11 +165,21 @@ Model *graphics_loadmodel(const char *filepath)
     return model_load(filepath);
 }
 
+void graphics_bindskinidentity(void)
+{
+}
+
 void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
 {
     (void)model;
     (void)boneMatrices;
     (void)boneCount;
+}
+
+void graphics_bindmodeltexture(Model *model, Material mat)
+{
+    (void)model;
+    (void)mat;
 }
 
 void graphics_reuploadmodel(Model *model)
