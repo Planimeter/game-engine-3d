@@ -631,7 +631,6 @@ int model_loadtextures(Model *model, const char *modelDir)
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
         mesh->diffuseTexture = NULL;
-        mesh->diffuseTextureSlot = -1;
 
         if (!mesh->material.diffuseTexture || slot >= 64) {
             continue;
@@ -651,7 +650,7 @@ int model_loadtextures(Model *model, const char *modelDir)
         }
 
         mesh->diffuseTexture = (void *)tex;
-        mesh->diffuseTextureSlot = slot++;
+        slot++;
         loaded++;
     }
 

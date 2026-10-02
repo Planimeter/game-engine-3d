@@ -2323,20 +2323,24 @@ void graphics_bindmodeltexture(Model *model, Material mat)
         return;
     }
 
-    int slot = -1;
+    /* Vulkan uses the bindless array (set 0), indexed by the shader through
+     * the material's diffuseSlot float. Slot 0 is the font atlas's, so model
+     * textures are assigned from 1 by model_loadtextures() and tracked here. */
+    static int nextSlot = 1;
+    static void *lastBound[1];
+
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
         if (!mesh->diffuseTexture) continue;
-        if (slot < 0) {
-            slot = mesh->diffuseTextureSlot;
-            graphics_material_set_float(mat, "diffuseSlot", (float)slot);
+        if (mesh->diffuseTexture != lastBound[0]) {
+            graphics_bindtexture((Texture)mesh->diffuseTexture,
+                                 (unsigned)nextSlot);
+            graphics_material_set_float(mat, "diffuseSlot", (float)nextSlot);
+            lastBound[0] = mesh->diffuseTexture;
         }
-        graphics_bindtexture((Texture)mesh->diffuseTexture,
-                             (unsigned)mesh->diffuseTextureSlot);
+        return;
     }
-    if (slot < 0) {
-        graphics_material_set_float(mat, "diffuseSlot", -1.0f);
-    }
+    (void)nextSlot;
 }
 
 void graphics_reuploadmodel(Model *model)

@@ -1479,25 +1479,21 @@ static void metal_make_white_texture(void)
 }
 
 void graphics_bindmodeltexture(Model *model, Material mat) {
-    if (!model || !mat) {
-        metal_make_white_texture();
-        graphics_material_set_float(mat, "diffuseSlot", 0.0f);
-        return;
-    }
+    if (!model || !mat) return;
 
-    int slot = 0;
+    /* Model draws happen before the text pass each frame, so slot 0 is
+     * available here. The text renderer rebinds the same slot afterwards for
+     * its atlas, and the 3D pipeline is not bound at that point, so there is
+     * no conflict — the shader samples [[texture(0)]] unconditionally. */
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
         if (!mesh->diffuseTexture) continue;
-        slot = mesh->diffuseTextureSlot;
-        graphics_material_set_float(mat, "diffuseSlot", (float)slot);
-        graphics_bindtexture((Texture)mesh->diffuseTexture, (unsigned)slot);
+        graphics_bindtexture((Texture)mesh->diffuseTexture, 0);
         return;
     }
 
-    /* Untextured: fall back to white so the albedo passes through unchanged. */
+    /* Untextured: bind white so the albedo passes through unchanged. */
     metal_make_white_texture();
-    graphics_material_set_float(mat, "diffuseSlot", 0.0f);
 }
 
 void graphics_reuploadmodel(Model *model) {
