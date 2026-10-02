@@ -237,9 +237,12 @@ void framework_draw(void)
             graphics_drawmodel(g_testModel, g_litMaterial, mvp);
         }
 
-        /* Instanced grid: one draw call places all copies via a per-instance
-         * mat4, so it visibly proves each instance gets its own transform. */
-        if (g_gridMaterial) {
+        /* Instanced grid: 100 cubes placed from one per-instance transform
+         * array. Metal draws them in a single call; the Vulkan backend loops
+         * graphics_drawmodel() per instance for now (see its comment).
+         * Set NO_INSTANCED_GRID=1 to skip the whole pass, which isolates
+         * instanced-draw crashes from the rest of the frame. */
+        if (g_gridMaterial && !getenv("NO_INSTANCED_GRID")) {
             static float instanceTransforms[INSTANCED_GRID_COUNT][16];
             static float gridView[16];
             static float gridMvp[16];

@@ -73,12 +73,6 @@ static VkFramebuffer *framebuffers;
 /* 9. Shaders */
 static Shader vertShader;
 static Shader fragShader;
-/* Instanced vertex shader (per-instance mat4) and the default fragment
- * shader, used together by graphics_draw_instanced */
-static Shader g_instanceVertShader;
-static Shader g_defaultFragShader;
-/* Cached per-instance transform buffer, bound at UBO slot 2 */
-static Buffer g_instanceBuffer;
 
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
@@ -144,9 +138,6 @@ typedef struct {
 
 /* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
 #define UNIFORM_BUFFER_SIZE 4096
-
-/* Must match MAX_INSTANCES in shaders/triangle_instanced.vert */
-#define MAX_INSTANCES 256
 static GPUBuffer *g_uniformBuffer = NULL;
 
 /* 34.2. WSI Surface */
@@ -1021,43 +1012,6 @@ static int graphics_createshaders()
             free(fragSource);
             free(vertSource);
             return 0;
-        }
-    }
-
-    /* Default fragment shader handle, shared by the instanced pipeline */
-    g_defaultFragShader = fragShader;
-
-    /* Instanced vertex shader: per-instance mat4 at locations 5-8 */
-    {
-        char   *src = NULL;
-        size_t  srcSize = filesystem_fileread((void **)&src, "shaders/triangle_instanced.vert");
-        if (!src || srcSize == 0) {
-            fprintf(stderr, "Failed to read shaders/triangle_instanced.vert\n");
-        } else {
-            shaderc_compile_options_t options = shaderc_compile_options_initialize();
-            shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
-            shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
-            shaderc_compilation_result_t result = shaderc_compile_into_spv(
-                g_shaderc_compiler, src, srcSize, shaderc_glsl_vertex_shader, "shader", "main", options);
-            shaderc_compile_options_release(options);
-
-            if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
-                fprintf(stderr, "Instanced vertex shader compilation failed:\n%s\n",
-                        shaderc_result_get_error_message(result));
-                shaderc_result_release(result);
-            } else {
-                size_t spvSize = shaderc_result_get_length(result);
-                VkShaderModuleCreateInfo moduleInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
-                moduleInfo.codeSize = spvSize;
-                moduleInfo.pCode = (const uint32_t *)shaderc_result_get_bytes(result);
-                VkResult vkResult = vkCreateShaderModule(device, &moduleInfo, NULL, (VkShaderModule *)&g_instanceVertShader);
-                if (vkResult != VK_SUCCESS) {
-                    fprintf(stderr, "Failed to create instanced vertex shader module: %d\n", vkResult);
-                    g_instanceVertShader = VK_NULL_HANDLE;
-                }
-                shaderc_result_release(result);
-            }
-            free(src);
         }
     }
 

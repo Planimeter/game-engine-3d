@@ -78,6 +78,10 @@ void        graphics_destroymodel(Model *model);
 void        graphics_drawmodel(Model *model,
                                Material mat,
                                const float *transform4x4);
+/* Draw `count` copies of `model` at the per-instance matrices in
+ * transforms4x4 (16 floats each), transformed by viewProjection4x4.
+ * Metal issues a single instanced draw; the Vulkan backend currently loops
+ * ordinary draws, so treat the instance count as a hint, not a guarantee. */
 void        graphics_draw_instanced(Model *model,
                                     Material mat,
                                     const float *transforms4x4,
