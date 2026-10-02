@@ -338,11 +338,9 @@ void framework_update(uint64_t deltaTime)
     float dt = (float)deltaTime / 1000.0f;
     g_elapsed += dt;
 
-    /* Spin the scene root; the children orbit with it. SPIN=0 freezes it,
-     * which is useful for checking whether motion is the cubes or the view. */
-    if (g_rootNode >= 0 && !getenv("SPIN")) {
-        scene_setrotation(&g_scene, g_rootNode, 0.0f, g_elapsed * 0.5f, 0.0f);
-    }
+    /* Scene cubes stay put. They used to orbit the root at
+     * g_elapsed * 0.5, which was the only motion on screen before the
+     * terrain existed and read as the whole world rotating. */
 
     /* Fly movement along the camera basis */
     float fwd = (g_keyForward ? 1.0f : 0.0f) - (g_keyBack ? 1.0f : 0.0f);
