@@ -198,6 +198,17 @@ if(NOT TARGET libcef_lib)
     )
 endif()
 
+# Character controller checks. Standalone, so the controller can be verified
+# without a window or synthetic key events. Build with:
+#   cmake --build build --target test_player && ./build/test_player
+add_executable(test_player EXCLUDE_FROM_ALL
+    src/player.c
+    src/physics.c
+    src/terrain.c
+    tests/test_player.c
+    )
+target_include_directories(test_player PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 # specify the list of paths to source files
 set(SOURCES
     src/audio_openal.c
@@ -213,6 +224,7 @@ set(SOURCES
     src/math_glm.cpp
     src/model_assimp.cpp
     src/physics.c
+    src/player.c
     src/scene.c
     src/text.c
     src/timer_sdl.c

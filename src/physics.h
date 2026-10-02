@@ -9,79 +9,50 @@
 extern "C" {
 #endif
 
-/* Character controller against a terrain heightfield.
+/* Collision queries against a terrain heightfield and a set of boxes.
  *
- * The character is a vertical capsule approximated by its feet position and
- * a radius, which is enough for a heightfield: the only thing to collide with
- * is the ground, so collision reduces to resolving the feet against the
- * sampled surface height and refusing moves that climb a slope too steep to
- * walk up.
- *
- * Nothing here rotates the world. Gravity, jump and slope response all move
- * the character; the world stays where it is. */
+ * The world is a heightfield plus axis-aligned props, so collision reduces to
+ * sampling the surface height and refusing moves that climb too steeply.
+ * Nothing here rotates or moves the world; callers move the character. */
 
-/* Shape and feel. Defaults come from player_init(); the tunables are kept in
- * the struct so a game can retune them without editing this module. */
-typedef struct {
-    float position[3];   /* feet, not eye level */
-    float velocity[3];
+/* Terrain surface height at a world position, in the same units the mesh was
+ * built with. */
+float physics_terrain_height(float x, float z, uint32_t seed, float amplitude);
 
-    float radius;        /* horizontal collision radius */
-    float height;        /* total height, for camera clamping */
-    float eyeHeight;     /* eye above the feet */
-
-    int grounded;        /* was resting on the terrain at the last step */
-    int hasGround;       /* 0 disables gravity and collision entirely */
-
-    /* Terrain sampling parameters, so physics does not need globals. */
-    uint32_t terrainSeed;
-    float terrainAmplitude;
-    float boundsExtent;  /* terrain is square, centred on the origin */
-
-    float walkSpeed;
-    float sprintSpeed;
-    float groundAcceleration;
-    float airAcceleration;
-    float groundFriction;
-    float gravity;
-    float jumpSpeed;
-    float maxSlope;      /* radians; steeper ground blocks movement */
-    float stepHeight;    /* vertical clearance a move may climb outright */
-    float terminalVelocity;
-} Player;
-
-/* One frame of input, before it is turned into forces. `forward` and `right`
- * are -1..1 strafe axes in the camera's yaw frame; pitch is ignored so
- * looking down does not slow the walk. */
-typedef struct {
-    float forward;
-    float right;
-    int jump;      /* edge-triggered by the caller */
-    int sprint;
-} PlayerInput;
-
-/* Axis-aligned box the character cannot walk through. Props come from the
+/* An axis-aligned box the character cannot walk through. Props come from the
  * scene graph, so a cube you can see is a cube you collide with. */
 typedef struct {
-    float center[3];   /* box centre */
-    float half[3];     /* half-extents */
-} PlayerObstacle;
+    float center[3];
+    float half[3];
+} PhysicsBox;
 
-/* Place a character standing on the terrain at (x, z), looking down -Z. */
-void player_init(Player *p, float x, float z, uint32_t seed, float amplitude,
-                 float extent);
+/* Flat circle-vs-box push-out in the XZ plane. Resolves along the axis of
+ * least penetration, so a character slides along a wall rather than stopping
+ * dead against it, and zeroes the velocity component that drove into the
+ * face. Returns 1 if the position was moved.
+ *
+ * Boxes whose top is within stepHeight of the feet are treated as kerbs and
+ * skipped: they are ground to climb, not walls. Pass the character's feet Y
+ * in pos[1] and stepHeight 0 to treat every box as solid. */
+int  physics_resolve_box(float pos[3], float velocity[3], float radius,
+                         float stepHeight, const PhysicsBox *box);
 
-/* Advance one frame. `yaw` orients the strafe axes in radians. Integrates in
- * substeps so a long frame cannot tunnel through a hill. `obstacles` may be
- * NULL with `obstacleCount` 0, in which case only terrain collides. */
-void player_update(Player *p, const PlayerInput *input, float yaw, float dt,
-                   const PlayerObstacle *obstacles, int obstacleCount);
+/* Highest standable surface directly under a point: the terrain, or the top
+ * of any box the point is inside. This is what feet rest on, so a low crate
+ * reads as ground to climb rather than a wall to stop at. */
+float physics_surface_height(float x, float z, uint32_t seed, float amplitude,
+                             const PhysicsBox *boxes, int boxCount);
 
-/* Eye position, i.e. feet plus eyeHeight. */
-void player_eye(const Player *p, float out[3]);
+/* Whether a horizontal move from one XZ point to another is too steep to
+ * walk. `rise` is destination ground minus source ground; `dx`/`dz` are the
+ * horizontal run. Returns 1 to refuse the move. Rises within stepHeight are
+ * walkable regardless of slope, which covers flat ground and kerbs. */
+int  physics_slope_blocks(int hasGround, float dx, float dz, float rise,
+                          float maxSlope, float stepHeight);
 
-/* Terrain surface height directly under the character's feet. */
-float player_ground_height(const Player *p);
+/* Clamp a vector length to at most max, in place. */
+void physics_clamp_length(float vec[2], float max);
+
 #ifdef __cplusplus
 }
 #endif

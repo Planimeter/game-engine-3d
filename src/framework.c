@@ -9,6 +9,7 @@
 #include "math_c.h"
 #include "camera.h"
 #include "physics.h"
+#include "player.h"
 #include "scene.h"
 #include "terrain.h"
 #include <stdint.h>
@@ -81,7 +82,7 @@ static int g_rootNode = -1;
  * the world, and their transforms are fixed, so the boxes are resolved once
  * at load and handed to the character controller every frame. */
 #define FRAMEWORK_MAX_PROPS 8
-static PlayerObstacle g_propBoxes[FRAMEWORK_MAX_PROPS];
+static PhysicsBox g_propBoxes[FRAMEWORK_MAX_PROPS];
 static int g_propNodes[FRAMEWORK_MAX_PROPS];
 static int g_propCount = 0;
 static void framework_build_prop_boxes(void);
