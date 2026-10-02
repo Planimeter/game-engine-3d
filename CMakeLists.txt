@@ -209,6 +209,14 @@ add_executable(test_player EXCLUDE_FROM_ALL
     )
 target_include_directories(test_player PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# Footstep cadence checks. The test supplies its own audio backend, so it can
+# count what was played without an audio device.
+add_executable(test_footstep EXCLUDE_FROM_ALL
+    src/footstep.c
+    tests/test_footstep.c
+    )
+target_include_directories(test_footstep PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
 # specify the list of paths to source files
 set(SOURCES
     src/audio_openal.c
@@ -217,6 +225,7 @@ set(SOURCES
     src/event_sdl.c
     src/filesystem_physfs.c
     src/font.c
+    src/footstep.c
     src/framework.c
     src/image_stb.c
     src/job_pthread.c
@@ -402,6 +411,7 @@ target_include_directories(game PUBLIC
 
 add_custom_command(TARGET game POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/shaders $<TARGET_FILE_DIR:game>/shaders
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets/sounds $<TARGET_FILE_DIR:game>/Sounds
   COMMAND_EXPAND_LISTS
 )
 

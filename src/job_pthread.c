@@ -480,10 +480,14 @@ JobHandle job_submit(JobSystem *jobSystem, const JobDescriptor *descriptor)
             pthread_mutex_lock(&queue->mutex);
         }
         queue->jobs[queue->tail++ % MAX_JOB_QUEUE] = job;
-        pthread_mutex_unlock(&queue->mutex);
-
-        /* Wake a worker that might be sleeping on this queue */
+        /* Wake a worker that might be sleeping on this queue. The signal has
+         * to happen with the lock held: a worker can be between checking the
+         * queue and calling cond_wait(), and signalling outside the lock lets
+         * it miss the wake and go back to sleep with a job sitting in the
+         * queue. The result is a job_wait() that never returns, and a
+         * job_destroy() left hanging in pthread_join(). */
         pthread_cond_signal(&queue->workAvailable);
+        pthread_mutex_unlock(&queue->mutex);
 
         queueIndex++;
     }

@@ -4,6 +4,7 @@
 #include "window.h"
 #include "graphics.h"
 #include "audio.h"
+#include "footstep.h"
 #include "font.h"
 #include "text.h"
 #include "math_c.h"
@@ -67,6 +68,7 @@ static Model *g_sky = NULL;
 static Material g_skyMaterial = NULL;
 static Texture g_skyGradient = NULL;
 static void framework_create_sky(void);
+static void framework_create_footsteps(void);
 static void framework_update_sky_gradient(void);
 static float framework_sun_elevation(void);
 static void framework_set_look(int active);
@@ -90,6 +92,25 @@ static int g_skyGradientDirty = 1;
  * by text_set(), which avoids per-frame allocation in the render loop. */
 #define HELP_LINE_COUNT 3
 static Text *g_helpText[HELP_LINE_COUNT];
+
+/* Footsteps. Four variants so consecutive steps differ, plus a heavier
+ * landing for the end of a jump. Missing files are tolerated: the system
+ * plays whatever loaded. */
+static FootstepSystem *g_footsteps = NULL;
+static int g_wasGrounded = 1;
+
+static void framework_create_footsteps(void)
+{
+    static const char *const stepNames[] = {
+        "Sounds/step1.wav",
+        "Sounds/step2.wav",
+        "Sounds/step3.wav",
+        "Sounds/step4.wav",
+    };
+    g_footsteps = footstep_create(stepNames,
+                                  (int)(sizeof(stepNames) / sizeof(stepNames[0])),
+                                  "Sounds/land.wav");
+}
 
 /* Camera + scene graph */
 static Camera g_camera;
@@ -158,6 +179,14 @@ static void framework_shutdown(void)
     if (g_skyMaterial) {
         graphics_destroymaterial(g_skyMaterial);
         g_skyMaterial = NULL;
+    }
+    if (g_terrain) {
+        graphics_destroymodel(g_terrain);
+        g_terrain = NULL;
+    }
+    if (g_footsteps) {
+        footstep_destroy(g_footsteps);
+        g_footsteps = NULL;
     }
     if (g_skyGradient) {
         graphics_destroytexture(g_skyGradient);
@@ -555,6 +584,8 @@ void framework_load(int argc, char *argv[])
     framework_compute_sun(g_sunDirection);
     framework_create_sky();
 
+    framework_create_footsteps();
+
     /* Lit material: floats are ambient/specular/shininess, vec3s are
      * light direction/camera position/albedo (slot order matters — the
      * material API packs by slot, not by name). The model matrix is
@@ -760,6 +791,16 @@ void framework_update(uint64_t deltaTime)
 
     player_update(&g_player, &input, g_camera.yaw, dt,
                   g_propCount > 0 ? g_propBoxes : NULL, g_propCount);
+
+    /* Footsteps follow horizontal speed, so the cadence tracks the walk or
+     * sprint rather than running at a fixed rate, and a landing fires on the
+     * frame the character touches back down. */
+    if (g_footsteps) {
+        float speed = sqrtf(g_player.velocity[0] * g_player.velocity[0] +
+                            g_player.velocity[2] * g_player.velocity[2]);
+        footstep_update(g_footsteps, speed, g_player.grounded, g_wasGrounded, dt);
+        g_wasGrounded = g_player.grounded;
+    }
 
     /* Camera follows the character's eyes. Only orientation is its own, so
      * mouse-look turns the view without moving the player. */
