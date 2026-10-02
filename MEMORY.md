@@ -108,6 +108,7 @@ Written after the animation work, so it reflects what is actually verified rathe
 | Text | FreeType + HarfBuzz, LRU atlas eviction, parallel shaping and vertex build |
 | Skeleton parsing | 13 bones / 1 clip from FBX; 7 bones from glTF |
 | GPU skinning | `quad_skin.glb` renders through the full path |
+| Model textures | Checkerboard renders on a textured quad; untextured models unaffected |
 | Shutdown | No leaked Vulkan objects on the normal teardown path |
 
 ### Known broken
@@ -115,12 +116,12 @@ Written after the animation work, so it reflects what is actually verified rathe
 - **`-O0` debug builds crash** in a `std::system_error` from OpenAL Soft when device enumeration fails on macOS. Third-party. Use `GAME_VULKAN_VALIDATION=ON` instead of `-O0`, or `ALSOFT_DRIVERS=null`.
 
 ### Highest-value next work
-1. **Material textures on models.** `graphics_bindtexture()` and the bindless descriptor set exist and are exercised by the font atlas, but nothing binds a *model's* diffuse/normal maps — `framework.c` calls no texture setter at all. This is what blocks any real-looking content, and it is a small job: load `MaterialData`'s texture paths, create GPU textures, bind them, sample in the fragment shader.
-2. **MSDF text.** The long-standing font recommendation and the only item from the old research list still open. Sharp at any size, which a 16px-rasterized atlas cannot do.
-3. **Animation blending.** One clip plays, with a hard `fmod` and no crossfade. Multi-clip blending needs a pose buffer rather than the single matrix array uploaded today.
-4. **Render passes.** `graphics_createpass()`/`graphics_beginpass()` are implemented on both backends but unused — no shadows or post-processing consume them yet. Shadow mapping is the natural first user.
-5. **FBX space diagnosis** (above).
-6. **The shader-variant system is still a no-op**, so material behaviour cannot vary per object.
+1. **MSDF text.** The long-standing font recommendation and the only item from the old research list still open. Sharp at any size, which a 16px-rasterized atlas cannot do.
+2. **Animation blending.** One clip plays, with a hard `fmod` and no crossfade. Multi-clip blending needs a pose buffer rather than the single matrix array uploaded today.
+3. **Render passes.** `graphics_createpass()`/`graphics_beginpass()` are implemented on both backends but unused — no shadows or post-processing consume them yet. Shadow mapping is the natural first user.
+4. **FBX space diagnosis** (above).
+5. **The shader-variant system is still a no-op**, so material behaviour cannot vary per object.
+6. **Normal maps.** `MaterialData` extracts `normalTexture` and the slot machinery now exists, but no shader samples a tangent-space normal map yet — diffuse was the smaller half of the texture work.
 
 ### Explicitly not worth doing yet
 - More Vulkan hardening. It reports zero validation errors; further work there is speculative.
@@ -240,6 +241,20 @@ Earlier notes blamed `job_pthread.c`. That is wrong. There is no `std::mutex` an
 `audio_openal.c` already handles a null device correctly (`alcOpenDevice` returns NULL -> early return, and a failed context closes the device), so the throw is inside the library, on a path we do not call directly.
 
 **Workaround for debug builds:** `ALSOFT_DRIVERS=null` selects OpenAL's null output device and avoids enumeration entirely, which suppresses the failure. `GAME_VULKAN_VALIDATION=ON` defines `_DEBUG` for the validation layers without needing `-O0` at all, which is the better route.
+
+### Model textures (2026-10-02)
+`graphics_bindtexture()` and the bindless descriptor set already existed and the font atlas exercised them, but nothing bound a *model's* diffuse map — `framework.c` called no texture setter at all. Now wired up:
+
+- `model_loadtextures()` resolves each mesh's `map_Kd` relative to the model's directory and loads it. A missing file is not fatal.
+- `image_stb.c` falls back to a direct file read for absolute paths: PhysFS is mounted at the executable directory, so model textures referenced by repo path were invisible to it. This was why the first attempt silently loaded nothing.
+- Metal's fragment shader samples `[[texture(0)]]` unconditionally, with a 1×1 white texture bound at init and whenever a model has no map — Metal requires a bound texture wherever a shader declares one, and an unbound one samples as zero, which renders untextured models black.
+- `shaders/triangle.frag` samples through the bindless array (`GL_EXT_nonuniform_qualifier` is required for the variable index).
+
+**Texture slot ownership differs per backend, deliberately.** Model draws all happen before the text pass in a frame and the text pipeline is not bound during them, so Metal reuses slot 0 for models and the text renderer rebinds it afterwards without affecting the 3D draw. Vulkan uses the bindless array from slot 1, since slot 0 is the font atlas's there. `Mesh` therefore stores no slot — it was the wrong place for something that differs per backend.
+
+Verified: `texquad.obj` renders with its checkerboard visible; `cube.obj` renders untextured at 119 FPS with no errors.
+
+**Note on a wasted diagnosis:** an earlier commit blamed `MTLStorageModePrivate` + `replaceBytesInRegion` for black textured models. That was wrong — the real cause was the slot mismatch above, found by reading the shader rather than reasoning about Metal semantics. `metal_texture_update_region` already handles the storage-mode issue by uploading through a blit encoder (the AGX driver ignores `replaceBytesInRegion`).
 
 ### Remaining validation errors (pre-existing, not yet fixed)
 - `vkDestroyDevice` reports 13 leaked objects at shutdown (buffers, an image, image views). Cleanup ordering, not a rendering correctness issue.
