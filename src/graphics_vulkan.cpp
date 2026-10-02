@@ -89,6 +89,8 @@ static Shader fragShader;
 static Shader g_instanceVertShader;
 /* Cached per-instance transform buffer, bound as vertex buffer index 1 */
 static Buffer g_instanceBuffer;
+/* Cached bone matrices, bound at UBO slot 2 */
+static Buffer g_skinBuffer;
 
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
@@ -1184,7 +1186,7 @@ static void graphics_creategraphicspipeline()
     bindingDescription.stride = sizeof(Vertex);
     bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription attributeDescriptions[5] = {};
+    VkVertexInputAttributeDescription attributeDescriptions[7] = {};
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
     attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -1205,6 +1207,16 @@ static void graphics_creategraphicspipeline()
     attributeDescriptions[4].location = 4;
     attributeDescriptions[4].format = VK_FORMAT_R32G32_SFLOAT;
     attributeDescriptions[4].offset = offsetof(Vertex, texCoords);
+    /* Skin attributes. Always bound so the same pipeline draws skinned and
+     * static models; static vertices carry bone 0 at weight 1, i.e. identity. */
+    attributeDescriptions[5].binding = 0;
+    attributeDescriptions[5].location = 5;
+    attributeDescriptions[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[5].offset = offsetof(Vertex, boneWeights);
+    attributeDescriptions[6].binding = 0;
+    attributeDescriptions[6].location = 6;
+    attributeDescriptions[6].format = VK_FORMAT_R32G32B32A32_SINT;
+    attributeDescriptions[6].offset = offsetof(Vertex, boneIndices);
 
     vertShaderStage.stage                       = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module                      = (VkShaderModule)vertShader;
@@ -1219,7 +1231,7 @@ static void graphics_creategraphicspipeline()
 
     vertexInput.vertexBindingDescriptionCount   = 1;
     vertexInput.pVertexBindingDescriptions      = &bindingDescription;
-    vertexInput.vertexAttributeDescriptionCount = 5;
+    vertexInput.vertexAttributeDescriptionCount = 7;
     vertexInput.pVertexAttributeDescriptions    = attributeDescriptions;
 
     inputAssembly.topology                      = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -2264,6 +2276,47 @@ Model *graphics_loadmodel(const char *filepath)
 }
 
 /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
+/* Skinning: bone matrices as a UBO at set 1 binding 2. MAX_SKIN_BONES must
+ * match the shaders. */
+#define MAX_SKIN_BONES 64
+#define SKIN_BUFFER_SIZE (MAX_SKIN_BONES * 16 * sizeof(float))
+
+void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
+{
+    (void)model;
+
+    if (!g_skinBuffer) {
+        g_skinBuffer = graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
+        if (!g_skinBuffer) return;
+        /* Zeroed so bone 0 is identity; unskinned vertices all use bone 0. */
+        graphics_updatebuffer(g_skinBuffer, NULL, 0);
+    }
+
+    if (boneMatrices && boneCount > 0) {
+        if (boneCount > MAX_SKIN_BONES) boneCount = MAX_SKIN_BONES;
+        graphics_updatebuffer(g_skinBuffer, boneMatrices,
+                              boneCount * 16 * sizeof(float));
+    }
+    graphics_binduniformbuffer(g_skinBuffer, 2);
+}
+
+void graphics_reuploadmodel(Model *model)
+{
+    if (!model) return;
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (mesh->vertexBuffer && mesh->vertices && mesh->vertexCount > 0) {
+            VkBuffer vertexBuffer = (VkBuffer)mesh->vertexBuffer;
+            VmaAllocation alloc = (VmaAllocation)mesh->vertexBufferMemory;
+            void *mapped = NULL;
+            if (vmaMapMemory(allocator, alloc, &mapped) == VK_SUCCESS) {
+                memcpy(mapped, mesh->vertices, mesh->vertexCount * sizeof(Vertex));
+                vmaUnmapMemory(allocator, alloc);
+            }
+        }
+    }
+}
+
 void graphics_destroymodel(Model *model)
 {
     if (!model) {
@@ -3812,37 +3865,50 @@ static void graphics_get_vertex_input_state(VertexFormat format,
     switch (format) {
         case VERTEX_FORMAT_FULL:
             bindingDesc->stride = sizeof(Vertex);
-            *attrCount = 5;
-            
+            *attrCount = 7;
+
             // Position
             attrDescs[0].binding = 0;
             attrDescs[0].location = 0;
             attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
             attrDescs[0].offset = offsetof(Vertex, position);
-            
+
             // Normal
             attrDescs[1].binding = 0;
             attrDescs[1].location = 1;
             attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
             attrDescs[1].offset = offsetof(Vertex, normal);
-            
+
             // Tangent
             attrDescs[2].binding = 0;
             attrDescs[2].location = 2;
             attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
             attrDescs[2].offset = offsetof(Vertex, tangent);
-            
+
             // Bitangent
             attrDescs[3].binding = 0;
             attrDescs[3].location = 3;
             attrDescs[3].format = VK_FORMAT_R32G32B32_SFLOAT;
             attrDescs[3].offset = offsetof(Vertex, bitangent);
-            
+
             // TexCoords
             attrDescs[4].binding = 0;
             attrDescs[4].location = 4;
             attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
             attrDescs[4].offset = offsetof(Vertex, texCoords);
+
+            // Skin weights / bone indices. Always declared so one pipeline
+            // serves skinned and static models; static vertices carry bone 0
+            // at weight 1, which is the identity.
+            attrDescs[5].binding = 0;
+            attrDescs[5].location = 5;
+            attrDescs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attrDescs[5].offset = offsetof(Vertex, boneWeights);
+
+            attrDescs[6].binding = 0;
+            attrDescs[6].location = 6;
+            attrDescs[6].format = VK_FORMAT_R32G32B32A32_SINT;
+            attrDescs[6].offset = offsetof(Vertex, boneIndices);
             break;
 
         case VERTEX_FORMAT_POS_UV:
@@ -3910,19 +3976,30 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
             attrDescs[4].offset = offsetof(Vertex, texCoords);
 
+            /* Skin attributes, same as VERTEX_FORMAT_FULL */
+            attrDescs[5].binding = 0;
+            attrDescs[5].location = 5;
+            attrDescs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attrDescs[5].offset = offsetof(Vertex, boneWeights);
+
+            attrDescs[6].binding = 0;
+            attrDescs[6].location = 6;
+            attrDescs[6].format = VK_FORMAT_R32G32B32A32_SINT;
+            attrDescs[6].offset = offsetof(Vertex, boneIndices);
+
             /* Per-instance mat4 on binding 1, stepped per instance and read
-             * as vertex attributes 5-8 (one vec4 per matrix column). */
+             * as vertex attributes 7-10 (one vec4 per matrix column). */
             instanceDesc->binding = 1;
             instanceDesc->stride = sizeof(float) * 16;
             instanceDesc->inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
             for (uint32_t c = 0; c < 4; c++) {
-                attrDescs[5 + c].binding = 1;
-                attrDescs[5 + c].location = 5 + c;
-                attrDescs[5 + c].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-                attrDescs[5 + c].offset = c * sizeof(float) * 4;
+                attrDescs[7 + c].binding = 1;
+                attrDescs[7 + c].location = 7 + c;
+                attrDescs[7 + c].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                attrDescs[7 + c].offset = c * sizeof(float) * 4;
             }
-            *attrCount = 9;
+            *attrCount = 11;
             break;
     }
 }
@@ -4008,7 +4085,7 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
 
     VkVertexInputBindingDescription bindingDescriptions[2] = {};
     VkVertexInputBindingDescription *bindingDescription = &bindingDescriptions[0];
-    VkVertexInputAttributeDescription attributeDescriptions[9] = {};
+    VkVertexInputAttributeDescription attributeDescriptions[11] = {};
     uint32_t attributeCount = 0;
 
     graphics_get_vertex_input_state(format, bindingDescription, &bindingDescriptions[1],

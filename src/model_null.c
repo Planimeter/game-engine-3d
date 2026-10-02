@@ -45,3 +45,12 @@ int model_pose(Model *model, const ModelAnimation *clip, float time, glm::mat4 *
 {
     return 0;
 }
+
+void model_normalize(Model *model, float targetHeight)
+{
+}
+
+int model_pose_by_index(Model *model, int clipIndex, float time, float *out16)
+{
+    return 0;
+}

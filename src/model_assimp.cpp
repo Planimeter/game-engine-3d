@@ -81,12 +81,14 @@ static void bonetable_free(BoneTable *table)
 
 static glm::mat4 model_assimp_matrix(const struct aiMatrix4x4t<float> *m)
 {
-    /* Assimp stores row-major as a.a1 b.c1 d.a4; GLM is column-major. */
+    /* Assimp's aiMatrix4x4t stores columns in a/b/c/d, which is already the
+     * layout GLM wants. Transposing here flips the translation into the
+     * wrong axis and mirrors the model. */
     return glm::mat4(
-        m->a1, m->b1, m->c1, m->d1,
-        m->a2, m->b2, m->c2, m->d2,
-        m->a3, m->b3, m->c3, m->d3,
-        m->a4, m->b4, m->c4, m->d4);
+        m->a1, m->a2, m->a3, m->a4,
+        m->b1, m->b2, m->b3, m->b4,
+        m->c1, m->c2, m->c3, m->c4,
+        m->d1, m->d2, m->d3, m->d4);
 }
 
 static void model_walknodes(const BoneTable *table, const struct aiNode *node,
@@ -514,6 +516,131 @@ Model *model_load(const char *filepath)
     printf("\n");
 
     return model;
+}
+
+void model_normalize(Model *model, float targetHeight)
+{
+    if (!model || !model->meshes || model->meshCount == 0 || targetHeight <= 0.0f) {
+        return;
+    }
+
+    float minY = 0.0f, maxY = 0.0f;
+    float centerX = 0.0f, centerZ = 0.0f;
+    uint32_t sampled = 0;
+    double sumX = 0.0, sumZ = 0.0;
+
+    for (uint32_t m = 0; m < model->meshCount; m++) {
+        Mesh *mesh = &model->meshes[m];
+        if (!mesh->vertices || mesh->vertexCount == 0) {
+            continue;
+        }
+        for (uint32_t i = 0; i < mesh->vertexCount; i++) {
+            const glm::vec3 &p = mesh->vertices[i].position;
+            if (sampled == 0) {
+                minY = maxY = p.y;
+            } else {
+                if (p.y < minY) minY = p.y;
+                if (p.y > maxY) maxY = p.y;
+            }
+            sumX += p.x;
+            sumZ += p.z;
+            sampled++;
+        }
+    }
+
+    if (sampled == 0) {
+        return;
+    }
+
+    float height = maxY - minY;
+    float scale = (height > 1e-6f) ? (targetHeight / height) : 1.0f;
+    centerX = (float)(sumX / sampled);
+    centerZ = (float)(sumZ / sampled);
+    float centerY = (minY + maxY) * 0.5f;
+
+    for (uint32_t m = 0; m < model->meshCount; m++) {
+        Mesh *mesh = &model->meshes[m];
+        if (!mesh->vertices) {
+            continue;
+        }
+        for (uint32_t i = 0; i < mesh->vertexCount; i++) {
+            Vertex *v = &mesh->vertices[i];
+            v->position = (v->position - glm::vec3(centerX, centerY, centerZ)) * scale;
+            /* Normals/tangents are directions: translate would not affect
+             * them but the uniform scale does, so renormalize. */
+            v->normal = glm::normalize(v->normal);
+            v->tangent = glm::normalize(v->tangent);
+            v->bitangent = glm::normalize(v->bitangent);
+        }
+    }
+
+    /* Move the skeleton to match, so the pose still lines up with the mesh. */
+    glm::mat4 xform = glm::translate(glm::mat4(1.0f), -glm::vec3(centerX, centerY, centerZ));
+    for (uint32_t b = 0; b < model->boneCount; b++) {
+        model->boneOffset[b] = glm::scale(xform, glm::vec3(scale)) * model->boneOffset[b];
+    }
+
+    /* Some exporters (this FBX among them) keep mesh vertices in world
+     * space while the bone hierarchy also carries that world offset, so
+     * applying world * inverseBind to a vertex pushes it further away
+     * instead of leaving it alone.
+     *
+     * A bone's bind-pose world matrix is exactly inverse(inverseBind). At
+     * rest the pose equals the bind world, so
+     * world * inverseBind should be the identity and leave vertices
+     * untouched — but only when the bone's rest *local* transform already
+     * matches its bind world. Exporters that inflate the local transforms
+     * with a world offset break that.
+     *
+     * Correction: corr = bindWorld * inverse(restWorld), so that
+     *   inverse(corr) * restWorld == bindWorld
+     * and folding inverse(corr) into the inverse bind matrix makes the rest
+     * pose an exact identity while leaving real animation intact. */
+    if (model->boneCount > 0) {
+        glm::mat4 *restWorld = (glm::mat4 *)malloc(model->boneCount * sizeof(glm::mat4));
+        if (restWorld) {
+            for (uint32_t b = 0; b < model->boneCount; b++) {
+                restWorld[b] = (model->boneParent[b] >= 0)
+                             ? restWorld[model->boneParent[b]] * model->boneOffset[b]
+                             : model->boneOffset[b];
+            }
+            for (uint32_t b = 0; b < model->boneCount; b++) {
+                glm::mat4 bindWorld = glm::inverse(model->boneInverseBind[b]);
+                glm::mat4 corr = bindWorld * glm::inverse(restWorld[b]);
+                model->boneInverseBind[b] = glm::inverse(corr) * model->boneInverseBind[b];
+            }
+            free(restWorld);        }
+    }
+
+    printf("  normalized: scale=%.4f height=%.3f\n", scale, height);
+}
+
+int model_pose_by_index(Model *model, int clipIndex, float time, float *out16)
+{
+    if (!model || !out16 || model->boneCount == 0) {
+        return 0;
+    }
+
+    const ModelAnimation *clip = NULL;
+    if (clipIndex >= 0 && (uint32_t)clipIndex < model->animationCount) {
+        clip = &model->animations[clipIndex];
+    }
+
+    /* Reuse the mat4 path, then flatten into the plain float array the
+     * graphics layer expects (column-major, matching GLM). */
+    glm::mat4 *tmp = (glm::mat4 *)malloc(model->boneCount * sizeof(glm::mat4));
+    if (!tmp) {
+        return 0;
+    }
+
+    int ok = model_pose(model, clip, time, tmp);
+    if (ok) {
+        for (uint32_t i = 0; i < model->boneCount; i++) {
+            memcpy(out16 + (size_t)i * 16, &tmp[i], 16 * sizeof(float));
+        }
+    }
+    free(tmp);
+    return ok;
 }
 
 uint32_t model_get_mesh_count(const Model *model)

@@ -165,6 +165,18 @@ Model *graphics_loadmodel(const char *filepath)
     return model_load(filepath);
 }
 
+void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
+{
+    (void)model;
+    (void)boneMatrices;
+    (void)boneCount;
+}
+
+void graphics_reuploadmodel(Model *model)
+{
+    (void)model;
+}
+
 void graphics_destroymodel(Model *model)
 {
     model_destroy(model);

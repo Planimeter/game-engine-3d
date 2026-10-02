@@ -75,6 +75,17 @@ void        graphics_setmaterial(Material mat);
 
 Model      *graphics_loadmodel(const char *filepath);
 void        graphics_destroymodel(Model *model);
+
+/* Re-upload a model's vertices after the CPU-side mesh data changed (e.g.
+ * model_normalize), keeping the existing GPU buffer allocations. */
+void        graphics_reuploadmodel(Model *model);
+
+/* Skinning. Upload bone matrices (boneCount * 16 floats, from model_pose)
+ * for the next draw. Passing boneCount 0 disables skinning, which is what
+ * static models want: their vertices all carry bone 0 at weight 1, so the
+ * shader collapses to the identity. The upload is per draw, so a frame with
+ * several skinned models must call this before each one. */
+void        graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount);
 void        graphics_drawmodel(Model *model,
                                Material mat,
                                const float *transform4x4);

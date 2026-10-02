@@ -105,13 +105,26 @@ struct ModelAnimation {
  * Returns 0 if the model has no skeleton. */
 int  model_pose(Model *model, const ModelAnimation *clip, float time,
                 glm::mat4 *out);
+
+const ModelAnimation *model_get_animation(const Model *model, uint32_t index);
 #endif
+
+/* Scale and centre the mesh data so the model fits a box of about
+ * targetHeight units tall, centred on the origin. Applied to vertex
+ * positions and normals (and bone offsets, so the skeleton follows) so an
+ * imported asset lands somewhere the default camera can see it.
+ * Does nothing for a model with no meshes. */
+void model_normalize(Model *model, float targetHeight);
+
+/* Same pose query addressed by clip index, so C callers do not need the
+ * C++-only ModelAnimation type. Pass clipIndex < 0 for the rest pose.
+ * out16 receives boneCount * 16 floats, column-major. */
+int model_pose_by_index(Model *model, int clipIndex, float time, float *out16);
 
 /* C-compatible accessors for opaque Model struct */
 uint32_t model_get_mesh_count(const Model *model);
 uint32_t model_get_bone_count(const Model *model);
 uint32_t model_get_animation_count(const Model *model);
-const ModelAnimation *model_get_animation(const Model *model, uint32_t index);
 int   model_is_skinned(const Model *model);
 
 /* Opaque clip info, so C callers can report on animations without needing

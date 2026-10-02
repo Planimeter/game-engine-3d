@@ -15,10 +15,20 @@ layout(location = 2) in vec3 in_tangent;
 layout(location = 3) in vec3 in_bitangent;
 layout(location = 4) in vec2 in_texcoord;
 
-layout(location = 5) in vec4 in_m0;
-layout(location = 6) in vec4 in_m1;
-layout(location = 7) in vec4 in_m2;
-layout(location = 8) in vec4 in_m3;
+/* Skinning, as in triangle.vert. Static models carry bone 0 at weight 1. */
+layout(location = 5) in vec4 in_boneWeights;
+layout(location = 6) in ivec4 in_boneIndices;
+
+/* Per-instance mat4 on binding 1, attributes 7-10 (one vec4 per column). */
+layout(location = 7) in vec4 in_m0;
+layout(location = 8) in vec4 in_m1;
+layout(location = 9) in vec4 in_m2;
+layout(location = 10) in vec4 in_m3;
+
+#define MAX_SKIN_BONES 64
+layout(set = 1, binding = 2) uniform SkinData {
+    mat4 bones[MAX_SKIN_BONES];
+} uSkin;
 
 layout(push_constant) uniform Transform {
     mat4 mvp;
@@ -39,11 +49,14 @@ void main()
 {
     mat4 instanceModel = mat4(in_m0, in_m1, in_m2, in_m3);
 
-    vec4 worldPos = instanceModel * vec4(in_position, 1.0);
+    mat4 skin = uSkin.bones[in_boneIndices.x] * in_boneWeights.x
+              + uSkin.bones[in_boneIndices.y] * in_boneWeights.y
+              + uSkin.bones[in_boneIndices.z] * in_boneWeights.z
+              + uSkin.bones[in_boneIndices.w] * in_boneWeights.w;
+
+    vec4 worldPos = instanceModel * (skin * vec4(in_position, 1.0));
     v_worldPos = worldPos.xyz;
-    /* Instance matrices are rotation+translation, so the upper 3x3 works as
-     * a normal matrix */
-    v_worldNormal = normalize(mat3(instanceModel) * in_normal);
+    v_worldNormal = normalize(mat3(instanceModel) * mat3(skin) * in_normal);
     v_texcoord = in_texcoord;
 
     gl_Position = uTransform.mvp * worldPos;

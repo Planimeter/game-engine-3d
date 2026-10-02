@@ -149,6 +149,17 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
             vd.attributes[4].offset = offsetof(Vertex, texCoords);
             vd.attributes[4].bufferIndex = 0;
 
+            /* Skin weights / bone indices. Always declared so one pipeline
+             * serves skinned and static models; static vertices carry bone 0
+             * at weight 1, which is the identity. */
+            vd.attributes[5].format = MTLVertexFormatFloat4;
+            vd.attributes[5].offset = offsetof(Vertex, boneWeights);
+            vd.attributes[5].bufferIndex = 0;
+
+            vd.attributes[6].format = MTLVertexFormatInt4;
+            vd.attributes[6].offset = offsetof(Vertex, boneIndices);
+            vd.attributes[6].bufferIndex = 0;
+
             vd.layouts[0].stride = sizeof(Vertex);
             vd.layouts[0].stepRate = 1;
             vd.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
@@ -958,6 +969,8 @@ void graphics_init() {
         "    float3 tangent  [[attribute(2)]];\n"
         "    float3 bitangent[[attribute(3)]];\n"
         "    float2 texcoord [[attribute(4)]];\n"
+        "    float4 boneWeights [[attribute(5)]];\n"
+        "    int4   boneIndices [[attribute(6)]];\n"
         "};\n"
         "\n"
         "struct VertexOut {\n"
@@ -977,20 +990,32 @@ void graphics_init() {
         "    float4x4 extraMatrix;\n"
         "};\n"
         "\n"
+        "struct SkinData {\n"
+        "    float4x4 bones[64];\n"
+        "};\n"
+        "\n"
         "vertex VertexOut vertex_main(\n"
         "    VertexIn v [[stage_in]],\n"
         "    constant TransformData &transform [[buffer(1)]],\n"
-        "    constant MaterialData &material [[buffer(2)]]\n"
+        "    constant MaterialData &material [[buffer(2)]],\n"
+        "    constant SkinData &skin [[buffer(3)]]\n"
         ") {\n"
         "    VertexOut out;\n"
-        "    out.position = transform.mvp * float4(v.position, 1.0);\n"
-        "    float4 worldPos = transform.model * float4(v.position, 1.0);\n"
+        /* Blend the four bone matrices. Static vertices carry bone 0 at
+         * weight 1, so this collapses to the identity. */
+        "    float4x4 sk = skin.bones[v.boneIndices.x] * v.boneWeights.x\n"
+        "                + skin.bones[v.boneIndices.y] * v.boneWeights.y\n"
+        "                + skin.bones[v.boneIndices.z] * v.boneWeights.z\n"
+        "                + skin.bones[v.boneIndices.w] * v.boneWeights.w;\n"
+        "    float4 localPos = sk * float4(v.position, 1.0);\n"
+        "    out.position = transform.mvp * localPos;\n"
+        "    float4 worldPos = transform.model * localPos;\n"
         "    out.worldPos = worldPos.xyz;\n"
         "    /* Model matrices are rotation+translation, so the upper 3x3 works as a normal matrix */\n"
         "    float3x3 normalMat = float3x3(transform.model[0].xyz,\n"
         "                                 transform.model[1].xyz,\n"
         "                                 transform.model[2].xyz);\n"
-        "    out.worldNormal = normalize(normalMat * v.normal);\n"
+        "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
         "    return out;\n"
         "}\n"
         "\n"
@@ -1032,6 +1057,8 @@ void graphics_init() {
         "    float3 tangent   [[attribute(2)]];\n"
         "    float3 bitangent [[attribute(3)]];\n"
         "    float2 texcoord  [[attribute(4)]];\n"
+        "    float4 boneWeights [[attribute(5)]];\n"
+        "    int4   boneIndices [[attribute(6)]];\n"
         "};\n"
         "\n"
         "struct VertexOut {\n"
@@ -1050,12 +1077,17 @@ void graphics_init() {
         "    float4x4 extraMatrix;\n"
         "};\n"
         "\n"
+        "struct SkinData {\n"
+        "    float4x4 bones[64];\n"
+        "};\n"
+        "\n"
         "vertex VertexOut vertex_main(\n"
         "    VertexIn v [[stage_in]],\n"
         "    uint iid [[instance_id]],\n"
         "    constant TransformData &transform [[buffer(3)]],\n"
         "    constant float4 *instances [[buffer(1)]],\n"
-        "    constant MaterialData &material [[buffer(2)]]\n"
+        "    constant MaterialData &material [[buffer(2)]],\n"
+        "    constant SkinData &skin [[buffer(4)]]\n"
         ") {\n"
         "    VertexOut out;\n"
         /* Instance transforms are read by instance_id from buffer(1) rather
@@ -1063,11 +1095,15 @@ void graphics_init() {
      * [[attribute]] slots the descriptor declares, and a descriptor-only
      * per-instance buffer was silently ignored here. */
         "    float4x4 model = float4x4(instances[iid*4+0], instances[iid*4+1], instances[iid*4+2], instances[iid*4+3]);\n"
-        "    float4 p = model * float4(v.position, 1.0);\n"
+        "    float4x4 sk = skin.bones[v.boneIndices.x] * v.boneWeights.x\n"
+        "                + skin.bones[v.boneIndices.y] * v.boneWeights.y\n"
+        "                + skin.bones[v.boneIndices.z] * v.boneWeights.z\n"
+        "                + skin.bones[v.boneIndices.w] * v.boneWeights.w;\n"
+        "    float4 p = model * (sk * float4(v.position, 1.0));\n"
         "    out.position = transform.mvp * p;\n"
         "    out.worldPos = p.xyz;\n"
         "    float3x3 normalMat = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);\n"
-        "    out.worldNormal = normalize(normalMat * v.normal);\n"
+        "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
         "    return out;\n"
         "}\n"
         "\n"
@@ -1335,6 +1371,45 @@ Model *graphics_loadmodel(const char *filepath) {
     }
 
     return model;
+}
+
+/* Cached skin buffer: 64 bones x mat4, matching SkinData in the MSL. */
+#define MAX_SKIN_BONES 64
+#define SKIN_BUFFER_SIZE (MAX_SKIN_BONES * 16 * sizeof(float))
+static MetalBuffer *g_skinBuffer = NULL;
+
+void graphics_setbones(Model *model, const float *boneMatrices, uint32_t boneCount)
+{
+    (void)model;
+
+    if (!g_skinBuffer) {
+        g_skinBuffer = (MetalBuffer *)graphics_createuniformbuffer(SKIN_BUFFER_SIZE);
+        if (!g_skinBuffer) return;
+        /* Zeroed by Metal; bone 0 then acts as identity for unskinned meshes. */
+        memset(metal_buffer_get_contents(g_skinBuffer->buffer), 0, SKIN_BUFFER_SIZE);
+    }
+
+    if (!boneMatrices || boneCount == 0) {
+        memset(metal_buffer_get_contents(g_skinBuffer->buffer), 0, SKIN_BUFFER_SIZE);
+    } else {
+        if (boneCount > MAX_SKIN_BONES) boneCount = MAX_SKIN_BONES;
+        memcpy(metal_buffer_get_contents(g_skinBuffer->buffer),
+               boneMatrices, boneCount * 16 * sizeof(float));
+    }
+
+    metal_encoder_set_buffer(g_currentEncoder, g_skinBuffer->buffer, 0, 3);
+}
+
+void graphics_reuploadmodel(Model *model) {
+    if (!model) return;
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (mesh->vertexBuffer && mesh->vertices && mesh->vertexCount > 0) {
+            MetalBuffer *vb = (MetalBuffer *)mesh->vertexBuffer;
+            metal_buffer_update(vb->buffer, mesh->vertices,
+                                mesh->vertexCount * sizeof(Vertex));
+        }
+    }
 }
 
 void graphics_destroymodel(Model *model) {

@@ -32,6 +32,15 @@ static float g_elapsed = 0.0f;
 #define INSTANCED_GRID_COUNT (INSTANCED_GRID_SIZE * INSTANCED_GRID_SIZE)
 static Material g_gridMaterial = NULL;
 
+/* Animation. g_animIndex < 0 means rest pose. The bone matrix array is
+ * sized for the engine's 64-bone shader limit and reallocated if a loaded
+ * model turns out to need more. */
+#define MAX_SKIN_BONES 64
+static float g_boneMatrices[MAX_SKIN_BONES * 16];
+static int g_animIndex = -1;
+static ModelAnimationInfo g_animInfo = {NULL, 0.0f, 0};
+static int g_poseDumped;
+
 /* Camera + scene graph */
 static Camera g_camera;
 static Scene g_scene;
@@ -134,10 +143,19 @@ void framework_load(int argc, char *argv[])
                                model_get_animation_count(g_testModel));
                         ModelAnimationInfo info;
                         if (model_get_animation_info(g_testModel, 0, &info)) {
+                            g_animIndex = 0;
+                            g_animInfo = info;
                             printf("  clip '%s': %.3fs, %u keys/bone\n",
                                    info.name ? info.name : "(unnamed)",
                                    info.duration, info.keyCount);
                         }
+                        /* Imported assets use wildly different scales and
+                         * origins (this one spans ~35 units vertically and
+                         * sits far from the origin). Normalize so the demo
+                         * camera framing works for any model. */
+                        model_normalize(g_testModel, 2.0f);
+                        /* Vertex data changed after upload; push it back. */
+                        graphics_reuploadmodel(g_testModel);
                     }
                 } else {
                     fprintf(stderr, "Failed to load model from %s\n", modelPath);
@@ -264,6 +282,20 @@ void framework_draw(void)
                                        g_camera.position[0],
                                        g_camera.position[1],
                                        g_camera.position[2]);
+        }
+
+        /* Skinning. model_pose_by_index() flattens the bone hierarchy into
+         * skinning matrices for the given clip (or the rest pose when
+         * clipIndex < 0). Static models have no bones and skip this; their
+         * vertices all carry bone 0 at weight 1, which is the identity. */
+        if (model_is_skinned(g_testModel)) {
+            float t = (g_animInfo.name && g_animInfo.duration > 0.0f)
+                    ? fmodf(g_elapsed, g_animInfo.duration)
+                    : 0.0f;
+            if (model_pose_by_index(g_testModel, g_animIndex, t, g_boneMatrices)) {
+                graphics_setbones(g_testModel, g_boneMatrices,
+                                  model_get_bone_count(g_testModel));
+            }
         }
 
         scene_update(&g_scene);
