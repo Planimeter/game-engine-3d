@@ -8,6 +8,7 @@
 #include "text.h"
 #include "math_c.h"
 #include "camera.h"
+#include "physics.h"
 #include "scene.h"
 #include "terrain.h"
 #include <stdint.h>
@@ -51,29 +52,29 @@ static ModelAnimationInfo g_animInfo = {NULL, 0.0f, 0};
 #define TERRAIN_SEED 20261002u
 static Model *g_terrain = NULL;
 static Material g_terrainMaterial = NULL;
-/* Camera eye height above the ground, for the walk camera. */
-static const float g_eyeHeight = 2.2f;
 
 /* Controls overlay. Text objects are allocated once and rewritten each frame
  * by text_set(), which avoids per-frame allocation in the render loop. */
 #define HELP_LINE_COUNT 3
 static Text *g_helpText[HELP_LINE_COUNT];
-static int g_poseDumped;
 
 /* Camera + scene graph */
 static Camera g_camera;
 static Scene g_scene;
 static int g_rootNode = -1;
 
+/* Character controller. The world is fixed; this is what moves in it. The
+ * camera follows the character's eyes and owns nothing but orientation. */
+static Player g_player;
+
 /* Camera control input state (see framework_keypressed/keyreleased) */
 static int g_keyForward = 0;
 static int g_keyBack = 0;
 static int g_keyLeft = 0;
 static int g_keyRight = 0;
-static int g_keyUp = 0;
-static int g_keyDown = 0;
+static int g_keyJump = 0;
+static int g_keySprint = 0;
 static int g_lookActive = 0;
-static const float g_moveSpeed = 3.0f;      /* world units per second */
 static const float g_lookSensitivity = 0.0025f; /* radians per pixel */
 
 /* Releases everything framework_load created. Registered before
@@ -290,17 +291,21 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_vec3(g_terrainMaterial, "albedo", 0.32f, 0.46f, 0.24f);
     }
 
-    /* Camera starts on a ridge looking across the landscape, high enough to
-     * see the terrain rather than being inside a hill. */
+    /* Character starts on the surface well behind the scene cubes, so it
+     * does not spawn inside the test model. The camera sits at its eyes. */
+    player_init(&g_player, 0.0f, 14.0f, TERRAIN_SEED, TERRAIN_AMPLITUDE,
+                TERRAIN_EXTENT);
     {
-        float startY = terrain_height(0.0f, 0.0f, TERRAIN_SEED) * TERRAIN_AMPLITUDE;
-        camera_init(&g_camera, 0.0f, startY + 26.0f, 120.0f);
+        float eye[3];
+        player_eye(&g_player, eye);
+        camera_init(&g_camera, eye[0], eye[1], eye[2]);
         camera_zoom(&g_camera, 6.0f * 0.12f);
+        g_camera.pitch = 0.0f;
     }
 
-    /* Scene graph: spinning root with three children, so parent->child
-     * transform composition is visible (children orbit the root). Sited on
-     * the terrain so the cubes sit in the landscape rather than floating. */
+    /* Scene graph: a static root with three children, so parent->child
+     * transform composition is visible. Sited on the terrain so the cubes sit
+     * in the landscape rather than floating. */
     scene_init(&g_scene);
     g_rootNode = scene_create(&g_scene, -1);
     if (g_rootNode >= 0) {
@@ -342,31 +347,27 @@ void framework_update(uint64_t deltaTime)
      * g_elapsed * 0.5, which was the only motion on screen before the
      * terrain existed and read as the whole world rotating. */
 
-    /* Fly movement along the camera basis */
-    float fwd = (g_keyForward ? 1.0f : 0.0f) - (g_keyBack ? 1.0f : 0.0f);
-    float rgt = (g_keyRight ? 1.0f : 0.0f) - (g_keyLeft ? 1.0f : 0.0f);
-    float up = (g_keyUp ? 1.0f : 0.0f) - (g_keyDown ? 1.0f : 0.0f);
-    if (fwd != 0.0f || rgt != 0.0f || up != 0.0f) {
-        camera_move(&g_camera, fwd, rgt, up, g_moveSpeed * dt);
-    }
+    /* WASD drives the character along the ground; it never translates the
+     * camera. E/Q are gone as free-flight: vertical motion is gravity and
+     * the jump key, so the camera cannot be lifted out of the world. */
+    PlayerInput input;
+    memset(&input, 0, sizeof(input));
+    input.forward = (g_keyForward ? 1.0f : 0.0f) - (g_keyBack ? 1.0f : 0.0f);
+    input.right = (g_keyRight ? 1.0f : 0.0f) - (g_keyLeft ? 1.0f : 0.0f);
+    input.jump = g_keyJump;
+    input.sprint = g_keySprint;
+    g_keyJump = 0;
 
-    /* Walk on the terrain: keep the camera a fixed height above the ground,
-     * but only once it has descended to ground level. Starting high means
-     * the landscape can be surveyed first, and the descent eases down. */
-    if (g_terrain) {
-        float ground = terrain_height(g_camera.position[0],
-                                       g_camera.position[2], TERRAIN_SEED)
-                      * TERRAIN_AMPLITUDE;
-        float floor = ground + g_eyeHeight;
-        if (up != 0.0f) {
-            /* Manual flight: never sink through the surface. */
-            if (g_camera.position[1] < floor) {
-                g_camera.position[1] = floor;
-            }
-        } else if (g_camera.position[1] < floor + 12.0f) {
-            /* Close to the ground, so ease onto it rather than snap. */
-            g_camera.position[1] += (floor - g_camera.position[1]) * 0.15f;
-        }
+    player_update(&g_player, &input, g_camera.yaw, dt);
+
+    /* Camera follows the character's eyes. Only orientation is its own, so
+     * mouse-look turns the view without moving the player. */
+    {
+        float eye[3];
+        player_eye(&g_player, eye);
+        g_camera.position[0] = eye[0];
+        g_camera.position[1] = eye[1];
+        g_camera.position[2] = eye[2];
     }
 }
 
@@ -431,9 +432,10 @@ void framework_draw(void)
             graphics_drawmodel(g_testModel, g_litMaterial, mvp);
         }
 
-        /* Landscape. Drawn before the cubes so the depth buffer sorts them
-         * naturally; identity world matrix since the mesh is already in world
-         * space. */
+        /* Landscape. The mesh is already in world space, so its model matrix
+         * is the identity and the MVP is just proj * view. It cannot reuse
+         * `mvp` from the loop above, which still holds the last cube's
+         * transform and would lift the whole landscape by that offset. */
         if (g_terrain && g_terrainMaterial) {
             static const float identity[16] = {
                 1, 0, 0, 0,
@@ -447,6 +449,7 @@ void framework_draw(void)
                                        g_camera.position[2]);
             graphics_material_set_mat4(g_terrainMaterial, identity);
             graphics_bindmodeltexture(g_terrain, g_terrainMaterial);
+            math_multiply(mvp, proj, view);
             graphics_drawmodel(g_terrain, g_terrainMaterial, mvp);
         }
 
@@ -511,9 +514,9 @@ void framework_draw(void)
     /* Controls, so the bindings do not have to be remembered or guessed. */
     {
         static const char *lines[] = {
-            "WASD  move      E/Q  up/down",
-            "right-drag  look      wheel  zoom",
-            "NO_INSTANCED_GRID=1  skip grid"
+            "WASD  move     Shift  sprint     Space  jump",
+            "right-drag  look",
+            "the character walks the terrain; the world stays put"
         };
         float y = 30.0f;
         for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
@@ -569,15 +572,15 @@ void framework_mousefocus(int focus)
 void framework_focus(int focus)
 {
     /* Release every held key on focus loss. Key-up events are delivered to
-     * the focused window, so without this the camera keeps walking (or
-     * flying) forever after the window is switched away from. */
+     * the focused window, so without this the character keeps walking
+     * forever after the window is switched away from. */
     if (!focus) {
         g_keyForward = 0;
         g_keyBack = 0;
         g_keyLeft = 0;
         g_keyRight = 0;
-        g_keyUp = 0;
-        g_keyDown = 0;
+        g_keyJump = 0;
+        g_keySprint = 0;
         g_lookActive = 0;
     }
 }
@@ -591,8 +594,12 @@ void framework_keypressed(const char *key, const char *scancode, int isrepeat)
     else if (!strcmp(scancode, "S")) g_keyBack = 1;
     else if (!strcmp(scancode, "A")) g_keyLeft = 1;
     else if (!strcmp(scancode, "D")) g_keyRight = 1;
-    else if (!strcmp(scancode, "E")) g_keyUp = 1;
-    else if (!strcmp(scancode, "Q")) g_keyDown = 1;
+    /* Jump is edge-triggered, so holding Space does not bunny-hop. E and Q
+     * used to fly the camera up and down; vertical motion now comes only
+     * from gravity and the jump, so there is no binding that can lift the
+     * character out of the world. */
+    else if (!strcmp(scancode, "Space")) g_keyJump = 1;
+    else if (!strcmp(scancode, "Left Shift") || !strcmp(scancode, "Right Shift")) g_keySprint = 1;
 }
 
 void framework_keyreleased(const char *key, const char *scancode)
@@ -603,8 +610,7 @@ void framework_keyreleased(const char *key, const char *scancode)
     else if (!strcmp(scancode, "S")) g_keyBack = 0;
     else if (!strcmp(scancode, "A")) g_keyLeft = 0;
     else if (!strcmp(scancode, "D")) g_keyRight = 0;
-    else if (!strcmp(scancode, "E")) g_keyUp = 0;
-    else if (!strcmp(scancode, "Q")) g_keyDown = 0;
+    else if (!strcmp(scancode, "Left Shift") || !strcmp(scancode, "Right Shift")) g_keySprint = 0;
 }
 
 void framework_textedited(const char *text, int start, int length)
@@ -660,8 +666,10 @@ void framework_mousereleased(int x, int y, const char *button, int istouch)
 
 void framework_wheelmoved(int x, int y)
 {
+    /* The wheel does nothing. It used to zoom the camera, which read as an
+     * engine that only responded to scrolling. */
     (void)x;
-    camera_zoom(&g_camera, (float)y);
+    (void)y;
 }
 
 void framework_joystick_axis_motion(int which, int axis, int value) { (void)which; (void)axis; (void)value; }

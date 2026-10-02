@@ -1,8 +1,6 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 #include "framework.h"
-#include <stdio.h>
-#include <stdlib.h>
 #include "window.h"
 #include "SDL3/SDL.h"
 

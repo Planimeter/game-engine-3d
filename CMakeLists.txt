@@ -212,6 +212,7 @@ set(SOURCES
     src/main_sdl.c
     src/math_glm.cpp
     src/model_assimp.cpp
+    src/physics.c
     src/scene.c
     src/text.c
     src/timer_sdl.c

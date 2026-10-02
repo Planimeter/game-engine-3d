@@ -103,7 +103,9 @@ Written after the animation work, so it reflects what is actually verified rathe
 | Metal backend | 59–132 FPS; 4-cube scene graph, instanced grid, text overlay |
 | Vulkan backend (MoltenVK) | Zero validation errors; same scene at 132 FPS |
 | Instanced drawing | Both backends issue one instanced draw; 100-cube grid visible |
-| Camera + scene graph | Fly camera (WASD/EQ, right-drag look, wheel zoom); parent-child composition |
+| Camera + scene graph | Character-driven camera (WASD, Shift sprint, Space jump, right-drag look); parent-child composition |
+| Player physics | `src/physics.c`: gravity, jump, grounded state, slope rejection with axis slide, terrain bounds clamp, substepped integration. Verified by position dump: walked z 14 → 5.4, jump reached VY +6.2 with `grounded` 0 |
+| World is fixed | Nothing rotates or orbits the landscape; only the character and camera yaw move |
 | HiDPI | Retina backing store, logical-space text, density-scaled glyph rasterization |
 | Text | FreeType + HarfBuzz, LRU atlas eviction, parallel shaping and vertex build |
 | Skeleton parsing | 13 bones / 1 clip from FBX; 7 bones from glTF |
