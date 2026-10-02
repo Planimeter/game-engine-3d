@@ -73,6 +73,10 @@ static VkFramebuffer *framebuffers;
 /* 9. Shaders */
 static Shader vertShader;
 static Shader fragShader;
+/* Instanced vertex shader, paired with fragShader in graphics_draw_instanced */
+static Shader g_instanceVertShader;
+/* Cached per-instance transform buffer, bound as vertex buffer index 1 */
+static Buffer g_instanceBuffer;
 
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
@@ -119,15 +123,22 @@ static VmaAllocation depthAllocation = VK_NULL_HANDLE;
 static VkImageView *swapchainImageViews;
 
 /* 14. Resource Descriptors */
-#define MAX_BINDLESS_RESOURCES 16384
-static VkDescriptorPool bindlessDescriptorPool;
-static VkDescriptorSetLayout bindlessDescriptorSetLayout;
-static VkDescriptorSet bindlessDescriptorSet;
-
 /* Swapchain images are capped at 16 (see graphics_getswapchainimages), and
  * fences are per image, so this is the frames-in-flight bound too. */
 #define MAX_FRAMES_IN_FLIGHT 16
 
+/* Bindless texture slots. Nothing in the engine binds more than a couple at a
+ * time (text uses slot 0), and one set is allocated per frame in flight, so
+ * this has to stay modest: 16384 was both wasteful and over MoltenVK's
+ * maxPerStageDescriptorUpdateAfterBindSamplers limit of 1024. */
+#define MAX_BINDLESS_RESOURCES 64
+static VkDescriptorPool bindlessDescriptorPool;
+static VkDescriptorSetLayout bindlessDescriptorSetLayout;
+/* One set per swapchain image, for the same reason as uboDescriptorSets. */
+static VkDescriptorSet bindlessDescriptorSets[MAX_FRAMES_IN_FLIGHT];
+static int g_bindlessUpdateAfterBind;
+
+static void graphics_flushdescriptorwrites(void);
 /* UBO descriptor set (set 1) — bindless uniform buffers for transform + material data */
 #define MAX_UBO_SLOTS 16
 static VkDescriptorPool uboDescriptorPool;
@@ -137,6 +148,18 @@ static VkDescriptorSetLayout uboDescriptorSetLayout;
  * vkUpdateDescriptorSets from invalidating a set a submitted frame still
  * references (VUID-vkCmdDraw-commandBuffer-recording). */
 static VkDescriptorSet uboDescriptorSets[MAX_FRAMES_IN_FLIGHT];
+
+/* Descriptor writes are deferred to just before vkCmdBindDescriptorSets.
+ * graphics_binduniformbuffer()/graphics_bindtexture() are called mid-frame
+ * (every material change, and text rebinds a texture each frame), but a
+ * vkUpdateDescriptorSets on a set that is already bound to the command buffer
+ * being recorded invalidates that buffer — even within a single frame. So
+ * bind* only records intent here and graphics_flushdescriptorwrites() applies
+ * it, after the fence for imageIndex has been waited on and before the bind. */
+static VkDescriptorBufferInfo g_pendingUboInfo[MAX_UBO_SLOTS];
+static int g_pendingUboValid[MAX_UBO_SLOTS];
+static VkDescriptorImageInfo g_pendingImageInfo[MAX_BINDLESS_RESOURCES];
+static int g_pendingImageValid[MAX_BINDLESS_RESOURCES];
 
 typedef struct {
     VkBuffer buffer;
@@ -457,15 +480,33 @@ static void graphics_createdevice()
         }
     }
 
-    /* Enable Vulkan 1.2 features for bindless rendering */
+    /* Enable Vulkan 1.2 features for bindless rendering.
+     *
+     * These must be *queried* from the device, not just asserted: enabling a
+     * feature the device does not support makes vkCreateDevice invalid, and
+     * silently-unsupported descriptor indexing breaks the bindless set's
+     * UPDATE_AFTER_BIND pool flag. */
+    VkPhysicalDeviceVulkan12Features supported12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    VkPhysicalDeviceFeatures2 supportedFeatures = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    supportedFeatures.pNext = &supported12;
+    vkGetPhysicalDeviceFeatures2(physicalDevices[0], &supportedFeatures);
+
     VkPhysicalDeviceVulkan12Features vulkan12Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-    vulkan12Features.descriptorIndexing = VK_TRUE;
-    vulkan12Features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-    vulkan12Features.descriptorBindingPartiallyBound = VK_TRUE;
-    vulkan12Features.descriptorBindingVariableDescriptorCount = VK_TRUE;
-    vulkan12Features.runtimeDescriptorArray = VK_TRUE;
-    vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-    vulkan12Features.bufferDeviceAddress = VK_TRUE;
+    vulkan12Features.descriptorIndexing = supported12.descriptorIndexing;
+    vulkan12Features.shaderSampledImageArrayNonUniformIndexing = supported12.shaderSampledImageArrayNonUniformIndexing;
+    vulkan12Features.descriptorBindingPartiallyBound = supported12.descriptorBindingPartiallyBound;
+    vulkan12Features.descriptorBindingVariableDescriptorCount = supported12.descriptorBindingVariableDescriptorCount;
+    vulkan12Features.runtimeDescriptorArray = supported12.runtimeDescriptorArray;
+    vulkan12Features.descriptorBindingSampledImageUpdateAfterBind = supported12.descriptorBindingSampledImageUpdateAfterBind;
+    vulkan12Features.bufferDeviceAddress = supported12.bufferDeviceAddress;
+
+    /* The bindless set's pool uses UPDATE_AFTER_BIND, which requires this
+     * feature. Without it, fall back to a non-update-after-bind pool. */
+    g_bindlessUpdateAfterBind = supported12.descriptorBindingSampledImageUpdateAfterBind == VK_TRUE;
+
+    if (!supported12.descriptorIndexing) {
+        fprintf(stderr, "Vulkan: device lacks descriptorIndexing; bindless textures unavailable\n");
+    }
 
     // Find suitable queue family first
     graphicsQueueFamily = graphics_findqueuefamily(physicalDevices[0]);
@@ -704,13 +745,17 @@ static void graphics_createbindlessdescriptors()
     binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
     bindingFlags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
-                   VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT |
-                   VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+                   VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+    if (g_bindlessUpdateAfterBind) {
+        bindingFlags |= VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+    }
 
     bindingFlagsInfo.bindingCount = 1;
     bindingFlagsInfo.pBindingFlags = &bindingFlags;
 
-    layoutInfo.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    layoutInfo.flags = g_bindlessUpdateAfterBind
+                     ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+                     : 0;
     layoutInfo.bindingCount = 1;
     layoutInfo.pBindings = &binding;
     layoutInfo.pNext = &bindingFlagsInfo;
@@ -724,10 +769,10 @@ static void graphics_createbindlessdescriptors()
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-pools */
     poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSize.descriptorCount = MAX_BINDLESS_RESOURCES;
+    poolSize.descriptorCount = MAX_BINDLESS_RESOURCES * MAX_FRAMES_IN_FLIGHT;
 
-    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
-    poolInfo.maxSets = 1;
+    poolInfo.flags = g_bindlessUpdateAfterBind ? VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT : 0;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
 
@@ -739,21 +784,28 @@ static void graphics_createbindlessdescriptors()
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-allocation */
-    variableDescriptorCount = MAX_BINDLESS_RESOURCES;
+    {
+        VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
+        uint32_t counts[MAX_FRAMES_IN_FLIGHT];
+        for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+            layouts[f] = bindlessDescriptorSetLayout;
+            counts[f] = MAX_BINDLESS_RESOURCES;
+        }
 
-    variableDescriptorCountInfo.descriptorSetCount = 1;
-    variableDescriptorCountInfo.pDescriptorCounts = &variableDescriptorCount;
+        variableDescriptorCountInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        variableDescriptorCountInfo.pDescriptorCounts = counts;
 
-    allocInfo.descriptorPool = bindlessDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &bindlessDescriptorSetLayout;
-    allocInfo.pNext = &variableDescriptorCountInfo;
+        allocInfo.descriptorPool = bindlessDescriptorPool;
+        allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        allocInfo.pSetLayouts = layouts;
+        allocInfo.pNext = &variableDescriptorCountInfo;
 
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkAllocateDescriptorSets */
-    result = vkAllocateDescriptorSets(device, &allocInfo, &bindlessDescriptorSet);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to allocate bindless descriptor set: %d\n", result);
-        exit(EXIT_FAILURE);
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkAllocateDescriptorSets */
+        result = vkAllocateDescriptorSets(device, &allocInfo, bindlessDescriptorSets);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to allocate bindless descriptor sets: %d\n", result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -1036,6 +1088,44 @@ static int graphics_createshaders()
     fragSource = NULL;
     free(vertSource);
     vertSource = NULL;
+
+    /* Instanced vertex shader: the model matrix arrives per instance as
+     * vertex attributes 5-8. Failure is non-fatal — graphics_draw_instanced
+     * falls back to per-instance draws when this module is missing. */
+    {
+        char   *src = NULL;
+        size_t  srcSize = filesystem_fileread((void **)&src, "shaders/triangle_instanced.vert");
+        if (!src || srcSize == 0) {
+            fprintf(stderr, "Failed to read shaders/triangle_instanced.vert\n");
+        } else {
+            shaderc_compile_options_t options = shaderc_compile_options_initialize();
+            shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+            shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+            shaderc_compilation_result_t result = shaderc_compile_into_spv(
+                g_shaderc_compiler, src, srcSize, shaderc_glsl_vertex_shader, "shader", "main", options);
+            shaderc_compile_options_release(options);
+
+            if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+                fprintf(stderr, "Instanced vertex shader compilation failed:\n%s\n",
+                        shaderc_result_get_error_message(result));
+                shaderc_result_release(result);
+            } else {
+                size_t spvSize = shaderc_result_get_length(result);
+                VkShaderModuleCreateInfo moduleInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+                moduleInfo.codeSize = spvSize;
+                moduleInfo.pCode = (const uint32_t *)shaderc_result_get_bytes(result);
+                VkResult vkResult = vkCreateShaderModule(device, &moduleInfo, NULL,
+                                                         (VkShaderModule *)&g_instanceVertShader);
+                if (vkResult != VK_SUCCESS) {
+                    fprintf(stderr, "Failed to create instanced vertex shader module: %d\n", vkResult);
+                    g_instanceVertShader = VK_NULL_HANDLE;
+                }
+                shaderc_result_release(result);
+            }
+            free(src);
+        }
+    }
+
     return 1;
 }
 
@@ -1736,9 +1826,13 @@ void graphics_predraw()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html#renderpass-commands */
     vkCmdBeginRenderPass(commandBuffers[imageIndex], &renderPassBegin, VK_SUBPASS_CONTENTS_INLINE);
 
+    /* Apply any binduniformbuffer()/bindtexture() calls from the previous
+     * frame before binding, so no write lands on an already-bound set. */
+    graphics_flushdescriptorwrites();
+
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#vkCmdBindDescriptorSets */
     vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+                           pipelineLayout, 0, 1, &bindlessDescriptorSets[imageIndex], 0, NULL);
 
     /* Bind this frame's UBO descriptor set at set 1 */
     if (imageIndex < MAX_FRAMES_IN_FLIGHT) {
@@ -2189,28 +2283,88 @@ void graphics_draw_instanced(Model *model,
      * this before graphics_predraw() would place it outside the render pass. */
     graphics_setmaterial(mat);
 
-    /* Draw each instance as its own call rather than through a per-instance
-     * vertex binding.
-     *
-     * The instanced pipeline crashed inside MoltenVK's SPIR-V-to-MSL
-     * translator (MVKShaderModule::getMTLFunction). The validation layers point
-     * at the underlying cause: this backend keeps a single uboDescriptorSet for
-     * every frame and refreshes it via graphics_binduniformbuffer() while
-     * earlier frames are still in flight, so draws get recorded against a
-     * descriptor set in an invalid state
-     * (VUID-vkCmdDraw-commandBuffer-recording). Fixing that properly means one
-     * descriptor set per frame in flight, which is a separate change to the
-     * descriptor pool and its allocation.
-     *
-     * Until then this is correct but not fast: N draws instead of one. */
-    for (size_t i = 0; i < count; i++) {
-        float mvp[16];
-        if (viewProjection4x4) {
-            math_multiply(mvp, viewProjection4x4, &transforms4x4[i * 16]);
-        } else {
-            memcpy(mvp, &transforms4x4[i * 16], sizeof(mvp));
+    /* Per-instance mat4s as vertex binding 1, stepped per instance. */
+    size_t needed = count * sizeof(float) * 16;
+    GPUBuffer *instBuf = (GPUBuffer *)g_instanceBuffer;
+    if (!instBuf || instBuf->size < needed) {
+        if (instBuf) {
+            graphics_destroybuffer((Buffer)instBuf);
         }
-        graphics_drawmodel(model, mat, mvp);
+        instBuf = (GPUBuffer *)graphics_createvertexbuffer(NULL, needed);
+        if (!instBuf) {
+            return;
+        }
+        g_instanceBuffer = (Buffer)instBuf;
+    }
+
+    Pipeline p = NULL;
+    if (g_instanceVertShader && fragShader) {
+        RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
+        p = graphics_createpipeline(g_instanceVertShader, fragShader, VERTEX_FORMAT_INSTANCE, state);
+    }
+
+    if (!p) {
+        /* No instanced pipeline (shader missing or creation failed): fall back
+         * to one ordinary draw per instance. Correct, just not one call. */
+        for (size_t i = 0; i < count; i++) {
+            float mvp[16];
+            if (viewProjection4x4) {
+                math_multiply(mvp, viewProjection4x4, &transforms4x4[i * 16]);
+            } else {
+                memcpy(mvp, &transforms4x4[i * 16], sizeof(mvp));
+            }
+            graphics_drawmodel(model, mat, mvp);
+        }
+        return;
+    }
+
+    graphics_updatebuffer((Buffer)instBuf, transforms4x4, needed);
+
+    if (currentPipeline != (VkPipeline)p) {
+        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)p);
+        currentPipeline = (VkPipeline)p;
+    }
+
+    /* Shared view-projection; the per-instance model matrices come from the
+     * vertex binding, so the push-constant model slot stays identity. */
+    {
+        struct {
+            float mvp[16];
+            float model[16];
+        } pushData;
+        static const float identity[16] = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        if (viewProjection4x4) {
+            memcpy(pushData.mvp, viewProjection4x4, sizeof(pushData.mvp));
+        } else {
+            memcpy(pushData.mvp, identity, sizeof(pushData.mvp));
+        }
+        memcpy(pushData.model, identity, sizeof(pushData.model));
+        vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout,
+                           VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushData), &pushData);
+    }
+
+    {
+        VkDeviceSize offsets[2] = {0, 0};
+        VkBuffer vertexBuffers[2] = {VK_NULL_HANDLE, instBuf->buffer};
+        uint32_t instanceCount = (uint32_t)count;
+
+        for (uint32_t i = 0; i < model->meshCount; i++) {
+            Mesh *mesh = &model->meshes[i];
+            VkBuffer vertexBuffer = (VkBuffer)mesh->vertexBuffer;
+            if (!vertexBuffer || !mesh->indexBuffer || mesh->indexCount == 0) {
+                continue;
+            }
+            vertexBuffers[0] = vertexBuffer;
+
+            vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 2, vertexBuffers, offsets);
+            vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, instanceCount, 0, 0, 0);
+        }
     }
 }
 
@@ -2554,34 +2708,69 @@ void graphics_destroybuffer(Buffer buf)
 void graphics_binduniformbuffer(Buffer buf, unsigned slot)
 {
     GPUBuffer *buffer = (GPUBuffer *)buf;
-    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    VkDescriptorBufferInfo bufferInfo;
 
     if (!buffer || slot >= MAX_UBO_SLOTS) {
         return;
     }
 
-    /* Write only the set belonging to the frame being recorded. Its fence has
-     * already been waited on (see graphics_update), so no in-flight command
-     * buffer can reference it. Writing the shared set instead would invalidate
-     * every previously submitted frame
-     * (VUID-vkCmdDraw-commandBuffer-recording). */
+    /* Recorded, not applied — see graphics_flushdescriptorwrites(). */
+    g_pendingUboInfo[slot].buffer = buffer->buffer;
+    g_pendingUboInfo[slot].offset = 0;
+    g_pendingUboInfo[slot].range = buffer->size;
+    g_pendingUboValid[slot] = 1;
+}
+
+/* Apply the writes recorded by graphics_binduniformbuffer()/graphics_bindtexture().
+ * Must run after the fence for imageIndex has been waited on and before the
+ * descriptor sets are bound for the frame. */
+static void graphics_flushdescriptorwrites()
+{
+    VkWriteDescriptorSet writes[MAX_UBO_SLOTS];
+    int n = 0;
+
     if (imageIndex >= MAX_FRAMES_IN_FLIGHT) {
         return;
     }
 
-    bufferInfo.buffer = buffer->buffer;
-    bufferInfo.offset = 0;
-    bufferInfo.range = buffer->size;
+    for (unsigned i = 0; i < MAX_UBO_SLOTS; i++) {
+        if (!g_pendingUboValid[i]) {
+            continue;
+        }
+        memset(&writes[n], 0, sizeof(writes[n]));
+        writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[n].dstSet = uboDescriptorSets[imageIndex];
+        writes[n].dstBinding = i;
+        writes[n].dstArrayElement = 0;
+        writes[n].descriptorCount = 1;
+        writes[n].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        writes[n].pBufferInfo = &g_pendingUboInfo[i];
+        n++;
+    }
+    if (n > 0) {
+        vkUpdateDescriptorSets(device, (uint32_t)n, writes, 0, NULL);
+    }
 
-    write.dstSet = uboDescriptorSets[imageIndex];
-    write.dstBinding = slot;
-    write.dstArrayElement = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    write.pBufferInfo = &bufferInfo;
+    n = 0;
+    for (unsigned i = 0; i < MAX_BINDLESS_RESOURCES; i++) {
+        if (!g_pendingImageValid[i]) {
+            continue;
+        }
+        memset(&writes[n], 0, sizeof(writes[n]));
+        writes[n].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[n].dstSet = bindlessDescriptorSets[imageIndex];
+        writes[n].dstBinding = 0;
+        writes[n].dstArrayElement = i;
+        writes[n].descriptorCount = 1;
+        writes[n].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        writes[n].pImageInfo = &g_pendingImageInfo[i];
+        n++;
+    }
+    if (n > 0) {
+        vkUpdateDescriptorSets(device, (uint32_t)n, writes, 0, NULL);
+    }
 
-    vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
+    memset(g_pendingUboValid, 0, sizeof(g_pendingUboValid));
+    memset(g_pendingImageValid, 0, sizeof(g_pendingImageValid));
 }
 
 Texture graphics_createtexture(Texture src)
@@ -2839,25 +3028,16 @@ void graphics_destroytexture(Texture tex)
 void graphics_bindtexture(Texture tex, unsigned slot)
 {
     GPUTexture *texture = (GPUTexture *)tex;
-    VkWriteDescriptorSet write = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    VkDescriptorImageInfo imageInfo;
 
     if (!texture || slot >= MAX_BINDLESS_RESOURCES) {
         return;
     }
 
-    imageInfo.sampler = texture->sampler;
-    imageInfo.imageView = texture->view;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-    write.dstSet = bindlessDescriptorSet;
-    write.dstBinding = 0;
-    write.dstArrayElement = slot;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo = &imageInfo;
-
-    vkUpdateDescriptorSets(device, 1, &write, 0, NULL);
+    /* Recorded, not applied — see graphics_flushdescriptorwrites(). */
+    g_pendingImageInfo[slot].sampler = texture->sampler;
+    g_pendingImageInfo[slot].imageView = texture->view;
+    g_pendingImageInfo[slot].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    g_pendingImageValid[slot] = 1;
 }
 
 RenderPass graphics_createpass(const char *name, RasterState state)
@@ -3043,8 +3223,9 @@ void graphics_beginpass(RenderPass pass)
         vkCmdBeginRenderPass(cmd, &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         /* Bind descriptor sets */
+        graphics_flushdescriptorwrites();
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+            pipelineLayout, 0, 1, &bindlessDescriptorSets[imageIndex], 0, NULL);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipelineLayout, 1, 1, &uboDescriptorSets[imageIndex], 0, NULL);
 
@@ -3099,8 +3280,9 @@ void graphics_beginpass(RenderPass pass)
         vkCmdBeginRenderPass(commandBuffers[imageIndex], &beginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         /* Re-bind descriptor sets */
+        graphics_flushdescriptorwrites();
         vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
+            pipelineLayout, 0, 1, &bindlessDescriptorSets[imageIndex], 0, NULL);
         vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipelineLayout, 1, 1, &uboDescriptorSets[imageIndex], 0, NULL);
 
@@ -3394,6 +3576,7 @@ void graphics_shutdown(void)
 // Helper function to get vertex input state for a format
 static void graphics_get_vertex_input_state(VertexFormat format,
                                              VkVertexInputBindingDescription *bindingDesc,
+                                             VkVertexInputBindingDescription *instanceDesc,
                                              VkVertexInputAttributeDescription *attrDescs,
                                              uint32_t *attrCount)
 {
@@ -3501,9 +3684,19 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
             attrDescs[4].offset = offsetof(Vertex, texCoords);
 
-            /* Instance transforms arrive as a uniform array indexed by
-             * gl_InstanceIndex, not as vertex attributes, so the layout is
-             * identical to VERTEX_FORMAT_FULL. */
+            /* Per-instance mat4 on binding 1, stepped per instance and read
+             * as vertex attributes 5-8 (one vec4 per matrix column). */
+            instanceDesc->binding = 1;
+            instanceDesc->stride = sizeof(float) * 16;
+            instanceDesc->inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+            for (uint32_t c = 0; c < 4; c++) {
+                attrDescs[5 + c].binding = 1;
+                attrDescs[5 + c].location = 5 + c;
+                attrDescs[5 + c].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                attrDescs[5 + c].offset = c * sizeof(float) * 4;
+            }
+            *attrCount = 9;
             break;
     }
 }
@@ -3591,8 +3784,8 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     VkVertexInputAttributeDescription attributeDescriptions[9] = {};
     uint32_t attributeCount = 0;
 
-    graphics_get_vertex_input_state(format, bindingDescription, attributeDescriptions,
-                                    &attributeCount);
+    graphics_get_vertex_input_state(format, bindingDescription, &bindingDescriptions[1],
+                                    attributeDescriptions, &attributeCount);
 
     vertShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module = pipeline->vertShader;
@@ -3609,6 +3802,11 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     vertexInput.pVertexBindingDescriptions = bindingDescriptions;
     vertexInput.vertexAttributeDescriptionCount = attributeCount;
     vertexInput.pVertexAttributeDescriptions = attributeDescriptions;
+
+    /* VERTEX_FORMAT_INSTANCE adds a second, per-instance binding */
+    if (format == VERTEX_FORMAT_INSTANCE) {
+        vertexInput.vertexBindingDescriptionCount = 2;
+    }
 
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
