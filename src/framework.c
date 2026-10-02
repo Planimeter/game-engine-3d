@@ -147,24 +147,30 @@ static void framework_shutdown(void)
     }
 }
 
-/* Sky gradient as a 1x64 texture sampled by dome height. Row 0 is the
- * zenith, row 63 the horizon. Three-stop blend: deep blue overhead, pale
- * blue at eye level, and a warm haze right at the skyline so the terrain
- * silhouette has something to sit against. */
+/* Sky gradient as a 1x64 texture sampled by dome height. The dome's V runs
+ * 1 at the zenith to 0 at the horizon, and a texture's row 0 lands at V = 0,
+ * so the rows are written horizon-first. Four stops: warm haze right at the
+ * skyline, pale blue above it, deeper blue, and deep blue overhead.
+ *
+ * The stops bunch toward the bottom, because most of the visible sky is the
+ * band just above the horizon and evenly spaced rows make that band read as
+ * a flat wash. */
 static void framework_create_sky_gradient(void)
 {
     enum { SKY_GRADIENT_H = 64 };
     unsigned char pixels[SKY_GRADIENT_H * 4];
 
+    /* { row fraction from horizon, r, g, b } */
     static const struct { float t; float r, g, b; } stops[] = {
-        {0.00f, 0.13f, 0.29f, 0.62f},  /* zenith */
-        {0.55f, 0.36f, 0.60f, 0.86f},  /* upper sky */
-        {0.88f, 0.68f, 0.80f, 0.92f},  /* pale horizon */
-        {1.00f, 0.90f, 0.86f, 0.78f},  /* haze at the skyline */
+        {0.00f, 0.90f, 0.85f, 0.76f},  /* haze at the skyline */
+        {0.10f, 0.74f, 0.83f, 0.92f},  /* pale just above */
+        {0.34f, 0.48f, 0.68f, 0.90f},  /* mid sky */
+        {1.00f, 0.16f, 0.34f, 0.70f},  /* zenith */
     };
     const int stopCount = (int)(sizeof(stops) / sizeof(stops[0]));
 
     for (int y = 0; y < SKY_GRADIENT_H; y++) {
+        /* Row 0 is the horizon, matching V = 0 on the dome. */
         float t = (float)y / (float)(SKY_GRADIENT_H - 1);
 
         int hi = 0;
@@ -186,14 +192,17 @@ static void framework_create_sky_gradient(void)
 
 /* Build the dome and its material. Vertices are unit-sized so the model
  * matrix can carry both the radius and the camera-centred offset, and the
- * UV runs 0 at the zenith to 1 at the horizon to match the gradient rows.
+ * UV runs 1 at the zenith to 0 at the horizon to match the gradient rows.
  * Faces are wound so the inside is front-facing: the camera is inside. */
 static void framework_create_sky(void)
 {
     const int segments = SKY_SEGMENTS;
     const int rings = SKY_RINGS;
-    const int vertexCount = (rings + 1) * (segments + 1);
-    const int indexCount = rings * segments * 6;
+    /* One extra vertex at the nadir closes the dome into a sphere. A
+     * hemisphere alone leaves a hole straight down, which shows as the sky
+     * arcing overhead with terrain visible through the gap. */
+    const int vertexCount = (rings + 1) * (segments + 1) + 1;
+    const int indexCount = rings * segments * 6 + segments * 3;
 
     /* Same 22-float layout as the terrain mesh: position(3) normal(3)
      * uv(2) tangent(3) bitangent(3) boneWeights(4) boneIndices(4). */
@@ -207,9 +216,8 @@ static void framework_create_sky(void)
     }
 
     for (int r = 0; r <= rings; r++) {
-        /* theta 0 at the zenith, pi/2 at the horizon. The dome stops at the
-         * horizon: below that the terrain covers the view, and a full sphere
-         * would show its underside through the gaps at the mesh edge. */
+        /* theta 0 at the zenith, pi/2 at the horizon, where the terrain
+         * takes over. */
         float t = (float)r / (float)rings;
         float theta = t * 3.14159265f * 0.5f;
         float sinT = sinf(theta);
@@ -243,6 +251,27 @@ static void framework_create_sky(void)
              * side survives back-face culling. */
             indices[n++] = (uint32_t)a; indices[n++] = (uint32_t)b; indices[n++] = (uint32_t)c;
             indices[n++] = (uint32_t)b; indices[n++] = (uint32_t)d; indices[n++] = (uint32_t)c;
+        }
+    }
+
+    /* Close the bottom with a fan to a single nadir vertex. The cap sits
+     * below the terrain and is only there so the view down is sky rather
+     * than a hole; it samples the darkest row so it reads as shadowed
+     * ground haze. */
+    {
+        int nadir = (rings + 1) * (segments + 1);
+        float *v = &verts[(size_t)nadir * 22];
+        v[0] = 0.0f; v[1] = -1.0f; v[2] = 0.0f;           /* straight down */
+        v[3] = 0.0f; v[4] = 1.0f; v[5] = 0.0f;           /* inward */
+        v[6] = 0.0f; v[7] = 0.0f;                       /* horizon row */
+        v[8] = 1.0f; v[9] = 0.0f; v[10] = 0.0f;
+        v[11] = 0.0f; v[12] = 0.0f; v[13] = 1.0f;
+        v[14] = 1.0f; v[15] = 0.0f; v[16] = 0.0f; v[17] = 0.0f;
+
+        for (int s = 0; s < segments; s++) {
+            int a = rings * (segments + 1) + s;
+            int b = a + 1;
+            indices[n++] = (uint32_t)a; indices[n++] = (uint32_t)b; indices[n++] = (uint32_t)nadir;
         }
     }
 
