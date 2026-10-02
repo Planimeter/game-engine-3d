@@ -128,7 +128,7 @@ Both backends now draw instanced batches in a single call: Metal via `[[instance
 First runtime test of the Vulkan backend, on macOS through Homebrew's MoltenVK. Five real bugs, all invisible to `clang++ -fsyntax-only`:
 
 - **`GAME_USE_VULKAN=ON`** CMake option builds `graphics_vulkan.cpp` on macOS instead of Metal, defines `GRAPHICS_VULKAN` for `window_sdl.c` (requests `SDL_WINDOW_VULKAN` + real surface) and `font.c` (keeps the SPIR-V text shaders instead of the MSL fallback), and adds `-Wl,-rpath,/opt/homebrew/lib` so volk/SDL can dlopen the loader by leaf name.
-- **`GAME_VULKAN_VALIDATION=ON`** CMake option defines `_DEBUG`, which gates the validation-layer probe in `graphics_createinstance()`. Beware: a `-O0 -D_DEBUG` build also trips a pre-existing `std::system_error: mutex lock failed` in the job system, unrelated to Vulkan — so enable validation without forcing `-O0`.
+- **`GAME_VULKAN_VALIDATION=ON`** CMake option defines `_DEBUG`, which gates the validation-layer probe in `graphics_createinstance()`. Avoid `-O0`; see "The -O0 mutex crash is in OpenAL Soft" below.
 - **`volkInitialize()` must precede every Vulkan call, including the `_DEBUG` validation probe.** `graphics_createinstance()` used to call `vkEnumerateInstanceLayerProperties` ~30 lines *before* `volkInitialize()`, so any `_DEBUG` build jumped to a null function pointer and crashed at startup with `EXC_BAD_ACCESS (address=0x0)`. Only the `_DEBUG` path hit it, which is why the release build ran fine. volkInitialize is now the first thing the function does.
 - **Run command needs the ICD**: the loader does not search Homebrew's prefix, so `VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json ./build/game.app/Contents/MacOS/game`. Without it: "Installed Vulkan Portability library doesn't implement the VK_KHR_surface extension" + `vkCreateInstance -9`.
 - **`graphics_createshader` ate SPIR-V**: shaderc only takes GLSL, so the font's `text.*.spv` blew up in the GLSL preprocessor. Now sniffs the SPIR-V magic (`\x03\x02\x23\x07`) and goes straight to `vkCreateShaderModule`.
@@ -160,7 +160,7 @@ Install with `brew install vulkan-validationlayers`, then build with `-DGAME_VUL
 VK_LAYER_PATH=/opt/homebrew/opt/vulkan-validationlayers/share/vulkan/explicit_layer.d \
 VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json ./build-vk/game.app/Contents/MacOS/game
 ```
-Two gotchas: stdout is buffered and lost on a crash, so pipe through `stdbuf -o0 -e0` or redirect to a file; and do **not** add `-O0`, which trips an unrelated pre-existing `std::system_error: mutex lock failed` in `job_pthread.c`.
+Two gotchas: stdout is buffered and lost on a crash, so pipe through `stdbuf -o0 -e0` or redirect to a file; and a plain `-O0 -D_DEBUG` build crashes on a `std::system_error` from OpenAL Soft — see "The -O0 mutex crash is in OpenAL Soft" below. `GAME_VULKAN_VALIDATION=ON` avoids needing `-O0` at all.
 
 ### Two more bugs validation caught (2026-10-02)
 - **`VK_KHR_portability_subset` was never enabled.** `vkCreateDevice()` only enabled `VK_KHR_swapchain`, but MoltenVK requires this whenever the device advertises it — `VUID-VkDeviceCreateInfo-pProperties-04451`. Now enabled conditionally on the device actually reporting it.
@@ -173,6 +173,13 @@ Two gotchas: stdout is buffered and lost on a crash, so pipe through `stdbuf -o0
 Verified with validation layers: `commandBuffer-recording` errors went to zero, scene still renders at 117 FPS.
 
 **This was the prerequisite for real Vulkan instancing.** The instanced pipeline itself is still unwritten — `shaders/triangle_instanced.vert` was removed and `VERTEX_FORMAT_INSTANCE` on Vulkan just reuses the plain vertex layout. Now that sets are per-frame, that path can be retried safely.
+
+### The `-O0` mutex crash is in OpenAL Soft, not the job system
+Earlier notes blamed `job_pthread.c`. That is wrong. There is no `std::mutex` anywhere in `src/` — the job system uses raw pthreads. `std::system_error: mutex lock failed` comes from **OpenAL Soft** (`third_party/openal-soft-1.25.1/` uses `std::mutex` throughout `core/helpers.cpp`, `core/logging.cpp`, `core/hrtf.cpp`, `alc/device.h`, `alc/events.h`), and it appears immediately after OpenAL logs `Failed to get audio device type`, i.e. when device enumeration fails on macOS.
+
+`audio_openal.c` already handles a null device correctly (`alcOpenDevice` returns NULL -> early return, and a failed context closes the device), so the throw is inside the library, on a path we do not call directly.
+
+**Workaround for debug builds:** `ALSOFT_DRIVERS=null` selects OpenAL's null output device and avoids enumeration entirely, which suppresses the failure. `GAME_VULKAN_VALIDATION=ON` defines `_DEBUG` for the validation layers without needing `-O0` at all, which is the better route.
 
 ### Remaining validation errors (pre-existing, not yet fixed)
 - `vkDestroyDevice` reports 13 leaked objects at shutdown (buffers, an image, image views). Cleanup ordering, not a rendering correctness issue.
