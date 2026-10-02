@@ -74,6 +74,12 @@ static id<CAMetalDrawable> g_currentDrawable = nil;
 
 /* Default sampler */
 static id<MTLSamplerState> g_defaultSampler = nil;
+
+/* 1x1 white fallback. Metal requires a bound texture wherever a shader
+ * declares one, and an unbound texture samples as zero — which would render
+ * untextured models black. Bound at slot 0 so every draw has a valid,
+ * neutral texture before any real one is bound. */
+static MetalTexture *g_whiteTexture = NULL;
 static MTLRenderPassDescriptor *g_renderPassDescriptor = nil;
 
 /* Uniform buffer */
@@ -957,6 +963,13 @@ void graphics_init() {
     sampDesc.tAddressMode = MTLSamplerAddressModeRepeat;
     g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];
     [sampDesc release];
+
+    /* The 3D fragment shader samples a texture unconditionally, so make sure
+     * a neutral one exists before the first draw. */
+    {
+        static const unsigned char white[4] = {255, 255, 255, 255};
+        g_whiteTexture = (MetalTexture *)graphics_createtexture_rgba(1, 1, white);
+    }
     
     /* Embedded 3D default shader (combined vertex + fragment in one MSL source).
      * Handles VERTEX_FORMAT_FULL: position(0), normal(1), tangent(2), bitangent(3), texcoord(4).
@@ -1033,14 +1046,21 @@ void graphics_init() {
         "\n"
         "fragment float4 fragment_main(\n"
         "    VertexOut in [[stage_in]],\n"
-        "    constant MaterialData &material [[buffer(2)]]\n"
+        "    constant MaterialData &material [[buffer(2)]],\n"
+        "    texture2d<float> diffuseTex [[texture(0)]],\n"
+        "    sampler diffuseSmp [[sampler(0)]]\n"
         ") {\n"
         "    float ambient  = material.floats[0];\n"
         "    float specular = material.floats[1];\n"
         "    float shininess = material.floats[2];\n"
+        /* floats[3] is the diffuse slot; graphics_bindmodeltexture() always
+         * binds a texture (1x1 white when the model has none), so this is
+         * safe to sample unconditionally. */
         "    float3 lightDir = material.vec3s_padded[0].xyz;\n"
         "    float3 cameraPos = material.vec3s_padded[1].xyz;\n"
         "    float3 albedo = material.vec3s_padded[2].xyz;\n"
+        "\n"
+        "    albedo *= diffuseTex.sample(diffuseSmp, in.texcoord).rgb;\n"
         "\n"
         "    float3 N = normalize(in.worldNormal);\n"
         "    float3 L = normalize(-lightDir);\n"   /* direction toward the light */
@@ -1439,13 +1459,45 @@ void graphics_bindskinidentity(void)
     }
 }
 
+/* 1x1 white fallback. Metal requires a bound texture wherever a shader
+ * declares one, and an unbound texture samples as zero — which would render
+ * untextured models black. Bound at slot 0 on init so every draw has a
+ * valid, neutral texture before any real one is bound. */
+
+static void metal_make_white_texture(void)
+{
+    static const unsigned char white[4] = {255, 255, 255, 255};
+    if (!g_whiteTexture) {
+        g_whiteTexture = (MetalTexture *)graphics_createtexture_rgba(1, 1, white);
+    }
+    if (g_whiteTexture) {
+        metal_encoder_set_fragment_texture(g_currentEncoder,
+                                           g_whiteTexture->texture, 0);
+        metal_encoder_set_fragment_sampler_state(g_currentEncoder,
+                                                 g_defaultSampler, 0);
+    }
+}
+
 void graphics_bindmodeltexture(Model *model, Material mat) {
-    (void)model;
-    (void)mat;
-    /* Texture sampling is not wired into the default Metal shader yet: adding
-     * texture2d<float> to fragment_main makes Metal require a bound texture
-     * on every draw, and an unbound one returns zero, blanking untextured
-     * models. Revisit once the shader has a fallback path. */
+    if (!model || !mat) {
+        metal_make_white_texture();
+        graphics_material_set_float(mat, "diffuseSlot", 0.0f);
+        return;
+    }
+
+    int slot = 0;
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (!mesh->diffuseTexture) continue;
+        slot = mesh->diffuseTextureSlot;
+        graphics_material_set_float(mat, "diffuseSlot", (float)slot);
+        graphics_bindtexture((Texture)mesh->diffuseTexture, (unsigned)slot);
+        return;
+    }
+
+    /* Untextured: fall back to white so the albedo passes through unchanged. */
+    metal_make_white_texture();
+    graphics_material_set_float(mat, "diffuseSlot", 0.0f);
 }
 
 void graphics_reuploadmodel(Model *model) {
