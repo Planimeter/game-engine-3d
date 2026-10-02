@@ -1337,6 +1337,16 @@ int graphics_isminimized() {
 }
 
 void graphics_predraw() {
+    /* Wait for the previous frame before touching any shared CPU-visible
+     * buffer. Without this the CPU runs ahead, and the next material pack
+     * overwrites the shared uniform buffer while the in-flight command
+     * buffer is still reading it — which shows up as flickering geometry.
+     * graphics_drawmodel() sidesteps this by copying per-draw data with
+     * setVertexBytes, but material uniforms have no such protection. */
+    if (g_currentCommandBuffer) {
+        [(id<MTLCommandBuffer>)g_currentCommandBuffer waitUntilCompleted];
+    }
+
     /* Get next drawable from Metal layer */
     g_currentDrawable = [g_metalLayer nextDrawable];
     if (!g_currentDrawable) {
