@@ -450,3 +450,8 @@ build-vk/
 
 # Debug build dir
 build-dbg/
+
+# Engine model assets live in Models/ and must be tracked. The blanket
+# *.obj rule exists for build artefacts (CMake compiler id checks).
+!Models/*.obj
+!Models/*.mtl
