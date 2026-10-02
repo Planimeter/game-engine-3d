@@ -132,8 +132,7 @@ First runtime test of the Vulkan backend, on macOS through Homebrew's MoltenVK. 
 - **Shader Variant System Is a No-Op**
   Assimp animation data (`mAnimations`, `mBones`) is completely ignored. The `Model` struct has no animation fields, and `model_assimp.cpp` doesn't process `aiScene::mAnimations`.
 
-- **No Error Return Codes — All Errors Call `exit()`**
-  Shader compilation failures, buffer creation failures, and resize errors all call `exit(EXIT_FAILURE)`. For a game engine, returning NULL or an enum error code would be more appropriate so the application can handle gracefully.
+- **~~No Error Return Codes — All Errors Call `exit()`~~** — partially fixed 2026-10-02: shader/buffer paths now return NULL/failure. Both backends already returned NULL from `graphics_create*buffer`/`graphics_createshader` (this issue was overstated for those); the Vulkan `exit()`s that mattered were in `graphics_createshader` (shaderc failure, module create) and `graphics_createshaders` (default-pipeline compile), now `return NULL` / `return 0` with callers logging and aborting startup or the resize instead of hard-exiting mid-frame. `graphics_createpipeline` now rejects NULL shaders. Still `exit(EXIT_FAILURE)`: Metal `graphics_init` (no device/view/layer — genuinely fatal at startup) and Vulkan's device/swapchain/renderpass init paths.
 
 ---
 

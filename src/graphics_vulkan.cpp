@@ -881,7 +881,7 @@ static void graphics_createframebuffers()
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html#shader-modules */
-static void graphics_createshaders()
+static int graphics_createshaders()
 {
     if (g_cachedVertSPIRV.data && g_cachedFragSPIRV.data) {
         /* Reuse cached SPIR-V on resize — skip shaderc recompilation */
@@ -892,7 +892,7 @@ static void graphics_createshaders()
         VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&vertShader);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create cached vert shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return 0;
         }
 
         createInfo.codeSize = g_cachedFragSPIRV.size;
@@ -900,9 +900,9 @@ static void graphics_createshaders()
         vkResult = vkCreateShaderModule(device, &createInfo, NULL, (VkShaderModule *)&fragShader);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create cached frag shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            return 0;
         }
-        return;
+        return 1;
     }
 
     char   *vertSource;
@@ -927,7 +927,9 @@ static void graphics_createshaders()
             fprintf(stderr, "Vertex shader compilation failed:\n%s\n",
                     shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            exit(EXIT_FAILURE);
+            free(fragSource);
+            free(vertSource);
+            return 0;
         }
 
         size_t spvSize = shaderc_result_get_length(result);
@@ -942,7 +944,9 @@ static void graphics_createshaders()
         shaderc_result_release(result);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create vert shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            free(fragSource);
+            free(vertSource);
+            return 0;
         }
     }
 
@@ -960,7 +964,9 @@ static void graphics_createshaders()
             fprintf(stderr, "Fragment shader compilation failed:\n%s\n",
                     shaderc_result_get_error_message(result));
             shaderc_result_release(result);
-            exit(EXIT_FAILURE);
+            free(fragSource);
+            free(vertSource);
+            return 0;
         }
 
         size_t spvSize = shaderc_result_get_length(result);
@@ -975,7 +981,9 @@ static void graphics_createshaders()
         shaderc_result_release(result);
         if (vkResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create frag shader module: %d\n", vkResult);
-            exit(EXIT_FAILURE);
+            free(fragSource);
+            free(vertSource);
+            return 0;
         }
     }
 
@@ -983,6 +991,7 @@ static void graphics_createshaders()
     fragSource = NULL;
     free(vertSource);
     vertSource = NULL;
+    return 1;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap10.html#pipelines-graphics */
@@ -1481,7 +1490,10 @@ void graphics_init()
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
-    graphics_createshaders();
+    if (!graphics_createshaders()) {
+        fprintf(stderr, "Vulkan: shader setup failed, cannot continue\n");
+        return;
+    }
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createswapchain();
     graphics_getswapchainimages();
@@ -1518,7 +1530,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
             break;
         default:
             fprintf(stderr, "Unknown shader stage: %d\n", stage);
-            exit(EXIT_FAILURE);
+            return NULL;
     }
 
     /* Input already compiled to SPIR-V (magic 0x07230203 LE, e.g. font .spv
@@ -1532,7 +1544,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
         VkResult spvResult = vkCreateShaderModule(device, &spvInfo, NULL, &shaderModule);
         if (spvResult != VK_SUCCESS) {
             fprintf(stderr, "Failed to create shader module: %d\n", spvResult);
-            exit(EXIT_FAILURE);
+            return NULL;
         }
         return shaderModule;
     }
@@ -1541,7 +1553,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     shaderc_compile_options_t options = shaderc_compile_options_initialize();
     if (!options) {
         fprintf(stderr, "Failed to create shaderc compile options\n");
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     shaderc_compile_options_set_target_env(
@@ -1578,7 +1590,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
         fprintf(stderr, "Shader compilation failed:\n%s\n",
                 shaderc_result_get_error_message(result));
         shaderc_result_release(result);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     /* Create VkShaderModule from compiled SPIR-V */
@@ -1591,7 +1603,7 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     if (vkResult != VK_SUCCESS) {
         fprintf(stderr, "Failed to create shader module: %d\n", vkResult);
         shaderc_result_release(result);
-        exit(EXIT_FAILURE);
+        return NULL;
     }
 
     shaderc_result_release(result);
@@ -3191,9 +3203,11 @@ void graphics_resize()
     graphics_createsemaphores();
     graphics_getswapchainimages();
     graphics_createdepthresources();
-    graphics_createshaders();
-    graphics_createrenderpass();
-    graphics_creategraphicspipeline();
+    if (!graphics_createshaders()) {
+        fprintf(stderr, "Vulkan: shader rebuild failed during resize\n");
+        return;
+    }
+    graphics_createrenderpass();    graphics_creategraphicspipeline();
     graphics_createcommandpools();
     graphics_allocatecommandbuffers();
     graphics_createfences();
@@ -3451,6 +3465,10 @@ static void graphics_get_blend_state(BlendMode blendMode, VkPipelineColorBlendAt
 Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
                                  VertexFormat format, RasterState state)
 {
+    if (!_vertShader || !_fragShader) {
+        return NULL;
+    }
+
     GPUPipeline *pipeline = (GPUPipeline *)malloc(sizeof(GPUPipeline));
     if (!pipeline) {
         fprintf(stderr, "Failed to allocate pipeline\n");
