@@ -91,6 +91,41 @@ Assimp's `aiScene::mAnimations` and `aiBone` data was loaded but never read, and
 
 `animation_with_skeleton.fbx` (13 bones, 1 clip) parses fine but **does not render**: its mesh vertices and node hierarchy disagree on a world-space offset that the mesh-space correction folded into `boneInverseBind` does not fully resolve. Normalization there also reports scale 1.09 / height 1.83 against vertices at x≈29, i.e. the two spaces disagree. Unresolved — diagnosing it needs another FBX to compare against, since the glTF path works.
 
+---
+
+## Roadmap (2026-10-02)
+
+Written after the animation work, so it reflects what is actually verified rather than what was intended.
+
+### Verified working (built *and* run on this machine)
+| Area | Evidence |
+|---|---|
+| Metal backend | 59–132 FPS; 4-cube scene graph, instanced grid, text overlay |
+| Vulkan backend (MoltenVK) | Zero validation errors; same scene at 132 FPS |
+| Instanced drawing | Both backends issue one instanced draw; 100-cube grid visible |
+| Camera + scene graph | Fly camera (WASD/EQ, right-drag look, wheel zoom); parent-child composition |
+| HiDPI | Retina backing store, logical-space text, density-scaled glyph rasterization |
+| Text | FreeType + HarfBuzz, LRU atlas eviction, parallel shaping and vertex build |
+| Skeleton parsing | 13 bones / 1 clip from FBX; 7 bones from glTF |
+| GPU skinning | `quad_skin.glb` renders through the full path |
+| Shutdown | No leaked Vulkan objects on the normal teardown path |
+
+### Known broken
+- **`animation_with_skeleton.fbx` does not render.** Parses fine, but its mesh vertices and node hierarchy disagree on a world-space offset that the mesh-space correction does not resolve. Needs a second FBX to compare against. The glTF path is fine, so this is an exporter-convention gap, not a pipeline defect.
+- **`-O0` debug builds crash** in a `std::system_error` from OpenAL Soft when device enumeration fails on macOS. Third-party. Use `GAME_VULKAN_VALIDATION=ON` instead of `-O0`, or `ALSOFT_DRIVERS=null`.
+
+### Highest-value next work
+1. **Material textures on models.** `graphics_bindtexture()` and the bindless descriptor set exist and are exercised by the font atlas, but nothing binds a *model's* diffuse/normal maps — `framework.c` calls no texture setter at all. This is what blocks any real-looking content, and it is a small job: load `MaterialData`'s texture paths, create GPU textures, bind them, sample in the fragment shader.
+2. **MSDF text.** The long-standing font recommendation and the only item from the old research list still open. Sharp at any size, which a 16px-rasterized atlas cannot do.
+3. **Animation blending.** One clip plays, with a hard `fmod` and no crossfade. Multi-clip blending needs a pose buffer rather than the single matrix array uploaded today.
+4. **Render passes.** `graphics_createpass()`/`graphics_beginpass()` are implemented on both backends but unused — no shadows or post-processing consume them yet. Shadow mapping is the natural first user.
+5. **FBX space diagnosis** (above).
+6. **The shader-variant system is still a no-op**, so material behaviour cannot vary per object.
+
+### Explicitly not worth doing yet
+- More Vulkan hardening. It reports zero validation errors; further work there is speculative.
+- Chasing the job system. It is correct as written (`job_wait` executes pending work, O(1) handle lookup, work stealing). `MAX_JOBS = 65536` with no monitoring is a theoretical limit, not a bug.
+
 ## Camera & Scene System (2026-10-01)
 
 Fly camera + fixed-pool scene graph replacing the hardcoded look-at in `framework_draw`.
