@@ -124,11 +124,19 @@ static VkDescriptorPool bindlessDescriptorPool;
 static VkDescriptorSetLayout bindlessDescriptorSetLayout;
 static VkDescriptorSet bindlessDescriptorSet;
 
+/* Swapchain images are capped at 16 (see graphics_getswapchainimages), and
+ * fences are per image, so this is the frames-in-flight bound too. */
+#define MAX_FRAMES_IN_FLIGHT 16
+
 /* UBO descriptor set (set 1) — bindless uniform buffers for transform + material data */
 #define MAX_UBO_SLOTS 16
 static VkDescriptorPool uboDescriptorPool;
 static VkDescriptorSetLayout uboDescriptorSetLayout;
-static VkDescriptorSet uboDescriptorSet;
+/* One set per swapchain image. The engine fences per image, so an image's
+ * set is only rewritten once its fence has signalled — that keeps
+ * vkUpdateDescriptorSets from invalidating a set a submitted frame still
+ * references (VUID-vkCmdDraw-commandBuffer-recording). */
+static VkDescriptorSet uboDescriptorSets[MAX_FRAMES_IN_FLIGHT];
 
 typedef struct {
     VkBuffer buffer;
@@ -782,9 +790,9 @@ static void graphics_createubodescriptors()
     }
 
     poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSize.descriptorCount = MAX_UBO_SLOTS;
+    poolSize.descriptorCount = MAX_UBO_SLOTS * MAX_FRAMES_IN_FLIGHT;
 
-    poolInfo.maxSets = 1;
+    poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
     poolInfo.poolSizeCount = 1;
     poolInfo.pPoolSizes = &poolSize;
 
@@ -794,14 +802,23 @@ static void graphics_createubodescriptors()
         exit(EXIT_FAILURE);
     }
 
-    allocInfo.descriptorPool = uboDescriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &uboDescriptorSetLayout;
+    /* One set per swapchain image, so a set is only ever rewritten once its
+     * fence has signalled and no in-flight frame can still reference it. */
+    {
+        VkDescriptorSetLayout layouts[MAX_FRAMES_IN_FLIGHT];
+        for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; f++) {
+            layouts[f] = uboDescriptorSetLayout;
+        }
 
-    result = vkAllocateDescriptorSets(device, &allocInfo, &uboDescriptorSet);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to allocate UBO descriptor set: %d\n", result);
-        exit(EXIT_FAILURE);
+        allocInfo.descriptorPool = uboDescriptorPool;
+        allocInfo.descriptorSetCount = MAX_FRAMES_IN_FLIGHT;
+        allocInfo.pSetLayouts = layouts;
+
+        result = vkAllocateDescriptorSets(device, &allocInfo, uboDescriptorSets);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to allocate UBO descriptor sets: %d\n", result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -1723,9 +1740,11 @@ void graphics_predraw()
     vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
                            pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
 
-    /* Bind UBO descriptor set at set 1 */
-    vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-                           pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+    /* Bind this frame's UBO descriptor set at set 1 */
+    if (imageIndex < MAX_FRAMES_IN_FLIGHT) {
+        vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
+                               pipelineLayout, 1, 1, &uboDescriptorSets[imageIndex], 0, NULL);
+    }
 
     viewport.width    = w;
     viewport.height   = h;
@@ -2542,11 +2561,20 @@ void graphics_binduniformbuffer(Buffer buf, unsigned slot)
         return;
     }
 
+    /* Write only the set belonging to the frame being recorded. Its fence has
+     * already been waited on (see graphics_update), so no in-flight command
+     * buffer can reference it. Writing the shared set instead would invalidate
+     * every previously submitted frame
+     * (VUID-vkCmdDraw-commandBuffer-recording). */
+    if (imageIndex >= MAX_FRAMES_IN_FLIGHT) {
+        return;
+    }
+
     bufferInfo.buffer = buffer->buffer;
     bufferInfo.offset = 0;
     bufferInfo.range = buffer->size;
 
-    write.dstSet = uboDescriptorSet;
+    write.dstSet = uboDescriptorSets[imageIndex];
     write.dstBinding = slot;
     write.dstArrayElement = 0;
     write.descriptorCount = 1;
@@ -3018,7 +3046,7 @@ void graphics_beginpass(RenderPass pass)
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+            pipelineLayout, 1, 1, &uboDescriptorSets[imageIndex], 0, NULL);
 
         VkViewport vp = {};
         vp.width = (float)beginInfo.renderArea.extent.width;
@@ -3074,7 +3102,7 @@ void graphics_beginpass(RenderPass pass)
         vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
             pipelineLayout, 0, 1, &bindlessDescriptorSet, 0, NULL);
         vkCmdBindDescriptorSets(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS,
-            pipelineLayout, 1, 1, &uboDescriptorSet, 0, NULL);
+            pipelineLayout, 1, 1, &uboDescriptorSets[imageIndex], 0, NULL);
 
         VkViewport vp = {};
         vp.width = (float)w;

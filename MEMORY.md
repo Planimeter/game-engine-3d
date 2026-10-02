@@ -121,7 +121,7 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 
 Verified on Metal at 59-60 FPS: instances render at distinct transforms.
 
-**Vulkan has no instanced pipeline yet** — see "Vulkan on MoltenVK" for the crash and the descriptor-set problem behind it. `graphics_draw_instanced()` there loops `graphics_drawmodel()` per instance (folding the view-projection into each matrix), which is correct but gives no performance benefit. Metal is the only backend that draws instanced batches in one call.
+**Vulkan has no instanced pipeline yet** — the descriptor-set problem that blocked it is fixed (see "Per-frame descriptor sets"), so it can be retried. `graphics_draw_instanced()` there currently loops `graphics_drawmodel()` per instance (folding the view-projection into each matrix), which is correct but gives no performance benefit. Metal is the only backend that draws instanced batches in one call.
 
 ## Vulkan on MoltenVK (2026-10-01)
 
@@ -150,8 +150,14 @@ Two gotchas: stdout is buffered and lost on a crash, so pipe through `stdbuf -o0
 ### Two more bugs validation caught (2026-10-02)
 - **`VK_KHR_portability_subset` was never enabled.** `vkCreateDevice()` only enabled `VK_KHR_swapchain`, but MoltenVK requires this whenever the device advertises it — `VUID-VkDeviceCreateInfo-pProperties-04451`. Now enabled conditionally on the device actually reporting it.
 - **The real reason instancing crashed.** Not MoltenVK's shader translator and not the instance data layout, as first assumed. `graphics_draw_instanced()` built a pipeline and bound uniforms through `graphics_binduniformbuffer()`, but this backend keeps a **single `uboDescriptorSet` shared across all frames** and refreshes it via `vkUpdateDescriptorSets` while earlier frames are still in flight. Every draw therefore gets recorded against a descriptor set in an invalid state — `VUID-vkCmdDraw-commandBuffer-recording` / `VUID-vkCmdPushConstants-commandBuffer-recording`, with `VkDescriptorSet ... was destroyed or updated without UPDATE_AFTER_BIND`. The `descriptorBindingSampledImageUpdateAfterBind` feature is enabled but never queried, so the pool lacks the `UPDATE_AFTER_BIND` flag that would make rebinding legal.
-  Proper fix: **one descriptor set per frame in flight** (allocate `framesInFlight` sets, write each before recording, never update a set a submitted frame still references). That is a change to the descriptor pool and allocation code, not yet done.
-  Until then `graphics_draw_instanced()` on Vulkan loops `graphics_drawmodel()` per instance — correct, but N draws instead of one.
+  Proper fix: ~~one descriptor set per frame in flight~~ — **done**, see "Per-frame descriptor sets" below.
+  `graphics_draw_instanced()` on Vulkan still loops `graphics_drawmodel()` per instance, which is correct but gives no performance benefit.
+
+### Per-frame descriptor sets (2026-10-02)
+`graphics_binduniformbuffer()` used to write the one shared `uboDescriptorSet` while earlier frames were still in flight, invalidating every submitted command buffer. There is now a `uboDescriptorSets[MAX_FRAMES_IN_FLIGHT]` array — one set per swapchain image. Fences were already per image and waited on before recording, so the set for the frame being recorded is guaranteed idle, and `graphics_binduniformbuffer()` writes only `uboDescriptorSets[imageIndex]`. All four `vkCmdBindDescriptorSets` call sites bind that set too. Pool sizing scales with `MAX_UBO_SLOTS * MAX_FRAMES_IN_FLIGHT`; `MAX_FRAMES_IN_FLIGHT` is 16, reusing the existing swapchain image cap rather than introducing a separate bound.
+Verified with validation layers: `commandBuffer-recording` errors went to zero, scene still renders at 117 FPS.
+
+**This was the prerequisite for real Vulkan instancing.** The instanced pipeline itself is still unwritten — `shaders/triangle_instanced.vert` was removed and `VERTEX_FORMAT_INSTANCE` on Vulkan just reuses the plain vertex layout. Now that sets are per-frame, that path can be retried safely.
 
 ### Remaining validation errors (pre-existing, not yet fixed)
 - `VUID-VkPipelineLayoutCreateInfo-descriptorType-03022` / `pSetLayouts-03036`: the bindless descriptor set declares 16384 sampled-image samplers, over MoltenVK's `maxPerStageDescriptorUpdateAfterBindSamplers` limit of 1024. Harmless on this device but wrong.
