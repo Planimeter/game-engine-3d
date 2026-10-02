@@ -67,6 +67,24 @@ static Model *g_sky = NULL;
 static Material g_skyMaterial = NULL;
 static Texture g_skyGradient = NULL;
 static void framework_create_sky(void);
+static void framework_update_sky_gradient(void);
+static float framework_sun_elevation(void);
+static void framework_set_look(int active);
+
+/* Day/night. One cycle drives everything time-of-day: the sky gradient's
+ * colours and the direction every lit material shades from. A single sun
+ * vector is the source of truth, so the landscape cannot end up lit from
+ * one side while the sky shows the sun somewhere else.
+ *
+ * The cycle is a fixed period, not a wall clock, so the sky is reproducible
+ * and the world stays fixed rather than drifting with real time. */
+#define DAY_LENGTH_SECONDS 240.0f
+#define SUN_TILT 0.35f        /* radians off vertical; 0 puts the sun overhead */
+/* Start mid-morning: the sun is up, the sky is blue, and the first thing on
+ * screen is daylight rather than a black landscape. */
+static float g_timeOfDay = 0.34f; /* fraction of a cycle: 0 midnight, 0.5 noon */
+static float g_sunDirection[3] = {0.0f, 1.0f, 0.0f};
+static int g_skyGradientDirty = 1;
 
 /* Controls overlay. Text objects are allocated once and rewritten each frame
  * by text_set(), which avoids per-frame allocation in the render loop. */
@@ -149,45 +167,145 @@ static void framework_shutdown(void)
 
 /* Sky gradient as a 1x64 texture sampled by dome height. The dome's V runs
  * 1 at the zenith to 0 at the horizon, and a texture's row 0 lands at V = 0,
- * so the rows are written horizon-first. Four stops: warm haze right at the
- * skyline, pale blue above it, deeper blue, and deep blue overhead.
+ * so the rows are written horizon-first.
  *
- * The stops bunch toward the bottom, because most of the visible sky is the
- * band just above the horizon and evenly spaced rows make that band read as
- * a flat wash. */
-static void framework_create_sky_gradient(void)
+ * The palette is keyed to the sun's height: daylight reads blue overhead with
+ * a pale horizon, dawn and dusk push orange into the low band, and night
+ * falls to a near-black dome. Colours are interpolated between four times of
+ * day and then written once, so the update is a small texture upload rather
+ * than a per-fragment branch.
+ *
+ * Stops bunch toward the bottom because most of the visible sky is the band
+ * just above the horizon. */
+typedef struct {
+    float t;   /* fraction of the cycle */
+    float zenith[3];
+    float horizon[3];
+} SkyPalette;
+
+static const SkyPalette SKY_PALETTE[] = {
+    /* midnight */
+    {0.00f, {0.02f, 0.03f, 0.08f}, {0.05f, 0.06f, 0.12f}},
+    /* first light */
+    {0.21f, {0.10f, 0.14f, 0.34f}, {0.62f, 0.42f, 0.34f}},
+    /* morning */
+    {0.30f, {0.16f, 0.34f, 0.70f}, {0.74f, 0.83f, 0.92f}},
+    /* noon */
+    {0.50f, {0.16f, 0.34f, 0.70f}, {0.74f, 0.83f, 0.92f}},
+    /* evening */
+    {0.70f, {0.20f, 0.26f, 0.56f}, {0.92f, 0.62f, 0.40f}},
+    /* dusk */
+    {0.79f, {0.09f, 0.11f, 0.28f}, {0.66f, 0.36f, 0.30f}},
+    /* midnight again, so the cycle wraps cleanly */
+    {1.00f, {0.02f, 0.03f, 0.08f}, {0.05f, 0.06f, 0.12f}},
+};
+#define SKY_PALETTE_COUNT ((int)(sizeof(SKY_PALETTE) / sizeof(SKY_PALETTE[0])))
+
+static void framework_sample_sky_palette(float zenith[3], float horizon[3])
 {
+    /* Wrap into [0, 1) so the last entry is only ever reached as the wrap
+     * point from 0.79 to 0.0. */
+    float t = g_timeOfDay;
+    t = t - floorf(t);
+
+    int hi = 0;
+    while (hi + 1 < SKY_PALETTE_COUNT - 1 && SKY_PALETTE[hi + 1].t < t) {
+        hi++;
+    }
+    int lo = hi;
+    if (SKY_PALETTE[hi].t > t && hi > 0) {
+        lo = hi - 1;
+    }
+
+    float span = SKY_PALETTE[hi].t - SKY_PALETTE[lo].t;
+    float f = span > 1e-6f ? (t - SKY_PALETTE[lo].t) / span : 0.0f;
+
+    for (int c = 0; c < 3; c++) {
+        zenith[c] = SKY_PALETTE[lo].zenith[c] +
+                    (SKY_PALETTE[hi].zenith[c] - SKY_PALETTE[lo].zenith[c]) * f;
+        horizon[c] = SKY_PALETTE[lo].horizon[c] +
+                    (SKY_PALETTE[hi].horizon[c] - SKY_PALETTE[lo].horizon[c]) * f;
+    }
+}
+
+/* Sun direction on the celestial sphere, tilted so the sun does not pass
+ * straight overhead. `dir` points from the world toward the sun. */
+static void framework_compute_sun(float dir[3])
+{
+    /* 0 at midnight (below the horizon), 0.5 at noon (overhead). */
+    float angle = (g_timeOfDay - 0.5f) * 2.0f * 3.14159265f;
+    float x = cosf(angle) * SUN_TILT * 3.0f;
+    float y = sinf(angle);
+    float z = cosf(angle) * 0.45f;
+
+    float len = sqrtf(x * x + y * y + z * z);
+    if (len > 1e-6f) {
+        x /= len;
+        y /= len;
+        z /= len;
+    }
+
+    dir[0] = x;
+    dir[1] = y;
+    dir[2] = z;
+}
+
+/* How high the sun is, 0 on the horizon and 1 overhead. Fades to 0 below the
+ * horizon so dusk glow stops at the skyline. */
+static float framework_sun_elevation(void)
+{
+    framework_compute_sun(g_sunDirection);
+    return g_sunDirection[1] > 0.0f ? g_sunDirection[1] : 0.0f;
+}
+
+static void framework_update_sky_gradient(void)
+{
+    if (!g_skyGradient) {
+        return;
+    }
+
     enum { SKY_GRADIENT_H = 64 };
     unsigned char pixels[SKY_GRADIENT_H * 4];
 
-    /* { row fraction from horizon, r, g, b } */
-    static const struct { float t; float r, g, b; } stops[] = {
-        {0.00f, 0.90f, 0.85f, 0.76f},  /* haze at the skyline */
-        {0.10f, 0.74f, 0.83f, 0.92f},  /* pale just above */
-        {0.34f, 0.48f, 0.68f, 0.90f},  /* mid sky */
-        {1.00f, 0.16f, 0.34f, 0.70f},  /* zenith */
-    };
-    const int stopCount = (int)(sizeof(stops) / sizeof(stops[0]));
+    float zenith[3];
+    float horizon[3];
+    framework_sample_sky_palette(zenith, horizon);
+
+    /* Sun glow near the skyline, strongest while the sun is low. Below the
+     * horizon there is no sun to see. */
+    float sunUp = framework_sun_elevation();
 
     for (int y = 0; y < SKY_GRADIENT_H; y++) {
         /* Row 0 is the horizon, matching V = 0 on the dome. */
-        float t = (float)y / (float)(SKY_GRADIENT_H - 1);
+        float v = (float)y / (float)(SKY_GRADIENT_H - 1);
 
-        int hi = 0;
-        while (hi + 1 < stopCount && stops[hi + 1].t < t) {
-            hi++;
+        /* Blend horizon -> zenith with a curve that keeps most of the range
+         * near the bottom, then add glow that falls off with height. */
+        float blend = v * v * (3.0f - 2.0f * v) * 0.55f + v * 0.45f;
+        float glow = (1.0f - v) * (1.0f - v) * sunUp * 0.55f;
+
+        for (int c = 0; c < 3; c++) {
+            float color = horizon[c] + (zenith[c] - horizon[c]) * blend;
+            /* Warm the low band toward the sun colour. */
+            color += glow * (c == 0 ? 1.0f : (c == 1 ? 0.62f : 0.28f));
+            pixels[y * 4 + c] = (unsigned char)(255.0f * (color < 0.0f ? 0.0f :
+                                                (color > 1.0f ? 1.0f : color)));
         }
-        int lo = hi > 0 ? hi - 1 : 0;
-        float span = stops[hi].t - stops[lo].t;
-        float f = span > 1e-6f ? (t - stops[lo].t) / span : 0.0f;
-
-        pixels[y * 4 + 0] = (unsigned char)(255.0f * (stops[lo].r + (stops[hi].r - stops[lo].r) * f));
-        pixels[y * 4 + 1] = (unsigned char)(255.0f * (stops[lo].g + (stops[hi].g - stops[lo].g) * f));
-        pixels[y * 4 + 2] = (unsigned char)(255.0f * (stops[lo].b + (stops[hi].b - stops[lo].b) * f));
         pixels[y * 4 + 3] = 255;
     }
 
-    g_skyGradient = graphics_createtexture_rgba(1, SKY_GRADIENT_H, pixels);
+    graphics_updatetexture(g_skyGradient, 0, 0, 1, SKY_GRADIENT_H, pixels);
+    g_skyGradientDirty = 0;
+}
+
+static void framework_create_sky_gradient(void)
+{
+    /* One row to start, then the real update writes the full height. The
+     * texture is created empty so the update path is the only one that ever
+     * decides what the sky looks like. */
+    static const unsigned char empty[4] = {0, 0, 0, 255};
+    g_skyGradient = graphics_createtexture_rgba(1, 1, empty);
+    framework_update_sky_gradient();
 }
 
 /* Build the dome and its material. Vertices are unit-sized so the model
@@ -285,7 +403,6 @@ static void framework_create_sky(void)
     }
 
     framework_create_sky_gradient();
-
     /* Full ambient and no light contribution: the dome stands in for the
      * background, not for a lit surface, so shading it would only darken
      * the gradient. */
@@ -432,6 +549,10 @@ void framework_load(int argc, char *argv[])
         }
     }
 
+    /* Resolve the sun before anything reads it: the sky gradient and every
+     * lit material take their light direction from this one vector, so the
+     * landscape cannot end up lit from a different angle than the sky. */
+    framework_compute_sun(g_sunDirection);
     framework_create_sky();
 
     /* Lit material: floats are ambient/specular/shininess, vec3s are
@@ -448,7 +569,8 @@ void framework_load(int argc, char *argv[])
          * leaving it unset would feed the shader garbage. */
         graphics_material_set_float(g_litMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_float(g_litMaterial, "normalSlot", -1.0f);
-        graphics_material_set_vec3(g_litMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_litMaterial, "lightDir", -g_sunDirection[0],
+                                   -g_sunDirection[1], -g_sunDirection[2]);
         graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
     }
@@ -464,7 +586,8 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_gridMaterial, "shininess", 48.0f);
         graphics_material_set_float(g_gridMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_float(g_gridMaterial, "normalSlot", -1.0f);
-        graphics_material_set_vec3(g_gridMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_gridMaterial, "lightDir", -g_sunDirection[0],
+                                   -g_sunDirection[1], -g_sunDirection[2]);
         graphics_material_set_vec3(g_gridMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_gridMaterial, "albedo", 0.35f, 0.6f, 0.85f);
         static const float identity[16] = {
@@ -485,7 +608,8 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_terrainMaterial, "shininess", 8.0f);
         graphics_material_set_float(g_terrainMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_float(g_terrainMaterial, "normalSlot", -1.0f);
-        graphics_material_set_vec3(g_terrainMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_terrainMaterial, "lightDir", -g_sunDirection[0],
+                                   -g_sunDirection[1], -g_sunDirection[2]);
         graphics_material_set_vec3(g_terrainMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_terrainMaterial, "albedo", 0.32f, 0.46f, 0.24f);
     }
@@ -606,6 +730,23 @@ void framework_update(uint64_t deltaTime)
      * g_elapsed * 0.5, which was the only motion on screen before the
      * terrain existed and read as the whole world rotating. */
 
+    /* Advance the day. The cycle is a fixed period rather than a wall clock,
+     * so the world stays fixed and the sky is reproducible. The gradient is
+     * only re-uploaded when the palette has moved far enough to see, which
+     * keeps this off the per-frame path. */
+    {
+        float before = g_timeOfDay;
+        g_timeOfDay += dt / DAY_LENGTH_SECONDS;
+        g_timeOfDay -= floorf(g_timeOfDay);
+
+        /* A hundredth of a cycle is well under one gradient row, so anything
+         * finer would upload identical bytes. */
+        if (fabsf(g_timeOfDay - before) > 0.0f) {
+            framework_compute_sun(g_sunDirection);
+            framework_update_sky_gradient();
+        }
+    }
+
     /* WASD drives the character along the ground; it never translates the
      * camera. E/Q are gone as free-flight: vertical motion is gravity and
      * the jump key, so the camera cannot be lifted out of the world. */
@@ -648,12 +789,69 @@ void framework_draw(void)
         camera_projection_reversez(&g_camera, aspect, proj);
         camera_view(&g_camera, view);
 
-        /* Specular highlight tracks the camera */
-        if (g_litMaterial) {
-            graphics_material_set_vec3(g_litMaterial, "cameraPos",
-                                       g_camera.position[0],
-                                       g_camera.position[1],
-                                       g_camera.position[2]);
+        /* Every lit surface shades from the same sun the sky is drawn with,
+         * and the shader wants the direction light travels, so the world
+         * toward the sun is negated here.
+         *
+         * Once the sun is below the horizon the direct term clamps to zero
+         * and only ambient remains, so ambient needs a real floor or the
+         * landscape turns to black at night. Albedo is tinted toward the
+         * sky's night colour at the same time, which is what makes it read
+         * as moonlight rather than as an unlit scene. */
+        {
+            float elevation = framework_sun_elevation();
+            /* A floor high enough to read as moonlit ground rather than an
+             * unlit scene: at night only this term survives, since the
+             * direct term clamps to zero once the sun is down. */
+            float ambient = 0.30f + 0.14f * elevation;
+
+            /* Fraction of the frame that reads as night, used to tint. */
+            float night = 1.0f - elevation * 3.0f;
+            if (night < 0.0f) night = 0.0f;
+            if (night > 1.0f) night = 1.0f;
+
+            /* Pull the albedos toward a cold blue-grey. Terrain green loses
+             * the most saturation, which is what makes night read as blue
+             * rather than merely dark. */
+            static const float MOON[3] = {0.34f, 0.38f, 0.52f};
+
+            if (g_litMaterial) {
+                graphics_material_set_vec3(g_litMaterial, "cameraPos",
+                                           g_camera.position[0],
+                                           g_camera.position[1],
+                                           g_camera.position[2]);
+                graphics_material_set_vec3(g_litMaterial, "lightDir",
+                                           -g_sunDirection[0],
+                                           -g_sunDirection[1],
+                                           -g_sunDirection[2]);
+                graphics_material_set_float(g_litMaterial, "ambient", ambient);
+                graphics_material_set_vec3(g_litMaterial, "albedo",
+                                           0.85f + (MOON[0] - 0.85f) * night,
+                                           0.55f + (MOON[1] - 0.55f) * night,
+                                           0.25f + (MOON[2] - 0.25f) * night);
+            }
+            if (g_terrainMaterial) {
+                graphics_material_set_vec3(g_terrainMaterial, "lightDir",
+                                           -g_sunDirection[0],
+                                           -g_sunDirection[1],
+                                           -g_sunDirection[2]);
+                graphics_material_set_float(g_terrainMaterial, "ambient", ambient);
+                graphics_material_set_vec3(g_terrainMaterial, "albedo",
+                                           0.32f + (MOON[0] - 0.32f) * night,
+                                           0.46f + (MOON[1] - 0.46f) * night,
+                                           0.24f + (MOON[2] - 0.24f) * night);
+            }
+            if (g_gridMaterial) {
+                graphics_material_set_vec3(g_gridMaterial, "lightDir",
+                                           -g_sunDirection[0],
+                                           -g_sunDirection[1],
+                                           -g_sunDirection[2]);
+                graphics_material_set_float(g_gridMaterial, "ambient", ambient);
+                graphics_material_set_vec3(g_gridMaterial, "albedo",
+                                           0.35f + (MOON[0] - 0.35f) * night,
+                                           0.60f + (MOON[1] - 0.60f) * night,
+                                           0.85f + (MOON[2] - 0.85f) * night);
+            }
         }
 
         /* Skinning. model_pose_by_index() flattens the bone hierarchy into
@@ -799,8 +997,8 @@ void framework_draw(void)
     {
         static const char *lines[] = {
             "WASD  move     Shift  sprint     Space  jump",
-            "right-drag  look",
-            "the character walks the terrain; the world stays put"
+            "mouse  look     Esc  release cursor",
+            ""
         };
         float y = 30.0f;
         for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
@@ -809,6 +1007,14 @@ void framework_draw(void)
                       0.0f, 0.0f, 0.0f, 0.0f);
             y += 18.0f;
         }
+
+        /* Pointer state, because a captured cursor gives no other cue that
+         * clicking will not reach the rest of the desktop. */
+        text_set(g_helpText[2], g_lookActive
+                 ? "click or Esc to release the cursor"
+                 : "the character walks the terrain; the world stays put");
+        text_draw(g_helpText[2], 8.0f, y - 18.0f, 0.0f, 1.0f, 1.0f,
+                  0.0f, 0.0f, 0.0f, 0.0f);
     }
     font_end_batch(g_testFont);
 }
@@ -829,7 +1035,7 @@ void framework_visible(int visible)
      * release input here too rather than only in framework_focus. */
     if (!visible) {
         framework_releaseinput();
-        window_setmouserelative(0);
+        framework_set_look(0);
     }
 }
 
@@ -866,7 +1072,7 @@ void framework_focus(int focus)
      * forever after the window is switched away from. */
     if (!focus) {
         framework_releaseinput();
-        window_setmouserelative(0);
+        framework_set_look(0);
     }
 }
 
@@ -874,6 +1080,14 @@ void framework_keypressed(const char *key, const char *scancode, int isrepeat)
 {
     (void)key;
     if (isrepeat) return;
+
+    /* Escape releases the pointer. Without this the cursor is trapped with no
+     * way back to the rest of the desktop, which is the one thing pointer
+     * capture must never do. */
+    if (!strcmp(scancode, "Escape")) {
+        framework_set_look(0);
+        return;
+    }
 
     if (!strcmp(scancode, "W")) g_keyForward = 1;
     else if (!strcmp(scancode, "S")) g_keyBack = 1;
@@ -906,8 +1120,16 @@ void framework_textinput(const char *text)
 {
 }
 
+/* Mouse look. Conventional first-person: a click captures the pointer and the
+ * camera follows it continuously, Escape releases it. Holding a button to look
+ * was the previous scheme and it is wrong twice over — the camera freezes
+ * whenever the button is not down, so there is no way to look while walking,
+ * and a right-button drag conflicts with anything else that wants that
+ * button. */
 void framework_mousemoved(int x, int y, int dx, int dy, int istouch)
 {
+    (void)x;
+    (void)y;
     if (!g_lookActive || istouch) {
         return;
     }
@@ -925,28 +1147,44 @@ void framework_mousemoved(int x, int y, int dx, int dy, int istouch)
     camera_look(&g_camera, (float)dx, (float)dy, g_lookSensitivity);
 }
 
-void framework_mousepressed(int x, int y, const char *button, int istouch)
+/* Capture or release the pointer. Relative mode hides the cursor and reports
+ * motion relative to the last position, which is what mouse look needs; the
+ * grab keeps it from sliding off the window and coming back as a huge delta. */
+static void framework_set_look(int active)
 {
-    if (!istouch && button && !strcmp(button, "right")) {
-        g_lookActive = 1;
-        window_setmouserelative(1);
-    } else if (!istouch && button && !strcmp(button, "left")) {
-        /* Left click grabs keyboard focus. SDL delivers key events to the
-         * focused window, so without this the controls appear dead until
-         * the user clicks. */
+    if (active == g_lookActive) {
+        return;
+    }
+    g_lookActive = active;
+    window_setmouserelative(active);
+    if (active) {
         window_setkeyboardfocus(1);
     }
 }
 
+void framework_mousepressed(int x, int y, const char *button, int istouch)
+{
+    (void)x;
+    (void)y;
+    (void)button;
+    if (istouch) {
+        return;
+    }
+    /* Any click grabs the pointer, so the game is playable without aiming at
+     * a particular button first. Clicking again while captured releases it,
+     * which matters on a trackpad where Escape is awkward to reach. */
+    framework_set_look(!g_lookActive);
+}
+
 void framework_mousereleased(int x, int y, const char *button, int istouch)
 {
-    if (!istouch && button && !strcmp(button, "right")) {
-        /* Always drop relative mode on release. If a release is ever missed
-         * the camera would otherwise keep spinning from stray deltas with no
-         * way back. */
-        g_lookActive = 0;
-        window_setmouserelative(0);
-    }
+    /* Releasing no longer changes the look state: the camera tracks the
+     * pointer as soon as it is captured, so there is no button to hold and no
+     * release to miss. */
+    (void)x;
+    (void)y;
+    (void)button;
+    (void)istouch;
 }
 
 void framework_wheelmoved(int x, int y)
