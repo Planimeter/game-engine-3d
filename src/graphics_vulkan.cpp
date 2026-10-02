@@ -2324,23 +2324,35 @@ void graphics_bindmodeltexture(Model *model, Material mat)
     }
 
     /* Vulkan uses the bindless array (set 0), indexed by the shader through
-     * the material's diffuseSlot float. Slot 0 is the font atlas's, so model
-     * textures are assigned from 1 by model_loadtextures() and tracked here. */
+     * the material's diffuseSlot/normalSlot floats. Slot 0 is the font
+     * atlas's, so model textures are assigned from 1. */
     static int nextSlot = 1;
-    static void *lastBound[1];
+    static void *bound[2];
+
+    int diffuseSlot = -1;
+    int normalSlot = -1;
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
-        if (!mesh->diffuseTexture) continue;
-        if (mesh->diffuseTexture != lastBound[0]) {
-            graphics_bindtexture((Texture)mesh->diffuseTexture,
-                                 (unsigned)nextSlot);
-            graphics_material_set_float(mat, "diffuseSlot", (float)nextSlot);
-            lastBound[0] = mesh->diffuseTexture;
+        if (mesh->diffuseTexture && diffuseSlot < 0 && nextSlot < MAX_BINDLESS_RESOURCES) {
+            diffuseSlot = nextSlot++;
+            graphics_bindtexture((Texture)mesh->diffuseTexture, (unsigned)diffuseSlot);
+            bound[0] = mesh->diffuseTexture;
         }
-        return;
+        if (mesh->normalTexture && normalSlot < 0 && nextSlot < MAX_BINDLESS_RESOURCES) {
+            normalSlot = nextSlot++;
+            graphics_bindtexture((Texture)mesh->normalTexture, (unsigned)normalSlot);
+            bound[1] = mesh->normalTexture;
+        }
+        if (diffuseSlot >= 0 && normalSlot >= 0) break;
     }
-    (void)nextSlot;
+
+    (void)bound;
+
+    /* The shader skips a slot below zero, so untextured sides need no
+     * fallback texture here. */
+    graphics_material_set_float(mat, "diffuseSlot", (float)diffuseSlot);
+    graphics_material_set_float(mat, "normalSlot", (float)normalSlot);
 }
 
 void graphics_reuploadmodel(Model *model)

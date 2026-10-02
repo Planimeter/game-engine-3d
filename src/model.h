@@ -51,11 +51,12 @@ typedef struct {
     void *indexBuffer;
     void *vertexBufferMemory;
     void *indexBufferMemory;
-    /* Loaded GPU texture, or NULL when the material had no diffuse map.
+    /* Loaded GPU textures, or NULL when the material had no such map.
      * Populated by model_loadtextures(). Slot assignment lives in the
      * backend: Metal reuses texture slot 0 for models and the text renderer
      * rebinds it afterwards, while Vulkan uses the bindless array. */
     void *diffuseTexture;
+    void *normalTexture;
 } Mesh;
 
 typedef struct ModelAnimation ModelAnimation;

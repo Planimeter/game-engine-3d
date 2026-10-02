@@ -195,6 +195,7 @@ void framework_load(int argc, char *argv[])
          * finds a map; material packing reads the whole float block, so
          * leaving it unset would feed the shader garbage. */
         graphics_material_set_float(g_litMaterial, "diffuseSlot", -1.0f);
+        graphics_material_set_float(g_litMaterial, "normalSlot", -1.0f);
         graphics_material_set_vec3(g_litMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
         graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
@@ -210,6 +211,7 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_gridMaterial, "specular", 0.5f);
         graphics_material_set_float(g_gridMaterial, "shininess", 48.0f);
         graphics_material_set_float(g_gridMaterial, "diffuseSlot", -1.0f);
+        graphics_material_set_float(g_gridMaterial, "normalSlot", -1.0f);
         graphics_material_set_vec3(g_gridMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
         graphics_material_set_vec3(g_gridMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_gridMaterial, "albedo", 0.35f, 0.6f, 0.85f);

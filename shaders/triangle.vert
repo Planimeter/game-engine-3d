@@ -42,6 +42,8 @@ layout(set = 1, binding = 1) uniform Material {
 layout(location = 0) out vec2 v_texcoord;
 layout(location = 1) out vec3 v_worldNormal;
 layout(location = 2) out vec3 v_worldPos;
+layout(location = 3) out vec3 v_worldTangent;
+layout(location = 4) out vec3 v_worldBitangent;
 
 void main()
 {
@@ -62,6 +64,10 @@ void main()
     /* Model matrices are rotation+translation, so the upper 3x3 works as
      * a normal matrix */
     v_worldNormal = normalize(mat3(uTransform.model) * skinNormal * in_normal);
+    /* Tangent frame for normal mapping, carried through the same skin/model
+     * transforms as the normal. */
+    v_worldTangent = normalize(mat3(uTransform.model) * skinNormal * in_tangent);
+    v_worldBitangent = normalize(mat3(uTransform.model) * skinNormal * in_bitangent);
     v_texcoord = in_texcoord;
 
     gl_Position = uTransform.mvp * worldPos;

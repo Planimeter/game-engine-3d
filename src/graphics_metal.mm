@@ -80,6 +80,7 @@ static id<MTLSamplerState> g_defaultSampler = nil;
  * untextured models black. Bound at slot 0 so every draw has a valid,
  * neutral texture before any real one is bound. */
 static MetalTexture *g_whiteTexture = NULL;
+static MetalTexture *g_whiteNormal = NULL;
 static MTLRenderPassDescriptor *g_renderPassDescriptor = nil;
 
 /* Uniform buffer */
@@ -1000,6 +1001,8 @@ void graphics_init() {
         "    float4 position [[position]];\n"
         "    float3 worldPos;\n"
         "    float3 worldNormal;\n"
+        "    float3 worldTangent;\n"
+        "    float3 worldBitangent;\n"
         "    float2 texcoord;\n"
         "};\n"
         "\n"
@@ -1040,6 +1043,9 @@ void graphics_init() {
         "                                 transform.model[1].xyz,\n"
         "                                 transform.model[2].xyz);\n"
         "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
+        "    float3x3 skinRot = float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz);\n"
+        "    out.worldTangent = normalize(normalMat * (skinRot * v.tangent));\n"
+        "    out.worldBitangent = normalize(normalMat * (skinRot * v.bitangent));\n"
         "    out.texcoord = v.texcoord;\n"
         "    return out;\n"
         "}\n"
@@ -1047,22 +1053,33 @@ void graphics_init() {
         "fragment float4 fragment_main(\n"
         "    VertexOut in [[stage_in]],\n"
         "    constant MaterialData &material [[buffer(2)]],\n"
-        "    texture2d<float> diffuseTex [[texture(0)]],\n"
-        "    sampler diffuseSmp [[sampler(0)]]\n"
+        "    texture2d<float> diffuseTex [[texture(1)]],\n"
+        "    texture2d<float> normalTex [[texture(2)]],\n"
+        "    sampler smp [[sampler(0)]]\n"
         ") {\n"
         "    float ambient  = material.floats[0];\n"
         "    float specular = material.floats[1];\n"
         "    float shininess = material.floats[2];\n"
-        /* floats[3] is the diffuse slot; graphics_bindmodeltexture() always
-         * binds a texture (1x1 white when the model has none), so this is
-         * safe to sample unconditionally. */
+        /* Slots are fixed in MSL (textures cannot be arrays), so the material
+         * only needs to say whether a real normal map is present. */
+        "    float hasNormal = material.floats[4];\n"
         "    float3 lightDir = material.vec3s_padded[0].xyz;\n"
         "    float3 cameraPos = material.vec3s_padded[1].xyz;\n"
         "    float3 albedo = material.vec3s_padded[2].xyz;\n"
         "\n"
-        "    albedo *= diffuseTex.sample(diffuseSmp, in.texcoord).rgb;\n"
+        "    albedo *= diffuseTex.sample(smp, in.texcoord).rgb;\n"
         "\n"
         "    float3 N = normalize(in.worldNormal);\n"
+        "    if (hasNormal >= 0.0) {\n"
+        /* The fallback is a flat normal, which decodes to (0,0,1). */
+        "        float3 sn = normalTex.sample(smp, in.texcoord).rgb * 2.0 - 1.0;\n"
+        "        if (abs(sn.x) > 0.001 || abs(sn.y) > 0.001 || abs(sn.z) > 0.001) {\n"
+        "            float3 T = normalize(in.worldTangent - N * dot(N, in.worldTangent));\n"
+        "            float3 B = normalize(cross(N, T));\n"
+        "            N = normalize(float3x3(T, B, N) * sn);\n"
+        "        }\n"
+        "    }\n"
+        "\n"
         "    float3 L = normalize(-lightDir);\n"   /* direction toward the light */
         "    float3 V = normalize(cameraPos - in.worldPos);\n"
         "    float3 H = normalize(L + V);\n"
@@ -1097,6 +1114,8 @@ void graphics_init() {
         "    float4 position [[position]];\n"
         "    float3 worldPos;\n"
         "    float3 worldNormal;\n"
+        "    float3 worldTangent;\n"
+        "    float3 worldBitangent;\n"
         "    float2 texcoord;\n"
         "};\n"
         "\n"
@@ -1137,6 +1156,9 @@ void graphics_init() {
         "    out.worldPos = p.xyz;\n"
         "    float3x3 normalMat = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);\n"
         "    out.worldNormal = normalize(normalMat * (float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz) * v.normal));\n"
+        "    float3x3 skinRot = float3x3(sk[0].xyz, sk[1].xyz, sk[2].xyz);\n"
+        "    out.worldTangent = normalize(normalMat * (skinRot * v.tangent));\n"
+        "    out.worldBitangent = normalize(normalMat * (skinRot * v.bitangent));\n"
         "    out.texcoord = v.texcoord;\n"
         "    return out;\n"
         "}\n"
@@ -1470,30 +1492,62 @@ static void metal_make_white_texture(void)
     if (!g_whiteTexture) {
         g_whiteTexture = (MetalTexture *)graphics_createtexture_rgba(1, 1, white);
     }
+    /* Flat normal (0.5, 0.5, 1.0) decodes to (0,0,1) — no perturbation. */
+    static const unsigned char flat[4] = {128, 128, 255, 255};
+    if (!g_whiteNormal) {
+        g_whiteNormal = (MetalTexture *)graphics_createtexture_rgba(1, 1, flat);
+    }
+    /* Slots 1 and 2: slot 0 is the font atlas's and the text pass rebinds
+     * it, so the model fallbacks use their own. */
     if (g_whiteTexture) {
         metal_encoder_set_fragment_texture(g_currentEncoder,
-                                           g_whiteTexture->texture, 0);
-        metal_encoder_set_fragment_sampler_state(g_currentEncoder,
-                                                 g_defaultSampler, 0);
+                                           g_whiteTexture->texture, 1);
     }
+    if (g_whiteNormal) {
+        metal_encoder_set_fragment_texture(g_currentEncoder,
+                                           g_whiteNormal->texture, 2);
+    }
+    metal_encoder_set_fragment_sampler_state(g_currentEncoder,
+                                             g_defaultSampler, 0);
 }
 
 void graphics_bindmodeltexture(Model *model, Material mat) {
-    if (!model || !mat) return;
-
-    /* Model draws happen before the text pass each frame, so slot 0 is
-     * available here. The text renderer rebinds the same slot afterwards for
-     * its atlas, and the 3D pipeline is not bound at that point, so there is
-     * no conflict — the shader samples [[texture(0)]] unconditionally. */
-    for (uint32_t i = 0; i < model->meshCount; i++) {
-        Mesh *mesh = &model->meshes[i];
-        if (!mesh->diffuseTexture) continue;
-        graphics_bindtexture((Texture)mesh->diffuseTexture, 0);
+    if (!model || !mat) {
+        metal_make_white_texture();
         return;
     }
 
-    /* Untextured: bind white so the albedo passes through unchanged. */
-    metal_make_white_texture();
+    /* Slots 1 (diffuse) and 2 (normal); slot 0 is the font atlas's and the
+     * text pass rebinds it later in the frame, so models never use it. */
+    int diffuseSlot = -1;
+    int normalSlot = -1;
+
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        if (mesh->diffuseTexture && diffuseSlot < 0) {
+            diffuseSlot = 1;
+            graphics_bindtexture((Texture)mesh->diffuseTexture, 1);
+        }
+        if (mesh->normalTexture && normalSlot < 0) {
+            normalSlot = 2;
+            graphics_bindtexture((Texture)mesh->normalTexture, 2);
+        }
+        if (diffuseSlot >= 0 && normalSlot >= 0) break;
+    }
+
+    /* Untextured sides fall back to white / a flat normal, so the shader can
+     * sample both slots unconditionally. */
+    if (diffuseSlot < 0 || normalSlot < 0) {
+        metal_make_white_texture();
+    }
+    if (diffuseSlot < 0) diffuseSlot = 1;
+    if (normalSlot < 0) normalSlot = 2;
+
+    graphics_material_set_float(mat, "diffuseSlot", (float)diffuseSlot);
+    /* MSL cannot index a texture array, so the slot is fixed at 2 and the
+     * shader only needs to know whether a real normal map is bound. */
+    graphics_material_set_float(mat, "normalSlot",
+                                 normalSlot >= 0 ? 1.0f : -1.0f);
 }
 
 void graphics_reuploadmodel(Model *model) {

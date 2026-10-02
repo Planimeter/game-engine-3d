@@ -8,6 +8,8 @@
 layout(location = 0) in vec2 v_texcoord;
 layout(location = 1) in vec3 v_worldNormal;
 layout(location = 2) in vec3 v_worldPos;
+layout(location = 3) in vec3 v_worldTangent;
+layout(location = 4) in vec3 v_worldBitangent;
 
 layout(location = 0) out vec4 out_color;
 
@@ -23,15 +25,26 @@ layout(set = 1, binding = 1) uniform Material {
 
 void main()
 {
-    /* floats[1].x = diffuse texture slot (-1 = none), .y = has-normal-map */
-    float diffuseSlot = uMaterial.floats[1].x;
-
     float ambient = uMaterial.floats[0].x;
     float specular = uMaterial.floats[0].y;
     float shininess = uMaterial.floats[0].z;
+    /* .x = diffuse slot (-1 none), .y = normal slot (-1 none) */
+    float diffuseSlot = uMaterial.floats[1].x;
+    float normalSlot = uMaterial.floats[1].y;
     vec3 lightDir = uMaterial.vec3s[0].xyz;
     vec3 cameraPos = uMaterial.vec3s[1].xyz;
     vec3 albedo = uMaterial.vec3s[2].xyz;
+
+    vec3 N = normalize(v_worldNormal);
+    if (normalSlot >= 0.0) {
+        /* Unbound array entries read as zero, so only apply a non-flat map. */
+        vec3 sampledN = texture(tex[int(normalSlot)], v_texcoord).rgb * 2.0 - 1.0;
+        if (any(greaterThan(abs(sampledN), vec3(0.001)))) {
+            vec3 T = normalize(v_worldTangent - N * dot(N, v_worldTangent));
+            vec3 B = normalize(cross(N, T));
+            N = normalize(mat3(T, B, N) * sampledN);
+        }
+    }
 
     /* Unbound entries in the partially-bound array read as zero, which would
      * black out the model; fall back to the material colour. */
@@ -41,7 +54,6 @@ void main()
         albedo *= sampled.rgb;
     }
 
-    vec3 N = normalize(v_worldNormal);
     vec3 L = normalize(-lightDir); /* direction toward the light */
     vec3 V = normalize(cameraPos - v_worldPos);
     vec3 H = normalize(L + V);

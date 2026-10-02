@@ -623,35 +623,49 @@ int model_loadtextures(Model *model, const char *modelDir)
         return 0;
     }
 
-    /* Slot 0 belongs to the font atlas, so model textures start at 1.
-     * MAX_BINDLESS_RESOURCES in the graphics backends caps the array. */
+    /* Vulkan assigns bindless slots from 1 (slot 0 is the font atlas's).
+     * Metal reuses slot 0 for model draws and rebinds the atlas afterwards,
+     * so it tracks its own. */
     int slot = 1;
     int loaded = 0;
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
         mesh->diffuseTexture = NULL;
-
-        if (!mesh->material.diffuseTexture || slot >= 64) {
-            continue;
-        }
+        mesh->normalTexture = NULL;
 
         char full[4096];
-        if (modelDir && modelDir[0]) {
-            snprintf(full, sizeof(full), "%s/%s", modelDir, mesh->material.diffuseTexture);
-        } else {
-            snprintf(full, sizeof(full), "%s", mesh->material.diffuseTexture);
+
+        if (mesh->material.diffuseTexture && slot < 64) {
+            if (modelDir && modelDir[0]) {
+                snprintf(full, sizeof(full), "%s/%s", modelDir, mesh->material.diffuseTexture);
+            } else {
+                snprintf(full, sizeof(full), "%s", mesh->material.diffuseTexture);
+            }
+            Texture tex = image_load(full);
+            if (tex) {
+                mesh->diffuseTexture = (void *)tex;
+                slot++;
+                loaded++;
+            }
         }
 
-        Texture tex = image_load(full);
-        if (!tex) {
-            /* Textures are optional; a missing file should not fail the load. */
-            continue;
+        /* Normal maps are a separate slot: the fragment shader samples both,
+         * and an unbound slot reads as zero, which would flatten the lighting.
+         * Gated on the same 64-slot ceiling. */
+        if (mesh->material.normalTexture && slot < 64) {
+            if (modelDir && modelDir[0]) {
+                snprintf(full, sizeof(full), "%s/%s", modelDir, mesh->material.normalTexture);
+            } else {
+                snprintf(full, sizeof(full), "%s", mesh->material.normalTexture);
+            }
+            Texture tex = image_load(full);
+            if (tex) {
+                mesh->normalTexture = (void *)tex;
+                slot++;
+                loaded++;
+            }
         }
-
-        mesh->diffuseTexture = (void *)tex;
-        slot++;
-        loaded++;
     }
 
     if (loaded > 0) {
