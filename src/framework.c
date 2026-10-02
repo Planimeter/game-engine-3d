@@ -119,13 +119,28 @@ void framework_load(int argc, char *argv[])
                     if (p) *p = '\0';
                 }
                 char modelPath[4096];
-                snprintf(modelPath, sizeof(modelPath), "%s/Models/cube.obj", resolved);
+                /* MODEL_OVERRIDE lets a different model (e.g. a skinned one)
+                 * be loaded without editing this file. */
+                const char *override = getenv("MODEL_OVERRIDE");
+                snprintf(modelPath, sizeof(modelPath), "%s/Models/%s", resolved,
+                         override ? override : "cube.obj");
                 g_testModel = graphics_loadmodel(modelPath);
                 if (g_testModel) {
-                    printf("Loaded cube model from %s (%d meshes)\n",
+                    printf("Loaded model from %s (%d meshes)\n",
                            modelPath, model_get_mesh_count(g_testModel));
+                    if (model_is_skinned(g_testModel)) {
+                        printf("  skinned: %u bones, %u animations\n",
+                               model_get_bone_count(g_testModel),
+                               model_get_animation_count(g_testModel));
+                        ModelAnimationInfo info;
+                        if (model_get_animation_info(g_testModel, 0, &info)) {
+                            printf("  clip '%s': %.3fs, %u keys/bone\n",
+                                   info.name ? info.name : "(unnamed)",
+                                   info.duration, info.keyCount);
+                        }
+                    }
                 } else {
-                    fprintf(stderr, "Failed to load cube model from %s\n", modelPath);
+                    fprintf(stderr, "Failed to load model from %s\n", modelPath);
                 }
             }
         }

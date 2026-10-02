@@ -10,6 +10,12 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/vec4.hpp>
+#include <glm/mat4x4.hpp>
+#include <glm/gtc/quaternion.hpp>
+
+/* Skinning: up to 4 bone influences per vertex (the common convention, and
+ * what most exporters emit). boneIndices are indices into Model::bones. */
+#define MAX_BONE_INFLUENCES 4
 
 typedef struct {
     glm::vec3 position;
@@ -17,6 +23,10 @@ typedef struct {
     glm::vec2 texCoords;
     glm::vec3 tangent;
     glm::vec3 bitangent;
+    /* Skin weights. Unused for static models: boneIndices all zero and
+     * boneWeights all 1 on bone 0 gives the identity transform. */
+    glm::vec4 boneWeights;
+    glm::ivec4 boneIndices;
 } Vertex;
 
 typedef struct {
@@ -43,16 +53,32 @@ typedef struct {
     void *indexBufferMemory;
 } Mesh;
 
+typedef struct ModelAnimation ModelAnimation;
+
 typedef struct {
     Mesh *meshes;
     uint32_t meshCount;
     char *name;
+
+    /* Skeleton. boneOffset is this bone's transform relative to its parent,
+     * so flattening the chain by multiplying parent*offset gives the final
+     * skinning matrix directly. */
+    glm::mat4 *boneOffset;
+    glm::mat4 *boneInverseBind;  /* inverse bind pose, per bone */
+    int *boneParent;             /* -1 for roots */
+    uint32_t boneCount;
+
+    /* Animation clips. Frames are already in bone-local space; pose by
+     * multiplying offset * animatedLocal per bone. */
+    ModelAnimation *animations;
+    uint32_t animationCount;
 } Model;
 #else
 typedef struct Vertex Vertex;
 typedef struct MaterialData MaterialData;
 typedef struct Mesh Mesh;
 typedef struct Model Model;
+typedef struct ModelAnimation ModelAnimation;
 #endif
 
 #ifdef __cplusplus
@@ -63,8 +89,40 @@ extern "C" {
 Model *model_load(const char *filepath);
 void   model_destroy(Model *model);
 
+#ifdef __cplusplus
+/* One animation clip: a keyframe track per bone, sampled uniformly in time. */
+struct ModelAnimation {
+    char *name;
+    float duration;            /* seconds */
+    float ticksPerSecond;
+    uint32_t keyCount;         /* frames per bone track */
+    glm::mat4 *frames;         /* boneCount * keyCount, bone-major */
+};
+
+/* Flatten the bone hierarchy at `time` into skinning matrices:
+ * out[i] = accumulatedWorld(bone i) * inverseBind(i). Bone-local animated
+ * transforms are sampled from the clip (or the rest pose when clip is NULL).
+ * Returns 0 if the model has no skeleton. */
+int  model_pose(Model *model, const ModelAnimation *clip, float time,
+                glm::mat4 *out);
+#endif
+
 /* C-compatible accessors for opaque Model struct */
 uint32_t model_get_mesh_count(const Model *model);
+uint32_t model_get_bone_count(const Model *model);
+uint32_t model_get_animation_count(const Model *model);
+const ModelAnimation *model_get_animation(const Model *model, uint32_t index);
+int   model_is_skinned(const Model *model);
+
+/* Opaque clip info, so C callers can report on animations without needing
+ * the C++-only ModelAnimation definition. */
+typedef struct {
+    const char *name;
+    float duration;
+    uint32_t keyCount;
+} ModelAnimationInfo;
+
+int model_get_animation_info(const Model *model, uint32_t index, ModelAnimationInfo *out);
 
 #ifdef __cplusplus
 }

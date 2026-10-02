@@ -9,10 +9,252 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <assimp/material.h>
+#include <assimp/anim.h>
+#include <assimp/quaternion.h>
+
+#include <glm/mat4x4.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 /* Forward declarations */
+/* Assimp stores bones per-mesh (aiMesh::mBones), not on the scene, and the
+ * same skeleton is repeated across every mesh. Bones are therefore collected
+ * into a unique-name table first; aiBone::mOffsetMatrix is the inverse bind
+ * matrix, while the bone's local transform comes from the node hierarchy. */
+typedef struct {
+    char **names;
+    glm::mat4 *inverseBind;
+    uint32_t count;
+    uint32_t capacity;
+} BoneTable;
+
+static void model_processanimations(const struct aiScene *scene, Model *model,
+                                    const BoneTable *table);
+
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene);
 static MaterialData model_processmaterial(const struct aiMaterial *aiMat);
+
+static int bonetable_find(const BoneTable *table, const char *name)
+{
+    for (uint32_t i = 0; i < table->count; i++) {
+        if (strcmp(table->names[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int bonetable_add(BoneTable *table, const char *name,
+                         const glm::mat4 &inverseBind)
+{
+    if (table->count == table->capacity) {
+        uint32_t cap = table->capacity ? table->capacity * 2 : 32;
+        char **names = (char **)realloc(table->names, cap * sizeof(char *));
+        glm::mat4 *binds = (glm::mat4 *)realloc(table->inverseBind, cap * sizeof(glm::mat4));
+        if (!names || !binds) {
+            free(names);
+            free(binds);
+            return -1;
+        }
+        table->names = names;
+        table->inverseBind = binds;
+        table->capacity = cap;
+    }
+
+    table->names[table->count] = (char *)malloc(strlen(name) + 1);
+    if (!table->names[table->count]) {
+        return -1;
+    }
+    strcpy(table->names[table->count], name);
+    table->inverseBind[table->count] = inverseBind;
+    return (int)table->count++;
+}
+
+static void bonetable_free(BoneTable *table)
+{
+    for (uint32_t i = 0; i < table->count; i++) {
+        free(table->names[i]);
+    }
+    free(table->names);
+    free(table->inverseBind);
+    memset(table, 0, sizeof(*table));
+}
+
+static glm::mat4 model_assimp_matrix(const struct aiMatrix4x4t<float> *m)
+{
+    /* Assimp stores row-major as a.a1 b.c1 d.a4; GLM is column-major. */
+    return glm::mat4(
+        m->a1, m->b1, m->c1, m->d1,
+        m->a2, m->b2, m->c2, m->d2,
+        m->a3, m->b3, m->c3, m->d3,
+        m->a4, m->b4, m->c4, m->d4);
+}
+
+static void model_walknodes(const BoneTable *table, const struct aiNode *node,
+                            int parentBone, Model *model)
+{
+    int self = bonetable_find(table, node->mName.C_Str());
+
+    if (self >= 0) {
+        model->boneParent[self] = parentBone;
+        model->boneOffset[self] = model_assimp_matrix(&node->mTransformation);
+    }
+
+    for (unsigned c = 0; c < node->mNumChildren; c++) {
+        model_walknodes(table, node->mChildren[c], self, model);
+    }
+}
+
+static void model_processskeleton(const struct aiScene *scene, Model *model)
+{
+    BoneTable table = {0};
+
+    model->boneOffset = NULL;
+    model->boneInverseBind = NULL;
+    model->boneParent = NULL;
+    model->boneCount = 0;
+
+    for (uint32_t m = 0; m < scene->mNumMeshes; m++) {
+        const struct aiMesh *mesh = scene->mMeshes[m];
+        for (unsigned b = 0; b < mesh->mNumBones; b++) {
+            const struct aiBone *bone = mesh->mBones[b];
+            if (bonetable_find(&table, bone->mName.C_Str()) >= 0) {
+                continue;
+            }
+            glm::mat4 invBind = model_assimp_matrix(&bone->mOffsetMatrix);
+            if (bonetable_add(&table, bone->mName.C_Str(), invBind) < 0) {
+                fprintf(stderr, "Failed to build bone table\n");
+                bonetable_free(&table);
+                return;
+            }
+        }
+    }
+
+    if (table.count > 0) {
+        model->boneCount = table.count;
+        model->boneOffset = (glm::mat4 *)malloc(table.count * sizeof(glm::mat4));
+        model->boneInverseBind = (glm::mat4 *)malloc(table.count * sizeof(glm::mat4));
+        model->boneParent = (int *)malloc(table.count * sizeof(int));
+        if (model->boneOffset && model->boneInverseBind && model->boneParent) {
+            for (uint32_t i = 0; i < table.count; i++) {
+                model->boneInverseBind[i] = table.inverseBind[i];
+                model->boneOffset[i] = glm::mat4(1.0f);
+                model->boneParent[i] = -1;
+            }
+            model_walknodes(&table, scene->mRootNode, -1, model);
+        } else {
+            fprintf(stderr, "Failed to allocate bone arrays\n");
+            free(model->boneOffset);
+            free(model->boneInverseBind);
+            free(model->boneParent);
+            model->boneOffset = NULL;
+            model->boneInverseBind = NULL;
+            model->boneParent = NULL;
+            model->boneCount = 0;
+        }
+    }
+
+    /* Animation channels reference bones by name, so they need the table
+     * before it goes away. */
+    model_processanimations(scene, model, &table);
+    bonetable_free(&table);
+}
+
+static void model_processanimations(const struct aiScene *scene, Model *model,
+                                    const BoneTable *table)
+{
+    model->animations = NULL;
+    model->animationCount = 0;
+
+    if (scene->mNumAnimations == 0) {
+        return;
+    }
+
+    model->animations = (ModelAnimation *)calloc(scene->mNumAnimations, sizeof(ModelAnimation));
+    if (!model->animations) {
+        return;
+    }
+
+    /* Uniform sampling: find the highest key count across all channels so
+     * every bone shares one time grid. */
+    for (uint32_t a = 0; a < scene->mNumAnimations; a++) {
+        const struct aiAnimation *anim = scene->mAnimations[a];
+        ModelAnimation *out = &model->animations[a];
+        uint32_t maxKeys = 0;
+
+        for (unsigned c = 0; c < anim->mNumChannels; c++) {
+            const struct aiNodeAnim *ch = anim->mChannels[c];
+            unsigned n = ch->mNumPositionKeys;
+            if (ch->mNumRotationKeys   > n) n = ch->mNumRotationKeys;
+            if (ch->mNumScalingKeys    > n) n = ch->mNumScalingKeys;
+            if (n > maxKeys) {
+                maxKeys = n;
+            }
+        }
+        if (maxKeys == 0 || model->boneCount == 0) {
+            continue;
+        }
+
+        out->name = (char *)malloc(strlen(anim->mName.C_Str()) + 1);
+        if (out->name) {
+            strcpy(out->name, anim->mName.C_Str());
+        }
+        out->ticksPerSecond = anim->mTicksPerSecond > 0.0f ? anim->mTicksPerSecond : 25.0f;
+        out->duration = (float)anim->mDuration / out->ticksPerSecond;
+        out->keyCount = maxKeys;
+        out->frames = (glm::mat4 *)calloc((size_t)model->boneCount * maxKeys, sizeof(glm::mat4));
+
+        if (!out->frames) {
+            free(out->name);
+            out->name = NULL;
+            continue;
+        }
+
+        /* Bones with no channel stay at identity; model_pose applies the
+         * rest offset separately, so identity is the right default here. */
+        for (size_t i = 0; i < (size_t)model->boneCount * maxKeys; i++) {
+            out->frames[i] = glm::mat4(1.0f);
+        }
+
+        for (unsigned c = 0; c < anim->mNumChannels; c++) {
+            const struct aiNodeAnim *ch = anim->mChannels[c];
+            int boneIndex = bonetable_find(table, ch->mNodeName.C_Str());
+            if (boneIndex < 0) {
+                continue;
+            }
+
+            /* Each key type has its own array and count. Where a channel is
+             * missing a track, identity is correct: translation 0, rotation
+             * identity, scale 1. */
+            for (uint32_t k = 0; k < maxKeys; k++) {
+                glm::vec3 t(0.0f);
+                glm::quat r(1.0f, 0.0f, 0.0f, 0.0f);
+                glm::vec3 s(1.0f);
+
+                if (k < ch->mNumPositionKeys) {
+                    t = glm::vec3(ch->mPositionKeys[k].mValue.x,
+                                  ch->mPositionKeys[k].mValue.y,
+                                  ch->mPositionKeys[k].mValue.z);
+                }
+                if (k < ch->mNumRotationKeys) {
+                    const struct aiQuatKey &qk = ch->mRotationKeys[k];
+                    r = glm::quat(qk.mValue.w, qk.mValue.x, qk.mValue.y, qk.mValue.z);
+                }
+                if (k < ch->mNumScalingKeys) {
+                    s = glm::vec3(ch->mScalingKeys[k].mValue.x,
+                                  ch->mScalingKeys[k].mValue.y,
+                                  ch->mScalingKeys[k].mValue.z);
+                }
+
+                out->frames[(size_t)boneIndex * maxKeys + k] =
+                    glm::translate(glm::mat4(1.0f), t) *
+                    glm::mat4_cast(r) *
+                    glm::scale(glm::mat4(1.0f), s);
+            }
+        }
+
+        model->animationCount++;
+    }
+}
 
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene)
 {
@@ -71,6 +313,19 @@ static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene
         } else {
             mesh->vertices[i].tangent = glm::vec3(1.0f, 0.0f, 0.0f);
             mesh->vertices[i].bitangent = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
+
+        /* Skin weights. Default is bone 0 at full weight, which is the
+         * identity when a model has no skeleton. */
+        mesh->vertices[i].boneIndices = glm::ivec4(0);
+        mesh->vertices[i].boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+
+        if (aiMesh->HasBones() && aiMesh->mNumBones > 0 && aiMesh->mBones[0]->mNumWeights > 0) {
+            const struct aiBone *bone = aiMesh->mBones[0];
+            for (unsigned w = 0; w < bone->mNumWeights && w < MAX_BONE_INFLUENCES; w++) {
+                mesh->vertices[i].boneIndices[w] = (int)bone->mWeights[w].mVertexId;
+                mesh->vertices[i].boneWeights[w] = (float)bone->mWeights[w].mWeight;
+            }
         }
     }
 
@@ -184,7 +439,11 @@ Model *model_load(const char *filepath)
         aiProcess_CalcTangentSpace |
         aiProcess_GenNormals |
         aiProcess_OptimizeMeshes |
-        aiProcess_RemoveRedundantMaterials
+        aiProcess_RemoveRedundantMaterials |
+        /* Caps skinning to MAX_BONE_INFLUENCES; a no-op on static models
+         * like cube.obj. Assimp populates aiBone/aiAnimation without any
+         * extra flag. */
+        aiProcess_LimitBoneWeights
     );
 
     if (!scene || !scene->mRootNode || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE)) {
@@ -239,9 +498,20 @@ Model *model_load(const char *filepath)
         return NULL;
     }
 
+    /* Skeleton and animation clips. Both optional: a static model has neither.
+     * Done before aiReleaseImport because they read from the scene. */
+    model_processskeleton(scene, model);
+
     aiReleaseImport(scene);
 
-    printf("Model loaded: %s with %d meshes\n", filepath, model->meshCount);
+    printf("Model loaded: %s with %d meshes", filepath, model->meshCount);
+    if (model->boneCount > 0) {
+        printf(", %u bones", model->boneCount);
+    }
+    if (model->animationCount > 0) {
+        printf(", %u animations", model->animationCount);
+    }
+    printf("\n");
 
     return model;
 }
@@ -250,6 +520,136 @@ uint32_t model_get_mesh_count(const Model *model)
 {
     if (!model) return 0;
     return model->meshCount;
+}
+
+uint32_t model_get_bone_count(const Model *model)
+{
+    if (!model) return 0;
+    return model->boneCount;
+}
+
+uint32_t model_get_animation_count(const Model *model)
+{
+    if (!model) return 0;
+    return model->animationCount;
+}
+
+const ModelAnimation *model_get_animation(const Model *model, uint32_t index)
+{
+    if (!model || index >= model->animationCount) return NULL;
+    return &model->animations[index];
+}
+
+int model_get_animation_info(const Model *model, uint32_t index, ModelAnimationInfo *out)
+{
+    if (!model || !out || index >= model->animationCount) return 0;
+    const ModelAnimation *clip = &model->animations[index];
+    out->name = clip->name;
+    out->duration = clip->duration;
+    out->keyCount = clip->keyCount;
+    return 1;
+}
+
+int model_is_skinned(const Model *model)
+{
+    return model && model->boneCount > 0;
+}
+
+/* Flatten the hierarchy: world[i] = world[parent] * offset[i] */
+static void model_accumulate(Model *model, glm::mat4 *world)
+{
+    for (uint32_t i = 0; i < model->boneCount; i++) {
+        world[i] = (model->boneParent[i] >= 0)
+                 ? world[model->boneParent[i]] * model->boneOffset[i]
+                 : model->boneOffset[i];
+    }
+}
+
+int model_pose(Model *model, const ModelAnimation *clip, float time,
+               glm::mat4 *out)
+{
+    if (!model || !out || model->boneCount == 0) {
+        return 0;
+    }
+
+    /* Bones are not guaranteed to be ordered parent-before-child, so
+     * repeatedly resolve any bone whose parent is already done. */
+    glm::mat4 *world = (glm::mat4 *)malloc(model->boneCount * sizeof(glm::mat4));
+    glm::mat4 *local = (glm::mat4 *)malloc(model->boneCount * sizeof(glm::mat4));
+    char *done = (char *)calloc(model->boneCount, 1);
+    if (!world || !local || !done) {
+        free(world);
+        free(local);
+        free(done);
+        return 0;
+    }
+
+    /* Sample the clip: nearest-key is enough here and avoids blending
+     * bookkeeping; linear interpolation between the two surrounding keys
+     * would be smoother but needs per-component slerp/lerp. */
+    float t = clip ? time : 0.0f;
+    if (clip && clip->duration > 0.0f && clip->frames) {
+        if (t < 0.0f) t = 0.0f;
+        if (t > clip->duration) t = clip->duration;
+    }
+
+    for (uint32_t i = 0; i < model->boneCount; i++) {
+        if (clip && clip->frames && clip->keyCount > 0) {
+            float framePos = (clip->duration > 0.0f)
+                           ? (t / clip->duration) * (clip->keyCount - 1)
+                           : 0.0f;
+            uint32_t f0 = (uint32_t)framePos;
+            uint32_t f1 = (f0 + 1 < clip->keyCount) ? f0 + 1 : f0;
+            if (f0 >= clip->keyCount) f0 = clip->keyCount - 1;
+            float frac = framePos - (float)f0;
+            const glm::mat4 &a = clip->frames[(size_t)i * clip->keyCount + f0];
+            const glm::mat4 &b = clip->frames[(size_t)i * clip->keyCount + f1];
+            /* Interpolate each column. Adequate for the TRS tracks Assimp
+             * emits; a proper decomposition into T/R/S and slerp would be
+             * smoother but is not needed to get motion on screen. */
+            local[i] = glm::mat4(
+                a[0] + (b[0] - a[0]) * frac,
+                a[1] + (b[1] - a[1]) * frac,
+                a[2] + (b[2] - a[2]) * frac,
+                a[3] + (b[3] - a[3]) * frac);
+        } else {
+            local[i] = model->boneOffset[i];
+        }
+    }
+
+    /* Resolve in dependency order. model->boneParent is small (tens), so a
+     * simple repeated pass is fine and avoids a depth-first recursion. */
+    uint32_t remaining = model->boneCount;
+    while (remaining > 0) {
+        int progress = 0;
+        for (uint32_t i = 0; i < model->boneCount; i++) {
+            if (done[i]) continue;
+            int parent = model->boneParent[i];
+            if (parent >= 0 && !done[parent]) continue;
+
+            world[i] = (parent >= 0) ? world[parent] * local[i] : local[i];
+            out[i] = world[i] * model->boneInverseBind[i];
+            done[i] = 1;
+            remaining--;
+            progress = 1;
+        }
+        if (!progress) {
+            /* Cycle in the parent chain (corrupt file): fall back to rest. */
+            fprintf(stderr, "model_pose: bone hierarchy has a cycle\n");
+            for (uint32_t i = 0; i < model->boneCount; i++) {
+                if (!done[i]) {
+                    out[i] = model->boneOffset[i] * model->boneInverseBind[i];
+                    done[i] = 1;
+                }
+            }
+            break;
+        }
+    }
+
+    free(world);
+    free(local);
+    free(done);
+    return 1;
 }
 
 void model_destroy(Model *model)
@@ -282,6 +682,18 @@ void model_destroy(Model *model)
             }
         }
         free(model->meshes);
+    }
+
+    free(model->boneOffset);
+    free(model->boneInverseBind);
+    free(model->boneParent);
+
+    if (model->animations) {
+        for (uint32_t i = 0; i < model->animationCount; i++) {
+            free(model->animations[i].name);
+            free(model->animations[i].frames);
+        }
+        free(model->animations);
     }
 
     if (model->name) {
