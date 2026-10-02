@@ -66,6 +66,31 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 - `graphics_draw_buffers()` still writes the legacy shared uniform path (single `g_uniformBuffer` region / descriptor binding 0). `graphics_drawmodel()` got the per-draw fix and `graphics_draw_instanced()` now carries its own transforms. (`graphics_draw_buffers()` today is font/text only and its text shaders ignore the transform.)
 - ~~Retina/pixel-density handling wrong~~ — fixed 2026-10-01: `SDL_WINDOW_HIGH_PIXEL_DENSITY` window flag + `NSHighResolutionCapable` in `cmake/MacOSXBundleInfo.plist.in` (CMake's default plist omits it) + `window_getpixeldensity()` + font rasterization/coords scaled by density. Verified: 640×480-pt window now renders at 1280×960.
 
+## Animation / Skinning (2026-10-02)
+
+Assimp's `aiScene::mAnimations` and `aiBone` data was loaded but never read, and `Model` had nowhere to put it, so every animated model rendered as a static pose.
+
+### Data layer (`edd9610d`, verified)
+- `Vertex` gains `boneWeights`/`boneIndices` (`MAX_BONE_INFLUENCES` = 4). Unskinned meshes default to bone 0 at weight 1, which is the identity.
+- `Model` gains `boneOffset` / `boneInverseBind` / `boneParent`, animation clips, and `ModelAnimation {name, duration, ticksPerSecond, keyCount, frames}`.
+- Bones live on `aiMesh`, not `aiScene`, and the same skeleton repeats across meshes — they are collected into a unique-name table. Parents and local transforms come from walking the `aiNode` tree; `aiBone::mOffsetMatrix` is the *inverse bind* matrix.
+- `model_pose()` flattens the hierarchy into skinning matrices (`world * inverseBind`), interpolating between keys per column. Resolution is iterative (Assimp does not order bones parent-first) and detects cycles rather than hanging.
+- `ModelAnimation` is C++-only, so `model_get_animation_info()` and `model_pose_by_index()` give C callers equivalent access.
+
+### GPU layer (`405c9a93`, verified)
+- `VERTEX_FORMAT_FULL` gains `boneWeights` (float4, location 5) and `boneIndices` (int4, location 6) in both backends; the instanced format moves its per-instance mat4 to locations 7-10.
+- All four vertex shaders blend the four bone matrices by weight and apply the rotation part to normals.
+- `graphics_setbones(model, matrices, count)` uploads up to 64 bone matrices — cached buffer at Metal `buffer(3)`, Vulkan UBO slot 2.
+- `model_normalize()` scales/centres imported meshes and their bone offsets; `graphics_reuploadmodel()` pushes the changed vertices back to the GPU.
+
+### Assimp matrix layout gotcha
+`aiMatrix4x4t` stores **columns** as `a/b/c/d` — already GLM's layout. Transposing it moves translation onto the wrong axis and puts bone rest and bind worlds tens of units apart. `model_assimp_matrix()` copies directly.
+
+### Verified
+`quad_skin.glb` (Assimp test suite, glTF2/simple_skin) loads with 7 bones, normalizes cleanly (scale 1.0, height 2.0), and **renders** — proving bone attributes, the blend, `graphics_setbones()` and the bind pose are correct.
+
+`animation_with_skeleton.fbx` (13 bones, 1 clip) parses fine but **does not render**: its mesh vertices and node hierarchy disagree on a world-space offset that the mesh-space correction folded into `boneInverseBind` does not fully resolve. Normalization there also reports scale 1.09 / height 1.83 against vertices at x≈29, i.e. the two spaces disagree. Unresolved — diagnosing it needs another FBX to compare against, since the glTF path works.
+
 ## Camera & Scene System (2026-10-01)
 
 Fly camera + fixed-pool scene graph replacing the hardcoded look-at in `framework_draw`.
