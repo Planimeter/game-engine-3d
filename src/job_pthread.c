@@ -467,7 +467,8 @@ JobHandle job_submit(JobSystem *jobSystem, const JobDescriptor *descriptor)
 
     /* Push work items to queues (round-robin distribution).
      * Each queue entry points to the same Job; workers claim unique work
-     * items via atomic currentIndex. */
+     * items via atomic currentIndex.
+     */
     uint32_t queueIndex = 0;
     for (uint32_t i = 0; i < descriptor->jobCount; i++) {
         JobQueue *queue = &jobSystem->queues[queueIndex % jobSystem->workerCount];

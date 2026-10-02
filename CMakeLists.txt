@@ -217,6 +217,21 @@ add_executable(test_footstep EXCLUDE_FROM_ALL
     )
 target_include_directories(test_footstep PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
+# Job system concurrency checks. Add -DGAME_JOB_TSAN=ON to build this with
+# ThreadSanitizer, which is how the lost-wakeup bugs were found.
+option(GAME_JOB_TSAN "Build the job system checks with ThreadSanitizer" OFF)
+add_executable(test_job EXCLUDE_FROM_ALL
+    src/job_pthread.c
+    tests/test_job.c
+    )
+target_include_directories(test_job PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+find_package(Threads REQUIRED)
+target_link_libraries(test_job PRIVATE Threads::Threads)
+if(GAME_JOB_TSAN)
+    target_compile_options(test_job PRIVATE -fsanitize=thread -g)
+    target_link_options(test_job PRIVATE -fsanitize=thread)
+endif()
+
 # specify the list of paths to source files
 set(SOURCES
     src/audio_openal.c
