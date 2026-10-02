@@ -84,7 +84,7 @@ Fly camera + fixed-pool scene graph replacing the hardcoded look-at in `framewor
 Previously `graphics_drawmodel` wrote mvp into one shared `g_uniformBuffer` region and the material's model mat4 into one shared pack — but the GPU reads uniforms when the frame *executes*, after all CPU writes, so N draws in one frame would all render with the last draw's matrices. Fixed only in `graphics_drawmodel()` (the only multi-draw path):
 - **Metal**: bundles `{mvp[16], model[16]}` = 128B and copies it into the command buffer with new helper `metal_encoder_set_vertex_bytes()` (`setVertexBytes:length:atIndex:`, index 1); MSL `TransformData {float4x4 mvp; float4x4 model;}` at buffer(1), normals/worldPos from `transform.model`. Material block unchanged (pack still writes `extraMatrix`, now unread).
 - **Vulkan**: `VkPushConstantRange {VERTEX, 0, 128}` added to the single pipeline layout (`graphics_creategraphicspipeline`); `graphics_drawmodel` records `vkCmdPushConstants` with `{mvp, model}` *after* binding the pipeline (material's `mat4`, identity if mat NULL). `shaders/triangle.vert` now reads `layout(push_constant) uniform Transform {mat4 mvp; mat4 model;}` — binding0 UBO removed from the shader (descriptor layout keeps the binding, unused). `.spv` regenerated (`glslangValidator -V` + `spirv-val` clean), file passes `clang++ -fsyntax-only`.
-- API unchanged: `graphics_drawmodel(model, mat, mvp)` + `graphics_material_set_mat4(mat, world)` per node still works — backends read the CPU-side mat4 at draw time.
+- API unchanged: `graphics_draw_instanced(model, mat, mvp, count)` now takes a separate `viewProjection4x4` — see "Instanced Drawing (2026-10-02)".
 
 ### font.c SPIR-V guard (fixes startup noise)
 `font_load_text_shaders()` on Apple now returns 1 immediately without loading `text.*.spv` — previously SPIR-V bytes were fed to the MSL compiler every startup, printing two bogus `Metal shader compilation failed ... <U+0003><U+0002>#<U+0007>` errors (SPIR-V magic 0x07230203) before the embedded MSL fallback succeeded.
@@ -119,9 +119,9 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - Added a dedicated instance vertex shader on the Metal side: embedded MSL `instance3dCombined` in `graphics_metal.mm` (`g_instanceVertShader`), paired with `g_defaultFragShader`. `VERTEX_FORMAT_INSTANCE` just reuses the `VERTEX_FORMAT_FULL` descriptor — no per-instance layout, no extra attributes.
 - `framework.c` draws a 10×10 grid (100 cubes from one per-instance transform array) so the path stays exercised. `NO_INSTANCED_GRID=1` skips the whole pass, which isolates instanced-draw crashes from the rest of the frame — that toggle is what pinned the Vulkan crash below.
 
-Verified on Metal at 59-60 FPS: instances render at distinct transforms.
+Both backends now draw instanced batches in a single call: Metal via `[[instance_id]]` into buffer(1), Vulkan via a `VK_VERTEX_INPUT_RATE_INSTANCE` vertex binding feeding attributes 5-8 (`shaders/triangle_instanced.vert`). The Vulkan path falls back to per-instance `graphics_drawmodel()` calls if the instanced shader module is unavailable.
 
-**Vulkan has no instanced pipeline yet** — the descriptor-set problem that blocked it is fixed (see "Per-frame descriptor sets"), so it can be retried. `graphics_draw_instanced()` there currently loops `graphics_drawmodel()` per instance (folding the view-projection into each matrix), which is correct but gives no performance benefit. Metal is the only backend that draws instanced batches in one call.
+**Vulkan instancing works** — see "Vulkan validation clean" for the descriptor and semaphore fixes that unblocked it. Both backends issue a single instanced draw.
 
 ## Vulkan on MoltenVK (2026-10-01)
 
@@ -138,6 +138,21 @@ First runtime test of the Vulkan backend, on macOS through Homebrew's MoltenVK. 
 - **Face winding**: both pipelines used `VK_FRONT_FACE_CLOCKWISE`, but the vertex shaders negate y for Vulkan's y-down clip space, which reverses screen-space winding — back-face culling was eating the outside faces. Both now use `VK_FRONT_FACE_COUNTER_CLOCKWISE`.
 - `shaders/text.vert` also needed the same y-flip as `triangle.vert`, otherwise text drew bottom-left and mirrored.
 - Result: 4-cube scene + FPS text render correctly through MoltenVK at 60–94 FPS.
+
+### Vulkan validation clean (2026-10-02)
+Went from **84 validation errors to zero** during rendering, found and fixed one at a time with the validation layers. All pre-existing; none were visible from syntax checks or from running without the validator.
+
+1. **Descriptor sets shared across frames** — `uboDescriptorSet` and `bindlessDescriptorSet` were single sets refreshed mid-frame. Now `uboDescriptorSets[MAX_FRAMES_IN_FLIGHT]` and `bindlessDescriptorSets[MAX_FRAMES_IN_FLIGHT]`, one per swapchain image.
+2. **Descriptor writes mid-frame** — `graphics_binduniformbuffer()`/`graphics_bindtexture()` ran `vkUpdateDescriptorSets` on a set already bound to the command buffer being recorded, invalidating it *within the same frame*. They now only record intent; `graphics_flushdescriptorwrites()` applies it once per frame after the fence wait and before `vkCmdBindDescriptorSets`. This was the actual cause of the instancing segfault all along — not MoltenVK's shader translator, not the instance data layout.
+3. **`MAX_BINDLESS_RESOURCES` 16384 → 64** — nothing binds more than slot 0 or 1, and 16384 exceeded MoltenVK's `maxPerStageDescriptorUpdateAfterBindSamplers` of 1024, logging on every pipeline-layout creation.
+4. **Vulkan 1.2 features asserted, not queried** — now read via `vkGetPhysicalDeviceFeatures2`; enabling an unsupported feature invalidates `vkCreateDevice`, and the bindless pool's UPDATE_AFTER_BIND flag follows what the device reports.
+5. **One semaphore pair and one fence for the whole swapchain** — a semaphore can't be reused while its previous wait/signal is pending. Now per frame slot, and the fence is waited **before** acquiring rather than after on the image's fence (the image's fence says nothing about whether the acquire semaphore is free). `imageFrameIndex` pairs submit/present to the acquiring slot.
+6. **`graphics_createsemaphores()` ran before `graphics_getswapchainimages()`** — its loop is sized from `swapchainImageCount`, so it created *zero* semaphores. Silent, because the single-semaphore version had never needed the count.
+7. **Material descriptor never seeded** — deferring writes meant the first draw read an uninitialised descriptor before any `setmaterial()` ran.
+
+**Known remaining:** `vkDestroyDevice` reports 13 leaked objects at shutdown (buffers, an image, image views). Cleanup ordering, not a rendering correctness issue.
+
+**Verified:** scene + 10×10 instanced grid render at 132 FPS through MoltenVK with zero validation errors.
 
 ### Validation layers (the only way to debug this backend)
 Install with `brew install vulkan-validationlayers`, then build with `-DGAME_VULKAN_VALIDATION=ON` and run with both:
@@ -160,7 +175,7 @@ Verified with validation layers: `commandBuffer-recording` errors went to zero, 
 **This was the prerequisite for real Vulkan instancing.** The instanced pipeline itself is still unwritten — `shaders/triangle_instanced.vert` was removed and `VERTEX_FORMAT_INSTANCE` on Vulkan just reuses the plain vertex layout. Now that sets are per-frame, that path can be retried safely.
 
 ### Remaining validation errors (pre-existing, not yet fixed)
-- `VUID-VkPipelineLayoutCreateInfo-descriptorType-03022` / `pSetLayouts-03036`: the bindless descriptor set declares 16384 sampled-image samplers, over MoltenVK's `maxPerStageDescriptorUpdateAfterBindSamplers` limit of 1024. Harmless on this device but wrong.
+- `vkDestroyDevice` reports 13 leaked objects at shutdown (buffers, an image, image views). Cleanup ordering, not a rendering correctness issue.
 
 ---
 
