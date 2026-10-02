@@ -2,11 +2,16 @@
 /* Copyright Planimeter. All Rights Reserved. */
 
 /* Instanced default 3D vertex shader (Vulkan).
- * Same as triangle.vert, but the model matrix arrives per instance as vertex
- * attributes 5-8 (a mat4's four columns) from vertex buffer binding 1 with
- * VK_VERTEX_INPUT_RATE_INSTANCE, so one draw covers `count` placements.
- * The view-projection still rides in push constants and is shared by all
- * instances. Material layout must match vulkan_material_pack(). */
+ *
+ * Per-instance transforms come from a uniform buffer at set 1, binding 2,
+ * indexed by gl_InstanceIndex. The conventional alternative — a second
+ * vertex buffer with VK_VERTEX_INPUT_RATE_INSTANCE feeding locations 5-8 —
+ * crashes MoltenVK's SPIR-V-to-MSL translator inside
+ * MVKShaderModule::getMTLFunction, so instance data is read as a uniform
+ * array instead. One draw call still covers `count` placements.
+ *
+ * The view-projection still rides in push constants and is shared by every
+ * instance. Material layout must match vulkan_material_pack(). */
 
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
@@ -14,15 +19,17 @@ layout(location = 2) in vec3 in_tangent;
 layout(location = 3) in vec3 in_bitangent;
 layout(location = 4) in vec2 in_texcoord;
 
-layout(location = 5) in vec4 in_m0;
-layout(location = 6) in vec4 in_m1;
-layout(location = 7) in vec4 in_m2;
-layout(location = 8) in vec4 in_m3;
-
 layout(push_constant) uniform Transform {
     mat4 mvp;
     mat4 model;
 } uTransform;
+
+/* Must match MAX_INSTANCES in graphics_vulkan.cpp */
+#define MAX_INSTANCES 256
+
+layout(set = 1, binding = 2) uniform InstanceData {
+    mat4 transforms[MAX_INSTANCES];
+} uInstances;
 
 layout(set = 1, binding = 1) uniform Material {
     vec4 floats[8];
@@ -36,7 +43,7 @@ layout(location = 2) out vec3 v_worldPos;
 
 void main()
 {
-    mat4 instanceModel = mat4(in_m0, in_m1, in_m2, in_m3);
+    mat4 instanceModel = uInstances.transforms[gl_InstanceIndex];
 
     vec4 worldPos = instanceModel * vec4(in_position, 1.0);
     v_worldPos = worldPos.xyz;
