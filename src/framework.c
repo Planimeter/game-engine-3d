@@ -484,7 +484,10 @@ void framework_load(int argc, char *argv[])
         int childRight = scene_create(&g_scene, g_rootNode);
         int childTop = scene_create(&g_scene, g_rootNode);
 
-        float baseY = terrain_height(0.0f, 0.0f, TERRAIN_SEED) * TERRAIN_AMPLITUDE;
+        /* Cubes sit on the terrain, sampled through the same helper the
+         * character collides against, so a prop's collider box matches the
+         * ground it rests on. */
+        float baseY = physics_terrain_height(0.0f, 0.0f, TERRAIN_SEED, TERRAIN_AMPLITUDE);
         scene_setposition(&g_scene, childLeft, -1.3f, baseY + 0.5f, 0.0f);
         scene_setscale(&g_scene, childLeft, 0.5f, 0.5f, 0.5f);
         scene_setposition(&g_scene, childRight, 1.3f, baseY + 0.5f, 0.0f);
@@ -732,9 +735,8 @@ void framework_draw(void)
                      * cubes, each sitting on the terrain surface. */
                     float x = (gx - INSTANCED_GRID_SIZE / 2) * 0.6f;
                     float z = 8.0f + (gz - INSTANCED_GRID_SIZE / 2) * 0.6f;
-                    float groundY = (g_terrain
-                        ? terrain_height(x, z, TERRAIN_SEED) * TERRAIN_AMPLITUDE
-                        : 0.0f);
+                    float groundY = physics_terrain_height(x, z, TERRAIN_SEED,
+                                                          TERRAIN_AMPLITUDE);
                     math_identity(instanceTransforms[n]);
                     math_translate(instanceTransforms[n], instanceTransforms[n],
                                    x, groundY + 0.06f, z);
