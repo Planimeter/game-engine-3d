@@ -1005,6 +1005,7 @@ static void graphics_creategraphicspipeline()
     VkPipelineDynamicStateCreateInfo              dynamicState             = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     const VkDynamicState                          states[]                 = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
     VkPipelineLayoutCreateInfo                    pipelineLayoutCreateInfo = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    VkPipelineDepthStencilStateCreateInfo         depthStencil             = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
 
     VkVertexInputBindingDescription bindingDescription = {};
     bindingDescription.binding = 0;
@@ -1055,10 +1056,22 @@ static void graphics_creategraphicspipeline()
     viewport.scissorCount                       = 1;
 
     rasterization.cullMode                      = VK_CULL_MODE_BACK_BIT;
-    rasterization.frontFace                     = VK_FRONT_FACE_CLOCKWISE;
+    /* Engine meshes are CCW in GL space, but the vertex shaders negate y for
+     * Vulkan's y-down clip space, which reverses screen-space winding. */
+    rasterization.frontFace                     = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterization.lineWidth                     = 1.0f;
 
     multisample.rasterizationSamples            = VK_SAMPLE_COUNT_1_BIT;
+
+    /* Depth test/write on for the default 3D pipeline. Leaving
+     * pDepthStencilState NULL while the render pass has a depth attachment
+     * makes every draw produce no fragments (Vulkan spec: no depth/stencil
+     * state means the depth test always fails). */
+    depthStencil.depthTestEnable         = VK_TRUE;
+    depthStencil.depthWriteEnable        = VK_TRUE;
+    depthStencil.depthCompareOp          = VK_COMPARE_OP_LESS;
+    depthStencil.depthBoundsTestEnable   = VK_FALSE;
+    depthStencil.stencilTestEnable       = VK_FALSE;
 
     colorBlendAttachment.colorWriteMask         = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     colorBlendAttachment.blendEnable            = VK_TRUE;
@@ -1106,6 +1119,7 @@ static void graphics_creategraphicspipeline()
     createInfo.pViewportState                   = &viewport;
     createInfo.pRasterizationState              = &rasterization;
     createInfo.pMultisampleState                = &multisample;
+    createInfo.pDepthStencilState               = &depthStencil;
     createInfo.pColorBlendState                 = &colorBlend;
     createInfo.pDynamicState                    = &dynamicState;
     createInfo.layout                           = pipelineLayout;
@@ -1507,6 +1521,22 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
             exit(EXIT_FAILURE);
     }
 
+    /* Input already compiled to SPIR-V (magic 0x07230203 LE, e.g. font .spv
+     * files) — pass the bytes straight to vkCreateShaderModule. shaderc only
+     * accepts GLSL source. */
+    if (size >= 4 && memcmp(source, "\x03\x02\x23\x07", 4) == 0) {
+        VkShaderModule shaderModule;
+        VkShaderModuleCreateInfo spvInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        spvInfo.codeSize = size;
+        spvInfo.pCode    = (const uint32_t *)source;
+        VkResult spvResult = vkCreateShaderModule(device, &spvInfo, NULL, &shaderModule);
+        if (spvResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create shader module: %d\n", spvResult);
+            exit(EXIT_FAILURE);
+        }
+        return shaderModule;
+    }
+
     /* Set up compilation options */
     shaderc_compile_options_t options = shaderc_compile_options_initialize();
     if (!options) {
@@ -1674,14 +1704,9 @@ void graphics_predraw()
     inPass = 1;
 }
 
-typedef struct {
-    VkBuffer *vertexBuffers;
-    VkBuffer *indexBuffers;
-    VmaAllocation *vertexAllocations;
-    VmaAllocation *indexAllocations;
-    uint32_t *indexCounts;
-    uint32_t meshCount;
-} GPUModel;
+/* GPU vertex/index buffers live in the Model's Mesh fields (same layout as
+ * the Metal backend), so the Model* handed to callers is a real Model and
+ * model.h accessors (model_get_mesh_count etc.) work on it. */
 
 #define MAX_MATERIAL_FLOATS    32
 #define MAX_MATERIAL_VEC3S     16
@@ -1894,45 +1919,48 @@ static void graphics_transition_image(VkCommandBuffer commandBuffer,
                          0, 0, NULL, 0, NULL, 1, &barrier);
 }
 
-/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
-static GPUModel *graphics_createmodelgpu(Model *modelData)
+/* Destroy any GPU buffers already created for the model's meshes (safe to
+ * call with none created). Does not free the Model itself. */
+static void graphics_freemodelbuffers(Model *modelData)
 {
-    if (!modelData) {
-        return NULL;
+    if (!modelData || !modelData->meshes) {
+        return;
     }
 
-    GPUModel *gpuModel = (GPUModel *)malloc(sizeof(GPUModel));
-    if (!gpuModel) {
-        fprintf(stderr, "Failed to allocate graphics model\n");
-        return NULL;
+    for (uint32_t i = 0; i < modelData->meshCount; i++) {
+        Mesh *mesh = &modelData->meshes[i];
+        if (mesh->vertexBuffer && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, (VkBuffer)mesh->vertexBuffer,
+                             (VmaAllocation)mesh->vertexBufferMemory);
+        }
+        if (mesh->indexBuffer && allocator != VK_NULL_HANDLE) {
+            vmaDestroyBuffer(allocator, (VkBuffer)mesh->indexBuffer,
+                             (VmaAllocation)mesh->indexBufferMemory);
+        }
+        mesh->vertexBuffer = NULL;
+        mesh->indexBuffer = NULL;
+        mesh->vertexBufferMemory = NULL;
+        mesh->indexBufferMemory = NULL;
+    }
+}
+
+/* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html#resources-buffers */
+static int graphics_createmodelgpu(Model *modelData)
+{
+    if (!modelData || !modelData->meshes) {
+        return 0;
     }
 
-    gpuModel->meshCount = modelData->meshCount;
-
-    gpuModel->vertexBuffers     = (VkBuffer *)     malloc(sizeof(VkBuffer)      * gpuModel->meshCount);
-    gpuModel->indexBuffers      = (VkBuffer *)     malloc(sizeof(VkBuffer)      * gpuModel->meshCount);
-    gpuModel->vertexAllocations = (VmaAllocation *)malloc(sizeof(VmaAllocation) * gpuModel->meshCount);
-    gpuModel->indexAllocations  = (VmaAllocation *)malloc(sizeof(VmaAllocation) * gpuModel->meshCount);
-    gpuModel->indexCounts       = (uint32_t *)     malloc(sizeof(uint32_t)      * gpuModel->meshCount);
-
-    if (!gpuModel->vertexBuffers || !gpuModel->indexBuffers || 
-        !gpuModel->vertexAllocations || !gpuModel->indexAllocations || 
-        !gpuModel->indexCounts) {
-        fprintf(stderr, "Failed to allocate buffer arrays\n");
-        free(gpuModel->vertexBuffers);
-        free(gpuModel->indexBuffers);
-        free(gpuModel->vertexAllocations);
-        free(gpuModel->indexAllocations);
-        free(gpuModel->indexCounts);
-        free(gpuModel);
-        return NULL;
-    }
-
-    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+    for (uint32_t i = 0; i < modelData->meshCount; i++) {
         Mesh *mesh = &modelData->meshes[i];
         VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
         VmaAllocationCreateInfo allocInfo = { 0 };
         VkResult result;
+
+        mesh->vertexBuffer = NULL;
+        mesh->indexBuffer = NULL;
+        mesh->vertexBufferMemory = NULL;
+        mesh->indexBufferMemory = NULL;
 
         bufferInfo.size        = mesh->vertexCount * sizeof(Vertex);
         bufferInfo.usage       = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -1942,89 +1970,46 @@ static GPUModel *graphics_createmodelgpu(Model *modelData)
         allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
 
         /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gac72ee55598617e8eecca384e746bab51 */
-        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, 
-                                &gpuModel->vertexBuffers[i], &gpuModel->vertexAllocations[i], NULL);
+        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                                 (VkBuffer *)&mesh->vertexBuffer,
+                                 (VmaAllocation *)&mesh->vertexBufferMemory, NULL);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create vertex buffer for mesh %d: %d\n", i, result);
-            goto cleanup;
+            return 0;
         }
 
         void *mappedData;
-        result = vmaMapMemory(allocator, gpuModel->vertexAllocations[i], &mappedData);
+        result = vmaMapMemory(allocator, (VmaAllocation)mesh->vertexBufferMemory, &mappedData);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to map vertex buffer for mesh %d: %d\n", i, result);
-            goto cleanup;
+            return 0;
         }
         memcpy(mappedData, mesh->vertices, bufferInfo.size);
-        vmaUnmapMemory(allocator, gpuModel->vertexAllocations[i]);
+        vmaUnmapMemory(allocator, (VmaAllocation)mesh->vertexBufferMemory);
 
         bufferInfo.size  = mesh->indexCount * sizeof(uint32_t);
         bufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
         /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gac72ee55598617e8eecca384e746bab51 */
-        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, 
-                                &gpuModel->indexBuffers[i], &gpuModel->indexAllocations[i], NULL);
+        result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                                 (VkBuffer *)&mesh->indexBuffer,
+                                 (VmaAllocation *)&mesh->indexBufferMemory, NULL);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create index buffer for mesh %d: %d\n", i, result);
-            goto cleanup;
+            return 0;
         }
 
-        result = vmaMapMemory(allocator, gpuModel->indexAllocations[i], &mappedData);
+        result = vmaMapMemory(allocator, (VmaAllocation)mesh->indexBufferMemory, &mappedData);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to map index buffer for mesh %d: %d\n", i, result);
-            goto cleanup;
+            return 0;
         }
         memcpy(mappedData, mesh->indices, bufferInfo.size);
-        vmaUnmapMemory(allocator, gpuModel->indexAllocations[i]);
-
-        gpuModel->indexCounts[i] = mesh->indexCount;
+        vmaUnmapMemory(allocator, (VmaAllocation)mesh->indexBufferMemory);
     }
 
-    model_destroy(modelData);
-    return gpuModel;
-
-cleanup:
-    for (uint32_t j = 0; j < gpuModel->meshCount; j++) {
-        if (gpuModel->vertexBuffers[j] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, gpuModel->vertexBuffers[j], gpuModel->vertexAllocations[j]);
-        }
-        if (gpuModel->indexBuffers[j] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, gpuModel->indexBuffers[j], gpuModel->indexAllocations[j]);
-        }
-    }
-    free(gpuModel->indexCounts);
-    free(gpuModel->vertexBuffers);
-    free(gpuModel->indexBuffers);
-    free(gpuModel->vertexAllocations);
-    free(gpuModel->indexAllocations);
-    free(gpuModel);
-    return NULL;
-}
-
-/* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
-static void graphics_destroymodelgpu(GPUModel *gpuModel)
-{
-    if (!gpuModel) {
-        return;
-    }
-
-    vkQueueWaitIdle(queue);
-
-    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
-        if (gpuModel->vertexBuffers[i] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, gpuModel->vertexBuffers[i], gpuModel->vertexAllocations[i]);
-        }
-        if (gpuModel->indexBuffers[i] != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
-            vmaDestroyBuffer(allocator, gpuModel->indexBuffers[i], gpuModel->indexAllocations[i]);
-        }
-    }
-
-    free(gpuModel->indexCounts);
-    free(gpuModel->vertexBuffers);
-    free(gpuModel->indexBuffers);
-    free(gpuModel->vertexAllocations);
-    free(gpuModel->indexAllocations);
-    free(gpuModel);
+    /* CPU-side mesh data stays alive, matching the Metal backend */
+    return 1;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
@@ -2041,14 +2026,14 @@ Model *graphics_loadmodel(const char *filepath)
         return NULL;
     }
 
-    GPUModel *gpuModel = graphics_createmodelgpu(modelData);
-    if (!gpuModel) {
+    if (!graphics_createmodelgpu(modelData)) {
         fprintf(stderr, "Failed to create GPU buffers for model: %s\n", filepath);
+        graphics_freemodelbuffers(modelData);
         model_destroy(modelData);
         return NULL;
     }
 
-    return (Model *)gpuModel;
+    return modelData;
 }
 
 /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
@@ -2058,22 +2043,26 @@ void graphics_destroymodel(Model *model)
         return;
     }
 
-    graphics_destroymodelgpu((GPUModel *)model);
+    vkQueueWaitIdle(queue);
+    graphics_freemodelbuffers(model);
+    model_destroy(model);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#drawing */
 void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
 {
-    if (mat) {
-        graphics_setmaterial(mat);
-    }
-
     if (!model || graphics_isminimized()) {
         return;
     }
 
-    GPUModel *gpuModel = (GPUModel *)model;
-    if (gpuModel->meshCount == 0) {
+    /* Bind the material inside the pass: vkCmdBindDescriptorSets is recorded
+     * into the command buffer, so binding it before graphics_predraw() began
+     * the render pass would leave the material's UBO unbound at draw time. */
+    if (mat) {
+        graphics_setmaterial(mat);
+    }
+
+    if (model->meshCount == 0) {
         return;
     }
 
@@ -2105,15 +2094,21 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
 
     VkDeviceSize offsets[] = {0};
 
-    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        VkBuffer vertexBuffer = (VkBuffer)mesh->vertexBuffer;
+        if (!vertexBuffer || !mesh->indexBuffer || mesh->indexCount == 0) {
+            continue;
+        }
+
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap22.html#vkCmdBindVertexBuffers */
-        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &gpuModel->vertexBuffers[i], offsets);
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertexBuffer, offsets);
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdBindIndexBuffer */
-        vkCmdBindIndexBuffer(commandBuffers[imageIndex], gpuModel->indexBuffers[i], 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
         /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap21.html#vkCmdDrawIndexed */
-        vkCmdDrawIndexed(commandBuffers[imageIndex], gpuModel->indexCounts[i], 1, 0, 0, 0);
+        vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, 1, 0, 0, 0);
     }
 }
 
@@ -2130,8 +2125,7 @@ void graphics_draw_instanced(Model *model,
         return;
     }
 
-    GPUModel *gpuModel = (GPUModel *)model;
-    if (gpuModel->meshCount == 0) {
+    if (model->meshCount == 0) {
         return;
     }
 
@@ -2150,10 +2144,15 @@ void graphics_draw_instanced(Model *model,
     VkDeviceSize offsets[] = {0};
     uint32_t instanceCount = count == 0 ? 1 : (uint32_t)count;
 
-    for (uint32_t i = 0; i < gpuModel->meshCount; i++) {
-        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &gpuModel->vertexBuffers[i], offsets);
-        vkCmdBindIndexBuffer(commandBuffers[imageIndex], gpuModel->indexBuffers[i], 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(commandBuffers[imageIndex], gpuModel->indexCounts[i], instanceCount, 0, 0, 0);
+    for (uint32_t i = 0; i < model->meshCount; i++) {
+        Mesh *mesh = &model->meshes[i];
+        VkBuffer vertexBuffer = (VkBuffer)mesh->vertexBuffer;
+        if (!vertexBuffer || !mesh->indexBuffer || mesh->indexCount == 0) {
+            continue;
+        }
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertexBuffer, offsets);
+        vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, instanceCount, 0, 0, 0);
     }
 }
 
@@ -3506,7 +3505,9 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     viewport.scissorCount = 1;
 
     rasterization.cullMode = state.backfaceCulling ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE;
-    rasterization.frontFace = VK_FRONT_FACE_CLOCKWISE;
+    /* Same y-flip caveat as the default pipeline: GL-space CCW winding
+     * arrives counter-clockwise after the vertex shader negates y. */
+    rasterization.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterization.lineWidth = 1.0f;
 
     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;

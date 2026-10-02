@@ -218,8 +218,11 @@ set(SOURCES
     src/window_sdl.c
     )
 
-# Graphics backend: Metal on macOS, Vulkan elsewhere
-if(APPLE)
+# Graphics backend: Metal on macOS, Vulkan elsewhere.
+# GAME_USE_VULKAN=ON forces the Vulkan backend everywhere (macOS runs it
+# through MoltenVK from Homebrew).
+option(GAME_USE_VULKAN "Use the Vulkan graphics backend (MoltenVK on macOS)" OFF)
+if(APPLE AND NOT GAME_USE_VULKAN)
     list(APPEND SOURCES src/graphics_metal.mm src/graphics_metal_helpers.m)
 else()
     list(APPEND SOURCES src/graphics_vulkan.cpp)
@@ -284,6 +287,16 @@ endif()
 set(VMA_STATIC_VULKAN_FUNCTIONS OFF CACHE BOOL "Link statically with Vulkan API")
 if (APPLE)
     target_compile_options(VulkanMemoryAllocator INTERFACE -Wno-nullability-completeness)
+endif()
+
+if(GAME_USE_VULKAN)
+    # Tells window/font code the Vulkan backend is active (not just "on Apple").
+    target_compile_definitions(game PRIVATE GRAPHICS_VULKAN)
+    if(APPLE)
+        # volk and SDL dlopen the Vulkan loader by leaf name (libvulkan.dylib);
+        # Homebrew's prefix is not in dyld's fallback search on Apple Silicon.
+        target_link_options(game PRIVATE -Wl,-rpath,/opt/homebrew/lib)
+    endif()
 endif()
 
 if(NOT WIN32)

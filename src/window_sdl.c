@@ -19,11 +19,12 @@ void window_init()
 
     SDL_Init(SDL_INIT_VIDEO);              /* Initialize SDL3    */
 
-#ifdef __APPLE__
-    /* On macOS, we use Metal instead of Vulkan. Use SDL_WINDOW_METAL flag. */
+#if defined(__APPLE__) && !defined(GRAPHICS_VULKAN)
+    /* Default macOS backend is Metal; GAME_USE_VULKAN builds request a
+     * Vulkan surface instead (MoltenVK). */
     Uint32 windowFlags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_METAL;
 #else
-    /* On other platforms, request a Vulkan surface for the Vulkan backend */
+    /* Request a Vulkan surface for the Vulkan backend */
     Uint32 windowFlags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
 #endif
     /* Render at the display's native pixel density (Retina/HiDPI) instead of
@@ -45,7 +46,7 @@ void window_init()
         return;
     }
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GRAPHICS_VULKAN)
     /* Create Metal view for this window */
     metalView = SDL_Metal_CreateView(window);
     if (!metalView) {
@@ -77,7 +78,7 @@ SDL_MetalView window_get_metal_view(void)
 
 int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
 {
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(GRAPHICS_VULKAN)
     /* Metal backend doesn't use Vulkan surfaces */
     (void)instance;
     (void)surface;

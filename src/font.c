@@ -165,10 +165,11 @@ static int font_init_freetype()
 
 static int font_load_text_shaders()
 {
-#if defined(__APPLE__)
+#if defined(__APPLE__) && !defined(GRAPHICS_VULKAN)
     /* Metal compiles MSL, not SPIR-V. Skip the .spv attempt so the embedded
      * MSL fallback (graphics_get_text_shaders) is used directly instead of
-     * failing compilation on SPIR-V bytes. */
+     * failing compilation on SPIR-V bytes. The Vulkan backend (GAME_USE_VULKAN,
+     * including MoltenVK) needs the .spv files. */
     return 1;
 #else
     if (g_text_spv_ready) {

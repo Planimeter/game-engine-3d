@@ -106,9 +106,22 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 - Blend modes: NONE, ALPHA, ADD, PREMULT
 
 ### Remaining Issues
-- Render pass always includes depth attachment even when no pipeline uses depth testing
-- Vulkan backend only syntax-checked on macOS (`clang++ -fsyntax-only`) — never runtime-tested on this machine
+- ~~Vulkan backend only syntax-checked on macOS~~ — now runtime-verified via MoltenVK, see "Vulkan on MoltenVK (2026-10-01)"
 - Pre-existing compile break fixed: `GPUBuffer` typedef used at line 134 but declared ~1700 — moved the typedef up so the file compiles again
+
+## Vulkan on MoltenVK (2026-10-01)
+
+First runtime test of the Vulkan backend, on macOS through Homebrew's MoltenVK. Five real bugs, all invisible to `clang++ -fsyntax-only`:
+
+- **`GAME_USE_VULKAN=ON`** CMake option builds `graphics_vulkan.cpp` on macOS instead of Metal, defines `GRAPHICS_VULKAN` for `window_sdl.c` (requests `SDL_WINDOW_VULKAN` + real surface) and `font.c` (keeps the SPIR-V text shaders instead of the MSL fallback), and adds `-Wl,-rpath,/opt/homebrew/lib` so volk/SDL can dlopen the loader by leaf name.
+- **Run command needs the ICD**: the loader does not search Homebrew's prefix, so `VK_ICD_FILENAMES=/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json ./build/game.app/Contents/MacOS/game`. Without it: "Installed Vulkan Portability library doesn't implement the VK_KHR_surface extension" + `vkCreateInstance -9`.
+- **`graphics_createshader` ate SPIR-V**: shaderc only takes GLSL, so the font's `text.*.spv` blew up in the GLSL preprocessor. Now sniffs the SPIR-V magic (`\x03\x02\x23\x07`) and goes straight to `vkCreateShaderModule`.
+- **`GPUModel` type-pun**: `graphics_loadmodel` returned a `GPUModel*` cast to `Model*`, so `model_get_mesh_count()` read a pointer field as a count (printed `1015160656 meshes`). Rewritten to match Metal — the real `Model*` is returned and GPU buffers live in `Mesh {vertexBuffer, indexBuffer, vertexBufferMemory, indexBufferMemory}`, so CPU mesh data now survives instead of being destroyed after upload.
+- **No depth state on the default pipeline**: `pDepthStencilState` was NULL while the render pass had a depth attachment, which per spec makes every draw discard all fragments. Added `depthTestEnable/depthWriteEnable/compareOp = LESS` to `graphics_creategraphicspipeline`.
+- **Material bound too early**: `graphics_drawmodel` called `graphics_setmaterial()` before `graphics_predraw()` had issued `vkCmdBeginRenderPass`/`vkCmdBindDescriptorSets`. Vulkan records commands, so the descriptor binding landed before the pass began and the material never reached the GPU (everything rendered near-black). The bind now happens inside `graphics_drawmodel`.
+- **Face winding**: both pipelines used `VK_FRONT_FACE_CLOCKWISE`, but the vertex shaders negate y for Vulkan's y-down clip space, which reverses screen-space winding — back-face culling was eating the outside faces. Both now use `VK_FRONT_FACE_COUNTER_CLOCKWISE`.
+- `shaders/text.vert` also needed the same y-flip as `triangle.vert`, otherwise text drew bottom-left and mirrored.
+- Result: 4-cube scene + FPS text render correctly through MoltenVK at 60–94 FPS.
 
 ---
 
