@@ -60,20 +60,28 @@ typedef struct {
     int sprint;
 } PlayerInput;
 
+/* Axis-aligned box the character cannot walk through. Props come from the
+ * scene graph, so a cube you can see is a cube you collide with. */
+typedef struct {
+    float center[3];   /* box centre */
+    float half[3];     /* half-extents */
+} PlayerObstacle;
+
 /* Place a character standing on the terrain at (x, z), looking down -Z. */
 void player_init(Player *p, float x, float z, uint32_t seed, float amplitude,
                  float extent);
 
 /* Advance one frame. `yaw` orients the strafe axes in radians. Integrates in
- * substeps so a long frame cannot tunnel through a hill. */
-void player_update(Player *p, const PlayerInput *input, float yaw, float dt);
+ * substeps so a long frame cannot tunnel through a hill. `obstacles` may be
+ * NULL with `obstacleCount` 0, in which case only terrain collides. */
+void player_update(Player *p, const PlayerInput *input, float yaw, float dt,
+                   const PlayerObstacle *obstacles, int obstacleCount);
 
 /* Eye position, i.e. feet plus eyeHeight. */
 void player_eye(const Player *p, float out[3]);
 
 /* Terrain surface height directly under the character's feet. */
 float player_ground_height(const Player *p);
-
 #ifdef __cplusplus
 }
 #endif

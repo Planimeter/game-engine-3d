@@ -153,7 +153,38 @@ static int player_slope_blocks(const Player *p, float x, float z,
     return slope > p->maxSlope;
 }
 
-void player_update(Player *p, const PlayerInput *input, float yaw, float dt)
+/* Push a circle out of an axis-aligned box along the axis of least
+ * penetration, which is the standard 2D resolution and reads as sliding
+ * along a wall rather than stopping dead against it. Horizontal only: the
+ * character can stand on top of a low box, so vertical penetration is left
+ * to the ground clamp rather than blocking the move. */
+static int player_resolve_box(float pos[3], float radius, float height,
+                              const PlayerObstacle *box)
+{
+    float top = box->center[1] + box->half[1];
+    /* Standing on the box is not colliding with its side. */
+    if (pos[1] >= top - PLAYER_EPSILON) {
+        return 0;
+    }
+
+    float dx = pos[0] - box->center[0];
+    float dz = pos[2] - box->center[2];
+    float overlapX = box->half[0] + radius - fabsf(dx);
+    float overlapZ = box->half[2] + radius - fabsf(dz);
+    if (overlapX <= 0.0f || overlapZ <= 0.0f) {
+        return 0;
+    }
+
+    if (overlapX < overlapZ) {
+        pos[0] += (dx < 0.0f ? -overlapX : overlapX);
+    } else {
+        pos[2] += (dz < 0.0f ? -overlapZ : overlapZ);
+    }
+    return 1;
+}
+
+void player_update(Player *p, const PlayerInput *input, float yaw, float dt,
+                   const PlayerObstacle *obstacles, int obstacleCount)
 {
     if (!p) return;
 
@@ -250,6 +281,36 @@ void player_update(Player *p, const PlayerInput *input, float yaw, float dt)
                     p->velocity[2] = 0.0f;
                 }
             }
+        }
+
+        /* Props. Resolve the horizontal move against every box and drop the
+         * velocity component along whichever axis pushed the character, so
+         * sliding along a cube is stable instead of accumulating a pushback
+         * each frame. Two passes handle a corner where two boxes meet. */
+        if (obstacles && obstacleCount > 0) {
+            float probe[3];
+            for (int pass = 0; pass < 2; pass++) {
+                probe[0] = newX;
+                probe[1] = p->position[1];
+                probe[2] = newZ;
+                int pushed = 0;
+                for (int i = 0; i < obstacleCount; i++) {
+                    float before = probe[0];
+                    float beforeZ = probe[2];
+                    if (player_resolve_box(probe, p->radius, p->height,
+                                           &obstacles[i])) {
+                        pushed = 1;
+                        /* Cancel the velocity that drove into the face. */
+                        if (probe[0] != before) p->velocity[0] = 0.0f;
+                        if (probe[2] != beforeZ) p->velocity[2] = 0.0f;
+                    }
+                }
+                if (!pushed) {
+                    break;
+                }
+            }
+            newX = probe[0];
+            newZ = probe[2];
         }
 
         p->position[0] = newX;
