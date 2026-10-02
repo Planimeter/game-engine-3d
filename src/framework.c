@@ -48,11 +48,41 @@ static int g_lookActive = 0;
 static const float g_moveSpeed = 3.0f;      /* world units per second */
 static const float g_lookSensitivity = 0.0025f; /* radians per pixel */
 
+/* Releases everything framework_load created. Registered before
+ * graphics_init()'s own atexit so it runs first — graphics_shutdown()
+ * destroys the device, and anything still holding GPU buffers at that point
+ * is reported as leaked. */
+static void framework_shutdown(void)
+{
+    if (g_testText) {
+        text_destroy(g_testText);
+        g_testText = NULL;
+    }
+    if (g_testFont) {
+        font_destroy(g_testFont);
+        g_testFont = NULL;
+    }
+    if (g_testModel) {
+        graphics_destroymodel(g_testModel);
+        g_testModel = NULL;
+    }
+    if (g_litMaterial) {
+        graphics_destroymaterial(g_litMaterial);
+        g_litMaterial = NULL;
+    }
+    if (g_gridMaterial) {
+        graphics_destroymaterial(g_gridMaterial);
+        g_gridMaterial = NULL;
+    }
+}
+
 void framework_init(const char *argv0)
 {
     filesystem_init(argv0);
     window_init();
     audio_init(argv0);
+    /* Registered first, so it runs last: atexit is LIFO */
+    atexit(framework_shutdown);
     graphics_init();
 }
 

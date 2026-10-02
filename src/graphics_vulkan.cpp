@@ -2200,8 +2200,7 @@ static int graphics_createmodelgpu(Model *modelData)
         /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#gac72ee55598617e8eecca384e746bab51 */
         result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
                                  (VkBuffer *)&mesh->vertexBuffer,
-                                 (VmaAllocation *)&mesh->vertexBufferMemory, NULL);
-        if (result != VK_SUCCESS) {
+                                 (VmaAllocation *)&mesh->vertexBufferMemory, NULL);        if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create vertex buffer for mesh %d: %d\n", i, result);
             return 0;
         }
@@ -2648,6 +2647,127 @@ void graphics_setmaterial(Material mat)
     }
 }
 
+/* Every buffer the backend hands out is registered here so shutdown can free
+ * the ones the caller still owns. vmaDestroyAllocator does not free them, and
+ * vkDestroyDevice reports them as leaked objects. */
+static GPUBuffer **g_ownedBuffers;
+static size_t g_ownedBufferCount;
+static size_t g_ownedBufferCapacity;
+
+/* Textures and pipelines are tracked the same way: anything the caller still
+ * owns at shutdown (the font's atlas pages and pipeline) must be freed before
+ * vkDestroyDevice, which otherwise reports them as leaked. */
+static GPUTexture **g_ownedTextures;
+static size_t g_ownedTextureCount;
+static size_t g_ownedTextureCapacity;
+static GPUPipeline **g_ownedPipelines;
+static size_t g_ownedPipelineCount;
+static size_t g_ownedPipelineCapacity;
+
+/* Defined next to the state above so every registry is in one place. */
+static void graphics_tracktexture(GPUTexture *t){
+    if (!t) return;
+    if (g_ownedTextureCount == g_ownedTextureCapacity) {
+        size_t cap = g_ownedTextureCapacity ? g_ownedTextureCapacity * 2 : 8;
+        GPUTexture **tmp = (GPUTexture **)realloc(g_ownedTextures, cap * sizeof(GPUTexture *));
+        if (!tmp) return;
+        g_ownedTextures = tmp;
+        g_ownedTextureCapacity = cap;
+    }
+    g_ownedTextures[g_ownedTextureCount++] = t;
+}
+
+static void graphics_untracktexture(GPUTexture *t)
+{
+    for (size_t i = 0; i < g_ownedTextureCount; i++) {
+        if (g_ownedTextures[i] == t) {
+            g_ownedTextures[i] = g_ownedTextures[--g_ownedTextureCount];
+            return;
+        }
+    }
+}
+
+static void graphics_freealltextures(void)
+{
+    while (g_ownedTextureCount > 0) {
+        graphics_destroytexture((Texture)g_ownedTextures[--g_ownedTextureCount]);
+    }
+    free(g_ownedTextures);
+    g_ownedTextures = NULL;
+    g_ownedTextureCapacity = 0;
+}
+
+static void graphics_trackpipeline(GPUPipeline *p)
+{
+    if (!p) return;
+    if (g_ownedPipelineCount == g_ownedPipelineCapacity) {
+        size_t cap = g_ownedPipelineCapacity ? g_ownedPipelineCapacity * 2 : 8;
+        GPUPipeline **tmp = (GPUPipeline **)realloc(g_ownedPipelines, cap * sizeof(GPUPipeline *));
+        if (!tmp) return;
+        g_ownedPipelines = tmp;
+        g_ownedPipelineCapacity = cap;
+    }
+    g_ownedPipelines[g_ownedPipelineCount++] = p;
+}
+
+static void graphics_untrackpipeline(GPUPipeline *p)
+{
+    for (size_t i = 0; i < g_ownedPipelineCount; i++) {
+        if (g_ownedPipelines[i] == p) {
+            g_ownedPipelines[i] = g_ownedPipelines[--g_ownedPipelineCount];
+            return;
+        }
+    }
+}
+
+static void graphics_freeallpipelines(void)
+{
+    while (g_ownedPipelineCount > 0) {
+        graphics_destroypipeline((Pipeline)g_ownedPipelines[--g_ownedPipelineCount]);
+    }
+    free(g_ownedPipelines);
+    g_ownedPipelines = NULL;
+    g_ownedPipelineCapacity = 0;
+}
+
+static void graphics_trackbuffer(GPUBuffer *buffer)
+{
+    if (!buffer) {
+        return;
+    }
+    if (g_ownedBufferCount == g_ownedBufferCapacity) {
+        size_t newCap = g_ownedBufferCapacity ? g_ownedBufferCapacity * 2 : 32;
+        GPUBuffer **tmp = (GPUBuffer **)realloc(g_ownedBuffers, newCap * sizeof(GPUBuffer *));
+        if (!tmp) {
+            return;
+        }
+        g_ownedBuffers = tmp;
+        g_ownedBufferCapacity = newCap;
+    }
+    g_ownedBuffers[g_ownedBufferCount++] = buffer;
+}
+
+static void graphics_untrackbuffer(GPUBuffer *buffer)
+{
+    for (size_t i = 0; i < g_ownedBufferCount; i++) {
+        if (g_ownedBuffers[i] == buffer) {
+            g_ownedBuffers[i] = g_ownedBuffers[--g_ownedBufferCount];
+            return;
+        }
+    }
+}
+
+static void graphics_freeallbuffers(void)
+{
+    /* Back to front: callers often depend on a later buffer */
+    while (g_ownedBufferCount > 0) {
+        graphics_destroybuffer((Buffer)g_ownedBuffers[--g_ownedBufferCount]);
+    }
+    free(g_ownedBuffers);
+    g_ownedBuffers = NULL;
+    g_ownedBufferCapacity = 0;
+}
+
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
 {
     GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
@@ -2679,6 +2799,7 @@ Buffer graphics_createvertexbuffer(const void *data, size_t size)
         graphics_updatebuffer(buffer, data, size);
     }
 
+    graphics_trackbuffer(buffer);
     return buffer;
 }
 
@@ -2713,6 +2834,7 @@ Buffer graphics_createindexbuffer(const void *data, size_t size)
         graphics_updatebuffer(buffer, data, size);
     }
 
+    graphics_trackbuffer(buffer);
     return buffer;
 }
 
@@ -2742,6 +2864,7 @@ Buffer graphics_createuniformbuffer(size_t size)
     }
 
     buffer->size = size;
+    graphics_trackbuffer(buffer);
     return buffer;
 }
 
@@ -2777,6 +2900,7 @@ void graphics_destroybuffer(Buffer buf)
         vmaDestroyBuffer(allocator, buffer->buffer, buffer->allocation);
     }
 
+    graphics_untrackbuffer(buffer);
     free(buffer);
 }
 
@@ -3001,6 +3125,7 @@ Texture graphics_createtexture_rgba(int width,
         return NULL;
     }
 
+    graphics_tracktexture(texture);
     return texture;
 }
 
@@ -3097,6 +3222,7 @@ void graphics_destroytexture(Texture tex)
         vmaDestroyImage(allocator, texture->image, texture->allocation);
     }
 
+    graphics_untracktexture(texture);
     free(texture);
 }
 
@@ -3571,9 +3697,25 @@ void graphics_shutdown(void)
 
         if (swapchain != VK_NULL_HANDLE) {
             vkDestroySwapchainKHR(device, swapchain, NULL);
+            swapchain = VK_NULL_HANDLE;
         }
         if (surface != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(instance, surface, NULL);
+            surface = VK_NULL_HANDLE;
+        }
+
+        /* Shader modules are owned here, not by the pipeline. */
+        if (vertShader != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(device, (VkShaderModule)vertShader, NULL);
+            vertShader = VK_NULL_HANDLE;
+        }
+        if (fragShader != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(device, (VkShaderModule)fragShader, NULL);
+            fragShader = VK_NULL_HANDLE;
+        }
+        if (g_instanceVertShader != VK_NULL_HANDLE) {
+            vkDestroyShaderModule(device, (VkShaderModule)g_instanceVertShader, NULL);
+            g_instanceVertShader = VK_NULL_HANDLE;
         }
         if (graphicsPipeline != VK_NULL_HANDLE) {
             /* Destroy all cached pipelines */
@@ -3620,6 +3762,15 @@ void graphics_shutdown(void)
             graphics_destroybuffer((Buffer)g_uniformBuffer);
             g_uniformBuffer = NULL;
         }
+        /* Caches in graphics_createpipeline()/graphics_createuniformbuffer()
+         * live past init; vmaDestroyAllocator below does not free them. */
+        if (g_instanceBuffer) {
+            graphics_destroybuffer(g_instanceBuffer);
+            g_instanceBuffer = NULL;
+        }
+        graphics_freeallbuffers();
+        graphics_freeallpipelines();
+        graphics_freealltextures();
 
         graphics_destroysemaphores();
         graphics_destroyfences();
@@ -3838,6 +3989,7 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     pipeline->fragShader = (VkShaderModule)_fragShader;
     pipeline->vertexFormat = format;
     pipeline->rasterState = state;
+    graphics_trackpipeline(pipeline);
 
     VkGraphicsPipelineCreateInfo createInfo = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
     VkPipelineShaderStageCreateInfo vertShaderStage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
@@ -3940,6 +4092,9 @@ void graphics_bindpipeline(Pipeline pipeline)
     }
 }
 
+/* Pipelines the caller still owns at shutdown (font.c creates one and only
+ * destroys it in font_destroy). Registered so vkDestroyDevice does not report
+ * them as leaked. State is declared alongside the buffer/texture registries. */
 void graphics_destroypipeline(Pipeline pipeline)
 {
     if (pipeline) {
@@ -3947,6 +4102,7 @@ void graphics_destroypipeline(Pipeline pipeline)
         if (gpuPipeline->pipeline != VK_NULL_HANDLE) {
             vkDestroyPipeline(device, gpuPipeline->pipeline, NULL);
         }
+        graphics_untrackpipeline(gpuPipeline);
         free(gpuPipeline);
     }
 }

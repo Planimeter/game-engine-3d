@@ -447,3 +447,6 @@ third_party/*
 
 # Vulkan/MoltenVK test build dir
 build-vk/
+
+# Debug build dir
+build-dbg/
