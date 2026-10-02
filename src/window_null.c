@@ -22,6 +22,11 @@ int window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface)
     return 0;
 }
 
+void window_setkeyboardfocus(int focused)
+{
+    (void)focused;
+}
+
 void window_getwindowsizeinpixels(int *w, int *h)
 {
     (void)w;

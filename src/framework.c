@@ -53,6 +53,11 @@ static Model *g_terrain = NULL;
 static Material g_terrainMaterial = NULL;
 /* Camera eye height above the ground, for the walk camera. */
 static const float g_eyeHeight = 2.2f;
+
+/* Controls overlay. Text objects are allocated once and rewritten each frame
+ * by text_set(), which avoids per-frame allocation in the render loop. */
+#define HELP_LINE_COUNT 3
+static Text *g_helpText[HELP_LINE_COUNT];
 static int g_poseDumped;
 
 /* Camera + scene graph */
@@ -80,6 +85,12 @@ static void framework_shutdown(void)
     if (g_testText) {
         text_destroy(g_testText);
         g_testText = NULL;
+    }
+    for (int i = 0; i < HELP_LINE_COUNT; i++) {
+        if (g_helpText[i]) {
+            text_destroy(g_helpText[i]);
+            g_helpText[i] = NULL;
+        }
     }
     if (g_testFont) {
         font_destroy(g_testFont);
@@ -124,6 +135,9 @@ void framework_load(int argc, char *argv[])
 
     if (g_testFont) {
         g_testText = text_create(g_testFont, "FPS: 0");
+        for (int i = 0; i < HELP_LINE_COUNT; i++) {
+            g_helpText[i] = text_create(g_testFont, "");
+        }
     }
 
     /* Load 3D test model.
@@ -324,8 +338,9 @@ void framework_update(uint64_t deltaTime)
     float dt = (float)deltaTime / 1000.0f;
     g_elapsed += dt;
 
-    /* Spin the scene root; the children orbit with it */
-    if (g_rootNode >= 0) {
+    /* Spin the scene root; the children orbit with it. SPIN=0 freezes it,
+     * which is useful for checking whether motion is the cubes or the view. */
+    if (g_rootNode >= 0 && !getenv("SPIN")) {
         scene_setrotation(&g_scene, g_rootNode, 0.0f, g_elapsed * 0.5f, 0.0f);
     }
 
@@ -495,6 +510,21 @@ void framework_draw(void)
     font_begin_batch(g_testFont);
     text_draw(g_testText, 8.0f, 8.0f, 0.0f,
               1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    /* Controls, so the bindings do not have to be remembered or guessed. */
+    {
+        static const char *lines[] = {
+            "WASD  move      E/Q  up/down",
+            "right-drag  look      wheel  zoom",
+            "NO_INSTANCED_GRID=1  skip grid"
+        };
+        float y = 30.0f;
+        for (size_t i = 0; i < sizeof(lines) / sizeof(lines[0]); i++) {
+            text_set(g_helpText[i], lines[i]);
+            text_draw(g_helpText[i], 8.0f, y, 0.0f, 1.0f, 1.0f,
+                      0.0f, 0.0f, 0.0f, 0.0f);
+            y += 18.0f;
+        }
+    }
     font_end_batch(g_testFont);
 }
 
@@ -589,9 +619,21 @@ void framework_textinput(const char *text)
 
 void framework_mousemoved(int x, int y, int dx, int dy, int istouch)
 {
-    if (g_lookActive && !istouch) {
-        camera_look(&g_camera, (float)dx, (float)dy, g_lookSensitivity);
+    if (!g_lookActive || istouch) {
+        return;
     }
+    /* Ignore implausible jumps. A missed relative-mode release can deliver an
+     * absolute-to-relative delta thousands of pixels wide, which whips the
+     * camera around; clamping keeps that from looking like a spin. */
+    const int kMaxDelta = 200;
+    if (dx > kMaxDelta) dx = kMaxDelta;
+    if (dx < -kMaxDelta) dx = -kMaxDelta;
+    if (dy > kMaxDelta) dy = kMaxDelta;
+    if (dy < -kMaxDelta) dy = -kMaxDelta;
+    if (dx == 0 && dy == 0) {
+        return;
+    }
+    camera_look(&g_camera, (float)dx, (float)dy, g_lookSensitivity);
 }
 
 void framework_mousepressed(int x, int y, const char *button, int istouch)
@@ -599,12 +641,20 @@ void framework_mousepressed(int x, int y, const char *button, int istouch)
     if (!istouch && button && !strcmp(button, "right")) {
         g_lookActive = 1;
         window_setmouserelative(1);
+    } else if (!istouch && button && !strcmp(button, "left")) {
+        /* Left click grabs keyboard focus. SDL delivers key events to the
+         * focused window, so without this the controls appear dead until
+         * the user clicks. */
+        window_setkeyboardfocus(1);
     }
 }
 
 void framework_mousereleased(int x, int y, const char *button, int istouch)
 {
     if (!istouch && button && !strcmp(button, "right")) {
+        /* Always drop relative mode on release. If a release is ever missed
+         * the camera would otherwise keep spinning from stray deltas with no
+         * way back. */
         g_lookActive = 0;
         window_setmouserelative(0);
     }

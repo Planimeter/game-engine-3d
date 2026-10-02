@@ -44,6 +44,7 @@ int    window_vulkan_createsurface(VkInstance instance, VkSurfaceKHR* surface);
 void   window_getwindowsizeinpixels(int *w, int *h);
 float  window_getpixeldensity(void);
 void   window_setmouserelative(int enabled);
+void   window_setkeyboardfocus(int focused);
 void   window_shutdown(void);
 
 #ifdef __APPLE__

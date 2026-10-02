@@ -107,6 +107,15 @@ void window_setmouserelative(int enabled)
     SDL_SetWindowRelativeMouseMode(window, enabled != 0);
 }
 
+void window_setkeyboardfocus(int focused)
+{
+    /* SDL3 has no explicit focus setter; raising the window is the way to
+     * take keyboard focus, which SDL needs before it delivers key events. */
+    if (focused) {
+        SDL_RaiseWindow(window);
+    }
+}
+
 void window_shutdown(void)
 {
 #ifdef __APPLE__
