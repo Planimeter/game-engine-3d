@@ -222,6 +222,12 @@ set(SOURCES
 # GAME_USE_VULKAN=ON forces the Vulkan backend everywhere (macOS runs it
 # through MoltenVK from Homebrew).
 option(GAME_USE_VULKAN "Use the Vulkan graphics backend (MoltenVK on macOS)" OFF)
+# Enables the Vulkan validation layers (VK_LAYER_KHRONOS_validation), which
+# the backend probes for under _DEBUG.
+option(GAME_VULKAN_VALIDATION "Enable Vulkan validation layers" OFF)
+if(GAME_VULKAN_VALIDATION)
+    add_compile_definitions(_DEBUG)
+endif()
 if(APPLE AND NOT GAME_USE_VULKAN)
     list(APPEND SOURCES src/graphics_metal.mm src/graphics_metal_helpers.m)
 else()

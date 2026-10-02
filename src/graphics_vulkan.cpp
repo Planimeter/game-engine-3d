@@ -76,6 +76,8 @@ static Shader fragShader;
  * shader, used together by graphics_draw_instanced */
 static Shader g_instanceVertShader;
 static Shader g_defaultFragShader;
+/* Cached per-instance transform buffer, bound at UBO slot 2 */
+static Buffer g_instanceBuffer;
 
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
@@ -141,6 +143,9 @@ typedef struct {
 
 /* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
 #define UNIFORM_BUFFER_SIZE 4096
+
+/* Must match MAX_INSTANCES in shaders/triangle_instanced.vert */
+#define MAX_INSTANCES 256
 static GPUBuffer *g_uniformBuffer = NULL;
 
 /* 34.2. WSI Surface */
@@ -163,6 +168,15 @@ static void graphics_createinstance()
     const char *validationLayerName = "VK_LAYER_KHRONOS_validation";
     const char **enabledLayerNames = NULL;
     uint32_t enabledLayerCount = 0;
+
+    /* volk must load the loader before any Vulkan entry point is callable.
+     * The validation-layer probe below uses vkEnumerateInstanceLayerProperties,
+     * so this has to come first. */
+    VkResult result = volkInitialize();
+    if (result != VK_SUCCESS) {
+        fprintf(stderr, "Failed to initialize Vulkan loader: %d\n", result);
+        exit(EXIT_FAILURE);
+    }
 
 #ifdef _DEBUG
     // Check if validation layer is available
@@ -195,12 +209,6 @@ static void graphics_createinstance()
         }
     }
 #endif
-
-    VkResult result = volkInitialize();
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to initialize Vulkan loader: %d\n", result);
-        exit(EXIT_FAILURE);
-    }
 
     // Check for portability enumeration extension (required for MoltenVK).
     uint32_t extensionCount = 0;
@@ -2183,11 +2191,32 @@ void graphics_draw_instanced(Model *model,
      * this before graphics_predraw() would place it outside the render pass. */
     graphics_setmaterial(mat);
 
-    /* Instance transforms as one mat4 per instance (binding 1) */
-    Buffer instanceBuffer = graphics_createvertexbuffer(transforms4x4, count * sizeof(float) * 16);
-    if (!instanceBuffer) {
-        return;
+    /* Per-instance transforms go to UBO slot 2 as a uniform array. The
+     * conventional per-instance vertex buffer binding crashes MoltenVK's
+     * SPIR-V-to-MSL translator, and a single uniform also avoids allocating
+     * a transient GPU buffer every draw. */
+    GPUBuffer *instBuf = (GPUBuffer *)g_instanceBuffer;
+    size_t needed = count * sizeof(float) * 16;
+    if (count > MAX_INSTANCES) {
+        fprintf(stderr, "Vulkan: instance count %zu exceeds MAX_INSTANCES (%d), truncating\n",
+                count, MAX_INSTANCES);
+        count = MAX_INSTANCES;
+        needed = count * sizeof(float) * 16;
     }
+
+    if (!instBuf || instBuf->size < needed) {
+        if (instBuf) {
+            graphics_destroybuffer((Buffer)instBuf);
+        }
+        instBuf = (GPUBuffer *)graphics_createvertexbuffer(NULL, MAX_INSTANCES * sizeof(float) * 16);
+        if (!instBuf) {
+            return;
+        }
+        g_instanceBuffer = (Buffer)instBuf;
+    }
+
+    graphics_updatebuffer((Buffer)instBuf, transforms4x4, needed);
+    graphics_binduniformbuffer((Buffer)instBuf, 2);
 
     Shader instVert = g_instanceVertShader;
     Pipeline p = NULL;
@@ -2197,12 +2226,11 @@ void graphics_draw_instanced(Model *model,
     }
     if (!p) {
         fprintf(stderr, "Vulkan: instanced pipeline unavailable, skipping draw\n");
-        graphics_destroybuffer(instanceBuffer);
         return;
     }
 
     // Bind instanced pipeline
-    if (currentPipeline != p) {
+    if (currentPipeline != (VkPipeline)p) {
         vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)p);
         currentPipeline = (VkPipeline)p;
     }
@@ -2227,9 +2255,8 @@ void graphics_draw_instanced(Model *model,
     vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout,
                        VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushData), &pushData);
 
-    GPUBuffer *ib = (GPUBuffer *)instanceBuffer;
-    VkDeviceSize vertexOffsets[] = {0, 0};
-    VkBuffer vertexBuffers[2] = {VK_NULL_HANDLE, ib->buffer};
+    VkDeviceSize vertexOffsets[] = {0};
+    VkBuffer vertexBuffers[1] = {VK_NULL_HANDLE};
     uint32_t instanceCount = (uint32_t)count;
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
@@ -2240,12 +2267,10 @@ void graphics_draw_instanced(Model *model,
         }
         vertexBuffers[0] = vertexBuffer;
 
-        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 2, vertexBuffers, vertexOffsets);
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, vertexBuffers, vertexOffsets);
         vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, instanceCount, 0, 0, 0);
     }
-
-    graphics_destroybuffer(instanceBuffer);
 }
 
 void graphics_draw_buffers(Buffer vertexBuffer,
@@ -3420,8 +3445,7 @@ void graphics_shutdown(void)
 static void graphics_get_vertex_input_state(VertexFormat format,
                                              VkVertexInputBindingDescription *bindingDesc,
                                              VkVertexInputAttributeDescription *attrDescs,
-                                             uint32_t *attrCount,
-                                             VkVertexInputBindingDescription *instanceDesc)
+                                             uint32_t *attrCount)
 {
     bindingDesc->binding = 0;
     bindingDesc->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -3527,19 +3551,9 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
             attrDescs[4].offset = offsetof(Vertex, texCoords);
 
-            /* Per-instance mat4 on binding 1, stepped per instance, read as
-             * vertex attributes 5-8 (one vec4 per matrix column). */
-            instanceDesc->binding = 1;
-            instanceDesc->stride = sizeof(float) * 16;
-            instanceDesc->inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
-
-            for (uint32_t c = 0; c < 4; c++) {
-                attrDescs[5 + c].binding = 1;
-                attrDescs[5 + c].location = 5 + c;
-                attrDescs[5 + c].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-                attrDescs[5 + c].offset = c * sizeof(float) * 4;
-            }
-            *attrCount = 9;
+            /* Instance transforms arrive as a uniform array indexed by
+             * gl_InstanceIndex, not as vertex attributes, so the layout is
+             * identical to VERTEX_FORMAT_FULL. */
             break;
     }
 }
@@ -3624,12 +3638,11 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
 
     VkVertexInputBindingDescription bindingDescriptions[2] = {};
     VkVertexInputBindingDescription *bindingDescription = &bindingDescriptions[0];
-    VkVertexInputBindingDescription instanceBindingDescription = {};
     VkVertexInputAttributeDescription attributeDescriptions[9] = {};
     uint32_t attributeCount = 0;
 
     graphics_get_vertex_input_state(format, bindingDescription, attributeDescriptions,
-                                    &attributeCount, &instanceBindingDescription);
+                                    &attributeCount);
 
     vertShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module = pipeline->vertShader;
@@ -3646,12 +3659,6 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     vertexInput.pVertexBindingDescriptions = bindingDescriptions;
     vertexInput.vertexAttributeDescriptionCount = attributeCount;
     vertexInput.pVertexAttributeDescriptions = attributeDescriptions;
-
-    /* VERTEX_FORMAT_INSTANCE adds a second, per-instance binding */
-    if (format == VERTEX_FORMAT_INSTANCE) {
-        bindingDescriptions[1] = instanceBindingDescription;
-        vertexInput.vertexBindingDescriptionCount = 2;
-    }
 
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
