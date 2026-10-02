@@ -104,7 +104,23 @@ float window_getpixeldensity(void)
 
 void window_setmouserelative(int enabled)
 {
-    SDL_SetWindowRelativeMouseMode(window, enabled != 0);
+    if (!window) return;
+    /* Relative mode is what mouse look needs: the cursor is hidden and motion
+     * arrives relative to the last position, so the camera cannot be driven
+     * by the pointer hitting a window edge.
+     *
+     * SDL_SetWindowMouseGrab() was tried here to confine the pointer as well,
+     * but on macOS it is a no-op for an unfocused window and reports 0 even
+     * immediately after being set, so it bought nothing but the false
+     * impression of confinement. Relative mode alone is what works here. */
+    SDL_SetWindowRelativeMouseMode(window, enabled ? true : false);
+}
+
+void window_getmousecapture(int *captured)
+{
+    if (captured) {
+        *captured = (window && SDL_GetWindowRelativeMouseMode(window)) ? 1 : 0;
+    }
 }
 
 void window_setkeyboardfocus(int focused)

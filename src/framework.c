@@ -979,10 +979,8 @@ void framework_draw(void)
 
         /* Instanced grid: 100 cubes placed from one per-instance transform
          * array. Metal draws them in a single call; the Vulkan backend loops
-         * graphics_drawmodel() per instance for now (see its comment).
-         * Set NO_INSTANCED_GRID=1 to skip the whole pass, which isolates
-         * instanced-draw crashes from the rest of the frame. */
-        if (g_gridMaterial && !getenv("NO_INSTANCED_GRID")) {
+         * graphics_drawmodel() per instance for now (see its comment). */
+        if (g_gridMaterial) {
             static float instanceTransforms[INSTANCED_GRID_COUNT][16];
             static float gridView[16];
             static float gridMvp[16];
@@ -1049,13 +1047,19 @@ void framework_draw(void)
             y += 18.0f;
         }
 
-        /* Pointer state, because a captured cursor gives no other cue that
-         * clicking will not reach the rest of the desktop. */
-        text_set(g_helpText[2], g_lookActive
-                 ? "click or Esc to release the cursor"
-                 : "the character walks the terrain; the world stays put");
-        text_draw(g_helpText[2], 8.0f, y - 18.0f, 0.0f, 1.0f, 1.0f,
-                  0.0f, 0.0f, 0.0f, 0.0f);
+        /* Pointer state read back from the window rather than assumed from
+         * the intent: a capture request can be refused by the platform, and
+         * telling the player the cursor is trapped when it is not would make
+         * Escape sound like the only way out. */
+        {
+            int captured = 0;
+            window_getmousecapture(&captured);
+            text_set(g_helpText[2], captured
+                     ? "click or Esc to release the cursor"
+                     : "the character walks the terrain; the world stays put");
+            text_draw(g_helpText[2], 8.0f, y - 18.0f, 0.0f, 1.0f, 1.0f,
+                      0.0f, 0.0f, 0.0f, 0.0f);
+        }
     }
     font_end_batch(g_testFont);
 }
@@ -1189,18 +1193,23 @@ void framework_mousemoved(int x, int y, int dx, int dy, int istouch)
 }
 
 /* Capture or release the pointer. Relative mode hides the cursor and reports
- * motion relative to the last position, which is what mouse look needs; the
- * grab keeps it from sliding off the window and coming back as a huge delta. */
+ * motion relative to the last position, which is what mouse look needs.
+ *
+ * Focus has to come first: an unfocused window cannot enter relative mode, so
+ * asking for capture before the window is active is silently ignored and the
+ * player gets a click that appears to do nothing. */
 static void framework_set_look(int active)
 {
     if (active == g_lookActive) {
         return;
     }
-    g_lookActive = active;
-    window_setmouserelative(active);
     if (active) {
         window_setkeyboardfocus(1);
+        window_setmouserelative(1);
+    } else {
+        window_setmouserelative(0);
     }
+    g_lookActive = active;
 }
 
 void framework_mousepressed(int x, int y, const char *button, int istouch)

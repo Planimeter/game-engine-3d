@@ -27,6 +27,18 @@ void window_setkeyboardfocus(int focused)
     (void)focused;
 }
 
+void window_setmouserelative(int enabled)
+{
+    (void)enabled;
+}
+
+void window_getmousecapture(int *captured)
+{
+    if (captured) {
+        *captured = 0;
+    }
+}
+
 void window_getwindowsizeinpixels(int *w, int *h)
 {
     (void)w;
