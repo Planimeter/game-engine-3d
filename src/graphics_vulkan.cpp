@@ -994,7 +994,7 @@ static int graphics_createshaders()
     /* Default fragment shader handle, shared by the instanced pipeline */
     g_defaultFragShader = fragShader;
 
-    /* Instanced vertex shader: per-instance mat4 as vertex attributes 5-8 */
+    /* Instanced vertex shader: per-instance mat4 at locations 5-8 */
     {
         char   *src = NULL;
         size_t  srcSize = filesystem_fileread((void **)&src, "shaders/triangle_instanced.vert");

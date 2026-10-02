@@ -117,7 +117,7 @@ static int g_minimized = 0;
 /* Default shaders */
 static MetalShader *g_defaultVertShader = NULL;
 static MetalShader *g_defaultFragShader = NULL;
-/* Instanced variant: adds a per-instance mat4 (vertex attributes 5-8). */
+/* Instanced variant: reads per-instance mat4s by [[instance_id]] */
 static MetalShader *g_instanceVertShader = NULL;
 
 /* Text rendering shaders (embedded MSL, used when SPIR-V not available) */
@@ -1020,9 +1020,8 @@ void graphics_init() {
     g_defaultFragShader = (MetalShader *)graphics_createshader(SHADER_STAGE_FRAGMENT, default3dCombined, strlen(default3dCombined), NULL, 0);
 
     /* Instanced 3D shader: identical to the default except the model matrix
-     * arrives per instance as vertex attributes 5-8 (mat4 columns) from
-     * buffer(1) with MTLVertexStepFunctionPerInstance, instead of a single
-     * transform at buffer(1). Material layout stays identical. */
+     * comes per instance from buffer(1), indexed by [[instance_id]], instead
+     * of a single shared transform. Material layout stays identical. */
     const char *instance3dCombined =
         "#include <metal_stdlib>\n"
         "using namespace metal;\n"
@@ -1424,10 +1423,11 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
     /* One mat4 per instance, stepped per instance by the vertex descriptor at
      * buffer(1). Bound after the material so nothing else claims slot 1.
      * Without this the whole array would collapse onto instance 0. */
-    /* Instance transforms live in a cached buffer that grows on demand. It
-     * cannot be destroyed after encoding: releasing the MTLBuffer here would
-     * free memory the in-flight command buffer still reads, and every
-     * instance would sample the same recycled bytes. */
+    /* Instance transforms live in a cached buffer that grows on demand,
+     * bound at buffer(1) and read by [[instance_id]]. It cannot be destroyed
+     * after encoding: releasing the MTLBuffer here would free memory the
+     * in-flight command buffer still reads, and every instance would sample
+     * the same recycled bytes. */
     static MetalBuffer *g_instanceBuffer = NULL;
     const size_t needed = count * sizeof(float) * 16;
     if (!g_instanceBuffer || g_instanceBuffer->size < needed) {

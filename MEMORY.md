@@ -41,7 +41,7 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 - Font atlas texture upload via staging buffer + blit encoder
 - Alpha channel glyph rendering (FreeType alpha in `.a` channel)
 - NDC-correct glyph positioning (Y-axis flip fixed)
-- Transform matrix upload in all 3 draw calls — `graphics_drawmodel()` now copies {mvp, world} (128B) via `metal_encoder_set_vertex_bytes()` (encode-time copy, immune to later CPU writes); `graphics_draw_instanced()`/`graphics_draw_buffers()` still use the legacy shared `g_uniformBuffer` upload (see Remaining Issues)
+- Transform matrix upload in all 3 draw calls — `graphics_drawmodel()` copies {mvp, world} (128B) via `metal_encoder_set_vertex_bytes()` (encode-time copy, immune to later CPU writes); `graphics_draw_instanced()` now uploads the full per-instance array to a cached buffer (see Instanced Drawing); `graphics_draw_buffers()` still uses the legacy shared `g_uniformBuffer` upload (see Remaining Issues)
 - Default 3D fallback shader with `VERTEX_FORMAT_FULL` support (position, normal, tangent, bitangent, texcoord)
 - `graphics_loadmodel()` GPU buffer creation (vertex + index buffer upload per mesh)
 - End-to-end 3D model rendering test (spinning cube with MVP matrix)
@@ -62,8 +62,8 @@ The Metal backend (`src/graphics_metal.mm`, ~1170 lines) is a complete port of t
 - `metal_encoder_set_buffer()` sets the buffer on BOTH vertex and fragment stages — render encoders have no `setBuffer:offset:atIndex:` (only compute/blit do), which previously crashed with `unrecognized selector` as soon as a material was bound
 
 ### Remaining Issues
-- `graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded. (No current callers, so low priority.)
-- `graphics_draw_instanced()`/`graphics_draw_buffers()` still write the legacy shared uniform path (single `g_uniformBuffer` region / descriptor binding 0). Only `graphics_drawmodel()` got the per-draw fix below; if these are revived with the 3D shader they need the same treatment. (`graphics_draw_buffers()` today is font/text only and its text shaders ignore the transform.)
+- ~~`graphics_draw_instanced()` only uploads the first transform matrix to the GPU — all instances render with the same transform. Instance data array not yet uploaded.~~ — fixed 2026-10-02, see "Instanced Drawing (2026-10-02)".
+- `graphics_draw_buffers()` still writes the legacy shared uniform path (single `g_uniformBuffer` region / descriptor binding 0). `graphics_drawmodel()` got the per-draw fix and `graphics_draw_instanced()` now carries its own transforms. (`graphics_draw_buffers()` today is font/text only and its text shaders ignore the transform.)
 - ~~Retina/pixel-density handling wrong~~ — fixed 2026-10-01: `SDL_WINDOW_HIGH_PIXEL_DENSITY` window flag + `NSHighResolutionCapable` in `cmake/MacOSXBundleInfo.plist.in` (CMake's default plist omits it) + `window_getpixeldensity()` + font rasterization/coords scaled by density. Verified: 640×480-pt window now renders at 1280×960.
 
 ## Camera & Scene System (2026-10-01)
@@ -108,6 +108,20 @@ The Vulkan backend (`src/graphics_vulkan.cpp`, ~3103 lines) is the primary graph
 ### Remaining Issues
 - ~~Vulkan backend only syntax-checked on macOS~~ — now runtime-verified via MoltenVK, see "Vulkan on MoltenVK (2026-10-01)"
 - Pre-existing compile break fixed: `GPUBuffer` typedef used at line 134 but declared ~1700 — moved the typedef up so the file compiles again
+
+## Instanced Drawing (2026-10-02)
+
+`graphics_draw_instanced()` uploaded only the first transform, so every instance rendered with the same one and all copies landed on top of each other. Two real bugs, plus a Metal-specific surprise:
+
+- **No view-projection parameter.** The API took only per-instance transforms, so nothing ever placed instances in the world. Added `viewProjection4x4` to the signature in `graphics.h` and all three backends; the shared view-projection is supplied separately from the per-instance model matrices.
+- **Instance buffer destroyed while still in use.** Metal created the instance buffer per draw and released it immediately after encoding — the in-flight command buffer still read it, so all instances sampled recycled memory. Now a static cached buffer that grows on demand (`g_instanceBuffer`).
+- **Metal ignores a per-instance `MTLVertexDescriptor` layout here.** Declaring `layouts[1].stepFunction = MTLVertexStepFunctionPerInstance` plus `[[attribute(5-8)]]` produced a valid pipeline that Metal validation reported *no* errors on, but every instance sampled the same transform. Working approach: bind the instance buffer at `buffer(1)` and index it in the shader with `[[instance_id]]`. `VERTEX_FORMAT_INSTANCE` therefore just reuses the `VERTEX_FORMAT_FULL` descriptor — no per-instance layout, no extra attributes.
+- Added a dedicated instance vertex shader per backend: embedded MSL `instance3dCombined` in `graphics_metal.mm` (`g_instanceVertShader`), and `shaders/triangle_instanced.vert` for Vulkan (validates clean with `glslangValidator -V` + `spirv-val`).
+- `framework.c` draws a 10×10 grid (100 cubes in one `graphics_draw_instanced()` call, `g_gridMaterial`) so the path stays exercised.
+
+Verified on Metal at 59-60 FPS: instances render at distinct transforms.
+
+**Known breakage:** the Vulkan instancing path **segfaults** on MoltenVK. `EXC_BAD_ACCESS` inside `MVKShaderModule::getMTLFunction` during pipeline creation — MoltenVK's SPIR-V→MSL translator crashes on `triangle_instanced.vert`. The likely cause is the raw `layout(location = 5..8)` instance vertex inputs; the conventional Vulkan approach is a per-instance vertex buffer binding (`VK_VERTEX_INPUT_RATE_INSTANCE`, already plumbed through `graphics_get_vertex_input_state`) rather than consuming instance data as ordinary vertex attributes. Not yet diagnosed with validation layers — those are gated behind `_DEBUG`, so a `-D_DEBUG` build is required to see the message.
 
 ## Vulkan on MoltenVK (2026-10-01)
 
