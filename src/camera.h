@@ -27,8 +27,12 @@ void camera_basis(const Camera *cam, float fwd[3], float right[3], float up[3]);
 /* View matrix (world -> camera space). */
 void camera_view(const Camera *cam, float *out16);
 
-/* Right-handed perspective projection matrix. */
+/* Right-handed perspective projection matrix (GL depth, 0..1). */
 void camera_projection(const Camera *cam, float aspect, float *out16);
+
+/* Reverse-Z projection with an infinite far plane. Depth is 1/z, so the
+ * backends must compare with GREATER and clear depth to 0. */
+void camera_projection_reversez(const Camera *cam, float aspect, float *out16);
 
 /* Apply mouse-look from relative motion (pixels, right/down positive).
  * sensitivity is radians per pixel (e.g. 0.0025f). */

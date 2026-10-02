@@ -48,6 +48,31 @@ void math_perspective(float *m, float fov_y, float aspect, float zNear, float zF
     std::memcpy(m, glm::value_ptr(result), 16 * sizeof(float));
 }
 
+/* Reverse-Z infinite-far projection.
+ *
+ * Depth is 1/z, so precision concentrates near the camera where it is
+ * needed, and the far plane is pushed to infinity — no log math in the
+ * shader, so early-Z still works. Requires the depth compare to be
+ * GREATER and the clear value to be 0.
+ *
+ * The infinite far plane uses w = z for the far row instead of the usual
+ * (far+near)/(near-far), so depth approaches 0 rather than 1 at infinity.
+ */
+void math_perspective_reversez(float *m, float fov_y, float aspect, float zNear)
+{
+    float tanHalf = tanf(fov_y * 0.5f);
+
+    glm::mat4 result(0.0f);
+    result[0][0] = 1.0f / (aspect * tanHalf);
+    result[1][1] = 1.0f / tanHalf;
+    result[2][2] = 0.0f;                    /* no z scaling: linear in z/w */
+    result[2][3] = -1.0f;                    /* w = -z_eye */
+    result[3][2] = zNear;                    /* z_ndc = zNear / |z_eye| */
+    result[3][3] = 0.0f;
+
+    std::memcpy(m, glm::value_ptr(result), 16 * sizeof(float));
+}
+
 void math_lookat(float *m,
                  float eyeX, float eyeY, float eyeZ,
                  float centerX, float centerY, float centerZ,

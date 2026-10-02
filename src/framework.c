@@ -9,6 +9,7 @@
 #include "math_c.h"
 #include "camera.h"
 #include "scene.h"
+#include "terrain.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -39,6 +40,19 @@ static Material g_gridMaterial = NULL;
 static float g_boneMatrices[MAX_SKIN_BONES * 16];
 static int g_animIndex = -1;
 static ModelAnimationInfo g_animInfo = {NULL, 0.0f, 0};
+
+/* Procedural landscape. Generated at startup rather than loaded, so there
+ * is no asset dependency and it is deterministic for a given seed.
+ * Amplitude is modest relative to the extent so hills read as walkable
+ * ground rather than cliffs that swallow the camera. */
+#define TERRAIN_RESOLUTION 129
+#define TERRAIN_EXTENT 600.0f
+#define TERRAIN_AMPLITUDE 9.0f
+#define TERRAIN_SEED 20261002u
+static Model *g_terrain = NULL;
+static Material g_terrainMaterial = NULL;
+/* Camera eye height above the ground, for the walk camera. */
+static const float g_eyeHeight = 2.2f;
 static int g_poseDumped;
 
 /* Camera + scene graph */
@@ -182,6 +196,30 @@ void framework_load(int argc, char *argv[])
         }
     }
 
+    /* Procedural landscape. */
+    {
+        void *mesh = terrain_build_mesh(TERRAIN_RESOLUTION, TERRAIN_EXTENT,
+                                        TERRAIN_AMPLITUDE, TERRAIN_SEED);
+        if (mesh) {
+            uint32_t side = TERRAIN_RESOLUTION * TERRAIN_RESOLUTION;
+            uint32_t quads = (TERRAIN_RESOLUTION - 1) * (TERRAIN_RESOLUTION - 1);
+            /* terrain_build_mesh lays vertices then indices in one block. */
+            g_terrain = graphics_createmesh(
+                mesh, side, 22 * sizeof(float),
+                (const uint32_t *)(mesh + (size_t)side * 22 * sizeof(float)),
+                (size_t)quads * 6);
+            terrain_free_mesh(mesh);
+            if (g_terrain) {
+                printf("Terrain: %dx%d grid, %.0f units across, seed %u\n",
+                       TERRAIN_RESOLUTION, TERRAIN_RESOLUTION,
+                       TERRAIN_EXTENT, TERRAIN_SEED);
+            }
+        }
+        if (!g_terrain) {
+            fprintf(stderr, "Failed to build terrain\n");
+        }
+    }
+
     /* Lit material: floats are ambient/specular/shininess, vec3s are
      * light direction/camera position/albedo (slot order matters — the
      * material API packs by slot, not by name). The model matrix is
@@ -224,11 +262,31 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_mat4(g_gridMaterial, identity);
     }
 
-    /* Fly camera: WASD + E/Q to move, right-drag to look, wheel to zoom */
-    camera_init(&g_camera, 0.0f, 0.6f, 4.0f);
+    /* Terrain material: greener and rougher than the cubes so the landscape
+     * reads as ground rather than another object. */
+    g_terrainMaterial = graphics_creatematerial(NULL);
+    if (g_terrainMaterial) {
+        graphics_material_set_float(g_terrainMaterial, "ambient", 0.22f);
+        graphics_material_set_float(g_terrainMaterial, "specular", 0.08f);
+        graphics_material_set_float(g_terrainMaterial, "shininess", 8.0f);
+        graphics_material_set_float(g_terrainMaterial, "diffuseSlot", -1.0f);
+        graphics_material_set_float(g_terrainMaterial, "normalSlot", -1.0f);
+        graphics_material_set_vec3(g_terrainMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_terrainMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
+        graphics_material_set_vec3(g_terrainMaterial, "albedo", 0.32f, 0.46f, 0.24f);
+    }
+
+    /* Camera starts on a ridge looking across the landscape, high enough to
+     * see the terrain rather than being inside a hill. */
+    {
+        float startY = terrain_height(0.0f, 0.0f, TERRAIN_SEED) * TERRAIN_AMPLITUDE;
+        camera_init(&g_camera, 0.0f, startY + 26.0f, 120.0f);
+        camera_zoom(&g_camera, 6.0f * 0.12f);
+    }
 
     /* Scene graph: spinning root with three children, so parent->child
-     * transform composition is visible (children orbit the root). */
+     * transform composition is visible (children orbit the root). Sited on
+     * the terrain so the cubes sit in the landscape rather than floating. */
     scene_init(&g_scene);
     g_rootNode = scene_create(&g_scene, -1);
     if (g_rootNode >= 0) {
@@ -236,11 +294,12 @@ void framework_load(int argc, char *argv[])
         int childRight = scene_create(&g_scene, g_rootNode);
         int childTop = scene_create(&g_scene, g_rootNode);
 
-        scene_setposition(&g_scene, childLeft, -1.3f, 0.0f, 0.0f);
+        float baseY = terrain_height(0.0f, 0.0f, TERRAIN_SEED) * TERRAIN_AMPLITUDE;
+        scene_setposition(&g_scene, childLeft, -1.3f, baseY + 0.5f, 0.0f);
         scene_setscale(&g_scene, childLeft, 0.5f, 0.5f, 0.5f);
-        scene_setposition(&g_scene, childRight, 1.3f, 0.0f, 0.0f);
+        scene_setposition(&g_scene, childRight, 1.3f, baseY + 0.5f, 0.0f);
         scene_setscale(&g_scene, childRight, 0.5f, 0.5f, 0.5f);
-        scene_setposition(&g_scene, childTop, 0.0f, 1.3f, 0.0f);
+        scene_setposition(&g_scene, childTop, 0.0f, baseY + 1.3f, 0.0f);
         scene_setscale(&g_scene, childTop, 0.5f, 0.5f, 0.5f);
     }
 }
@@ -277,6 +336,25 @@ void framework_update(uint64_t deltaTime)
     if (fwd != 0.0f || rgt != 0.0f || up != 0.0f) {
         camera_move(&g_camera, fwd, rgt, up, g_moveSpeed * dt);
     }
+
+    /* Walk on the terrain: keep the camera a fixed height above the ground,
+     * but only once it has descended to ground level. Starting high means
+     * the landscape can be surveyed first, and the descent eases down. */
+    if (g_terrain) {
+        float ground = terrain_height(g_camera.position[0],
+                                       g_camera.position[2], TERRAIN_SEED)
+                      * TERRAIN_AMPLITUDE;
+        float floor = ground + g_eyeHeight;
+        if (up != 0.0f) {
+            /* Manual flight: never sink through the surface. */
+            if (g_camera.position[1] < floor) {
+                g_camera.position[1] = floor;
+            }
+        } else if (g_camera.position[1] < floor + 12.0f) {
+            /* Close to the ground, so ease onto it rather than snap. */
+            g_camera.position[1] += (floor - g_camera.position[1]) * 0.15f;
+        }
+    }
 }
 
 void framework_draw(void)
@@ -289,8 +367,11 @@ void framework_draw(void)
 
         float proj[16], view[16], mvp[16], temp[16];
 
-        /* Camera-driven projection and view */
-        camera_projection(&g_camera, aspect, proj);
+        /* Camera-driven projection and view. Reverse-Z with an infinite far
+         * plane: precision concentrates near the camera, which the 600-unit
+         * landscape needs. Both backends compare depth with GREATER and
+         * clear to 0 to match. */
+        camera_projection_reversez(&g_camera, aspect, proj);
         camera_view(&g_camera, view);
 
         /* Specular highlight tracks the camera */
@@ -337,6 +418,25 @@ void framework_draw(void)
             graphics_drawmodel(g_testModel, g_litMaterial, mvp);
         }
 
+        /* Landscape. Drawn before the cubes so the depth buffer sorts them
+         * naturally; identity world matrix since the mesh is already in world
+         * space. */
+        if (g_terrain && g_terrainMaterial) {
+            static const float identity[16] = {
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            };
+            graphics_material_set_vec3(g_terrainMaterial, "cameraPos",
+                                       g_camera.position[0],
+                                       g_camera.position[1],
+                                       g_camera.position[2]);
+            graphics_material_set_mat4(g_terrainMaterial, identity);
+            graphics_bindmodeltexture(g_terrain, g_terrainMaterial);
+            graphics_drawmodel(g_terrain, g_terrainMaterial, mvp);
+        }
+
         /* Instanced grid: 100 cubes placed from one per-instance transform
          * array. Metal draws them in a single call; the Vulkan backend loops
          * graphics_drawmodel() per instance for now (see its comment).
@@ -359,13 +459,16 @@ void framework_draw(void)
             math_scale(gridModel, gridModel, 0.12f, 0.12f, 0.12f);
             for (int gx = 0; gx < INSTANCED_GRID_SIZE; gx++) {
                 for (int gz = 0; gz < INSTANCED_GRID_SIZE; gz++) {
-                    /* Camera sits at +z looking down -Z, so the grid goes at
-                     * negative z (in front of the origin) and below the
-                     * scene graph cubes to stay clear of them */
-                    float x = (gx - INSTANCED_GRID_SIZE / 2) * 0.2f;
-                    float z = -2.2f + (gz - INSTANCED_GRID_SIZE / 2) * 0.2f;
+                    /* Scattered across the landscape just in front of the
+                     * cubes, each sitting on the terrain surface. */
+                    float x = (gx - INSTANCED_GRID_SIZE / 2) * 0.6f;
+                    float z = 8.0f + (gz - INSTANCED_GRID_SIZE / 2) * 0.6f;
+                    float groundY = (g_terrain
+                        ? terrain_height(x, z, TERRAIN_SEED) * TERRAIN_AMPLITUDE
+                        : 0.0f);
                     math_identity(instanceTransforms[n]);
-                    math_translate(instanceTransforms[n], instanceTransforms[n], x, -0.9f, z);
+                    math_translate(instanceTransforms[n], instanceTransforms[n],
+                                   x, groundY + 0.06f, z);
                     math_multiply(instanceTransforms[n], gridModel, instanceTransforms[n]);
                     n++;
                 }
@@ -437,6 +540,18 @@ void framework_mousefocus(int focus)
 
 void framework_focus(int focus)
 {
+    /* Release every held key on focus loss. Key-up events are delivered to
+     * the focused window, so without this the camera keeps walking (or
+     * flying) forever after the window is switched away from. */
+    if (!focus) {
+        g_keyForward = 0;
+        g_keyBack = 0;
+        g_keyLeft = 0;
+        g_keyRight = 0;
+        g_keyUp = 0;
+        g_keyDown = 0;
+        g_lookActive = 0;
+    }
 }
 
 void framework_keypressed(const char *key, const char *scancode, int isrepeat)

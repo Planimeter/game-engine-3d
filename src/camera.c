@@ -18,7 +18,9 @@ void camera_init(Camera *cam, float x, float y, float z)
     cam->pitch = -0.15f;
     cam->fovY = 3.14159265f * 0.5f;
     cam->zNear = 0.1f;
-    cam->zFar = 100.0f;
+    /* Far enough to contain the 600-unit landscape. At 100 the terrain was
+     * clipped, which read as chunks vanishing as the camera moved. */
+    cam->zFar = 2000.0f;
 }
 
 void camera_basis(const Camera *cam, float fwd[3], float right[3], float up[3])
@@ -66,6 +68,14 @@ void camera_projection(const Camera *cam, float aspect, float *out16)
 {
     if (!cam || !out16) return;
     math_perspective(out16, cam->fovY, aspect, cam->zNear, cam->zFar);
+}
+
+/* Reverse-Z projection for the landscape: infinite far plane, so depth is
+ * 1/z with a GREATER compare and a clear of 0. */
+void camera_projection_reversez(const Camera *cam, float aspect, float *out16)
+{
+    if (!cam || !out16) return;
+    math_perspective_reversez(out16, cam->fovY, aspect, cam->zNear);
 }
 
 void camera_look(Camera *cam, float dx, float dy, float sensitivity)

@@ -202,6 +202,7 @@ endif()
 set(SOURCES
     src/audio_openal.c
     src/camera.c
+    src/terrain.c
     src/event_sdl.c
     src/filesystem_physfs.c
     src/font.c

@@ -74,6 +74,11 @@ void math_scale(float *out, const float *m, float x, float y, float z);
  */
 void math_perspective(float *m, float fov_y, float aspect, float zNear, float zFar);
 
+/* Reverse-Z projection with an infinite far plane. Depth becomes 1/z, so
+ * precision concentrates near the camera; requires a depth compare of
+ * GREATER and a depth clear of 0. Takes no zFar — it is infinite. */
+void math_perspective_reversez(float *m, float fov_y, float aspect, float zNear);
+
 /**
  * Creates a right-handed look-at view matrix.
  *

@@ -67,6 +67,16 @@ void math_perspective(float *m, float fov_y, float aspect, float zNear, float zF
     m[15] = 0.0f;
 }
 
+void math_perspective_reversez(float *m, float fov_y, float aspect, float zNear)
+{
+    (void)fov_y;
+    (void)aspect;
+    (void)zNear;
+    for (int i = 0; i < 16; i++) {
+        m[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+    }
+}
+
 void math_lookat(float *m,
                  float eyeX, float eyeY, float eyeZ,
                  float centerX, float centerY, float centerZ,

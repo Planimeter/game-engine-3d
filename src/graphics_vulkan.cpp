@@ -1253,7 +1253,7 @@ static void graphics_creategraphicspipeline()
      * state means the depth test always fails). */
     depthStencil.depthTestEnable         = VK_TRUE;
     depthStencil.depthWriteEnable        = VK_TRUE;
-    depthStencil.depthCompareOp          = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp          = VK_COMPARE_OP_GREATER;  /* reverse-Z */
     depthStencil.depthBoundsTestEnable   = VK_FALSE;
     depthStencil.stencilTestEnable       = VK_FALSE;
 
@@ -1869,7 +1869,7 @@ void graphics_predraw()
     clearValues[0].color.float32[1] = CLEAR_COLOR[1];
     clearValues[0].color.float32[2] = CLEAR_COLOR[2];
     clearValues[0].color.float32[3] = CLEAR_COLOR[3];
-    clearValues[1].depthStencil.depth = 1.0f;
+    clearValues[1].depthStencil.depth = 0.0f;  /* reverse-Z */
     clearValues[1].depthStencil.stencil = 0;
 
     /* 27.9. Controlling the Viewport */
@@ -2273,6 +2273,59 @@ Model *graphics_loadmodel(const char *filepath)
     }
 
     return modelData;
+}
+
+Model *graphics_createmesh(const void *vertices, size_t vertexCount,
+                          size_t vertexStride,
+                          const uint32_t *indices, size_t indexCount)
+{
+    if (!vertices || vertexCount == 0 || vertexStride == 0) {
+        return NULL;
+    }
+
+    Model *model = (Model *)calloc(1, sizeof(Model));
+    if (!model) return NULL;
+
+    model->meshCount = 1;
+    model->meshes = (Mesh *)calloc(1, sizeof(Mesh));
+    if (!model->meshes) {
+        free(model);
+        return NULL;
+    }
+
+    Mesh *mesh = &model->meshes[0];
+    mesh->vertexCount = (uint32_t)vertexCount;
+    mesh->indexCount = (uint32_t)indexCount;
+    mesh->vertices = (Vertex *)malloc(vertexCount * vertexStride);
+    if (!mesh->vertices) {
+        free(model->meshes);
+        free(model);
+        return NULL;
+    }
+    memcpy(mesh->vertices, vertices, vertexCount * vertexStride);
+
+    if (indices && indexCount > 0) {
+        mesh->indices = (uint32_t *)malloc(indexCount * sizeof(uint32_t));
+        if (mesh->indices) {
+            memcpy(mesh->indices, indices, indexCount * sizeof(uint32_t));
+        } else {
+            mesh->indexCount = 0;
+        }
+    }
+
+    mesh->material.ambient = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
+    mesh->material.diffuse = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+    mesh->material.specular = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    mesh->material.emission = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    mesh->material.shininess = 32.0f;
+
+    if (!graphics_createmodelgpu(model)) {
+        graphics_freemodelbuffers(model);
+        model_destroy(model);
+        return NULL;
+    }
+
+    return model;
 }
 
 /* https://gpuopen-librariesandsdks.github.io/VulkanMemoryAllocator/html/group__group__alloc.html#ga0386f883b5c5a093975b6303569735aa */
@@ -3524,7 +3577,7 @@ void graphics_beginpass(RenderPass pass)
             clearValues[i].color.float32[3] = 0.0f;
         }
         if (gp->hasDepth) {
-            clearValues[gp->colorCount].depthStencil.depth = 1.0f;
+            clearValues[gp->colorCount].depthStencil.depth = 0.0f;  /* reverse-Z */
         }
         beginInfo.clearValueCount = (uint32_t)(gp->colorCount + (gp->hasDepth ? 1 : 0));
         beginInfo.pClearValues = clearValues;
@@ -3581,7 +3634,7 @@ void graphics_beginpass(RenderPass pass)
         clearValues[0].color.float32[1] = CLEAR_COLOR[1];
         clearValues[0].color.float32[2] = CLEAR_COLOR[2];
         clearValues[0].color.float32[3] = CLEAR_COLOR[3];
-        clearValues[1].depthStencil.depth = 1.0f;
+        clearValues[1].depthStencil.depth = 0.0f;  /* reverse-Z */
         clearValues[1].depthStencil.stencil = 0;
         beginInfo.clearValueCount = 2;
         beginInfo.pClearValues = clearValues;
@@ -4182,7 +4235,7 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
 
     depthStencil.depthTestEnable = state.depthTest ? VK_TRUE : VK_FALSE;
     depthStencil.depthWriteEnable = state.depthWrite ? VK_TRUE : VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_GREATER;  /* reverse-Z */
 
     graphics_get_blend_state(state.blendMode, &colorBlendAttachment);
 

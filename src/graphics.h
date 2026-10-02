@@ -74,6 +74,14 @@ void        graphics_material_set_mat4(Material mat,
 void        graphics_setmaterial(Material mat);
 
 Model      *graphics_loadmodel(const char *filepath);
+
+/* Build a Model directly from CPU vertex/index data, for geometry
+ * generated at runtime (terrain) rather than loaded from a file. The data
+ * is copied, so the caller keeps ownership of the arrays. vertexStride is
+ * the byte size of one engine Vertex. */
+Model      *graphics_createmesh(const void *vertices, size_t vertexCount,
+                               size_t vertexStride,
+                               const uint32_t *indices, size_t indexCount);
 void        graphics_destroymodel(Model *model);
 
 /* Bind every mesh texture the model owns and tell the shader which

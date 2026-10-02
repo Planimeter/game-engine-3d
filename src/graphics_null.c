@@ -165,6 +165,18 @@ Model *graphics_loadmodel(const char *filepath)
     return model_load(filepath);
 }
 
+Model *graphics_createmesh(const void *vertices, size_t vertexCount,
+                          size_t vertexStride,
+                          const uint32_t *indices, size_t indexCount)
+{
+    (void)vertices;
+    (void)vertexCount;
+    (void)vertexStride;
+    (void)indices;
+    (void)indexCount;
+    return NULL;
+}
+
 void graphics_bindskinidentity(void)
 {
 }

@@ -245,7 +245,9 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
 
 static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
     MTLDepthStencilDescriptor *desc = [[MTLDepthStencilDescriptor alloc] init];
-    desc.depthCompareFunction = state.depthTest ? MTLCompareFunctionLess : MTLCompareFunctionAlways;
+    /* Reverse-Z: near maps to 1 and the infinite far plane to 0, so the test
+     * inverts and the clear is 0 (see graphics_clearcolor below). */
+    desc.depthCompareFunction = state.depthTest ? MTLCompareFunctionGreater : MTLCompareFunctionAlways;
     desc.depthWriteEnabled = state.depthWrite;
     return (id<MTLDepthStencilState>)metal_device_new_depth_stencil_state(g_device, desc);
 }
@@ -860,7 +862,7 @@ void graphics_beginpass(RenderPass pass) {
             rpd.depthAttachment.texture = depth->texture;
             rpd.depthAttachment.loadAction = MTLLoadActionClear;
             rpd.depthAttachment.storeAction = MTLStoreActionStore;
-            rpd.depthAttachment.clearDepth = 1.0;
+            rpd.depthAttachment.clearDepth = 0.0;  /* reverse-Z */
         }
 
         g_currentEncoder = (id<MTLRenderCommandEncoder>)metal_command_buffer_new_render_encoder(
@@ -1377,7 +1379,7 @@ void graphics_predraw() {
     g_renderPassDescriptor.depthAttachment.texture = g_depthTexture ? g_depthTexture->texture : nil;
     g_renderPassDescriptor.depthAttachment.loadAction = MTLLoadActionClear;
     g_renderPassDescriptor.depthAttachment.storeAction = MTLStoreActionStore;
-    g_renderPassDescriptor.depthAttachment.clearDepth = 1.0;
+    g_renderPassDescriptor.depthAttachment.clearDepth = 0.0;  /* reverse-Z */
 
     /* Begin command buffer and render encoder */
     if (g_currentCommandBuffer) [g_currentCommandBuffer release];
@@ -1393,9 +1395,9 @@ void graphics_predraw() {
     };
     metal_encoder_set_viewport(g_currentEncoder, vp);
 
-    /* Default depth state */
+    /* Default depth state (reverse-Z: GREATER compares against a 0 clear) */
     MTLDepthStencilDescriptor *d = [[MTLDepthStencilDescriptor alloc] init];
-    d.depthCompareFunction = MTLCompareFunctionLess;
+    d.depthCompareFunction = MTLCompareFunctionGreater;
     d.depthWriteEnabled = YES;
     metal_encoder_set_depth_stencil_state(g_currentEncoder, metal_device_new_depth_stencil_state(g_device, d));
 
@@ -1439,6 +1441,61 @@ Model *graphics_loadmodel(const char *filepath) {
             mesh->indexBuffer = graphics_createindexbuffer(
                 mesh->indices, mesh->indexCount * sizeof(uint32_t));
         }
+    }
+
+    return model;
+}
+
+Model *graphics_createmesh(const void *vertices, size_t vertexCount,
+                          size_t vertexStride,
+                          const uint32_t *indices, size_t indexCount)
+{
+    if (!vertices || vertexCount == 0 || vertexStride == 0) {
+        return NULL;
+    }
+
+    Model *model = (Model *)calloc(1, sizeof(Model));
+    if (!model) return NULL;
+
+    model->meshCount = 1;
+    model->meshes = (Mesh *)calloc(1, sizeof(Mesh));
+    if (!model->meshes) {
+        free(model);
+        return NULL;
+    }
+
+    Mesh *mesh = &model->meshes[0];
+    mesh->vertexCount = (uint32_t)vertexCount;
+    mesh->indexCount = (uint32_t)indexCount;
+    mesh->vertices = (Vertex *)malloc(vertexCount * vertexStride);
+    if (!mesh->vertices) {
+        free(model->meshes);
+        free(model);
+        return NULL;
+    }
+    memcpy(mesh->vertices, vertices, vertexCount * vertexStride);
+
+    if (indices && indexCount > 0) {
+        mesh->indices = (uint32_t *)malloc(indexCount * sizeof(uint32_t));
+        if (mesh->indices) {
+            memcpy(mesh->indices, indices, indexCount * sizeof(uint32_t));
+        } else {
+            mesh->indexCount = 0;
+        }
+    }
+
+    /* Default material, matching what model_processmaterial() produces. */
+    mesh->material.ambient = glm::vec4(0.2f, 0.2f, 0.2f, 1.0f);
+    mesh->material.diffuse = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+    mesh->material.specular = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+    mesh->material.emission = glm::vec4(0.0f, 0.0f, 0.0f, 1.0f);
+    mesh->material.shininess = 32.0f;
+
+    mesh->vertexBuffer = graphics_createvertexbuffer(mesh->vertices,
+                                                    vertexCount * vertexStride);
+    if (mesh->indexCount > 0) {
+        mesh->indexBuffer = graphics_createindexbuffer(mesh->indices,
+                                                       indexCount * sizeof(uint32_t));
     }
 
     return model;
