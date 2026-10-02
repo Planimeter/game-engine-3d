@@ -72,6 +72,10 @@ static VkFramebuffer *framebuffers;
 /* 9. Shaders */
 static Shader vertShader;
 static Shader fragShader;
+/* Instanced vertex shader (per-instance mat4) and the default fragment
+ * shader, used together by graphics_draw_instanced */
+static Shader g_instanceVertShader;
+static Shader g_defaultFragShader;
 
 /* Shaderc compiler for runtime GLSL→SPIR-V compilation */
 static shaderc_compiler_t g_shaderc_compiler;
@@ -984,6 +988,43 @@ static int graphics_createshaders()
             free(fragSource);
             free(vertSource);
             return 0;
+        }
+    }
+
+    /* Default fragment shader handle, shared by the instanced pipeline */
+    g_defaultFragShader = fragShader;
+
+    /* Instanced vertex shader: per-instance mat4 as vertex attributes 5-8 */
+    {
+        char   *src = NULL;
+        size_t  srcSize = filesystem_fileread((void **)&src, "shaders/triangle_instanced.vert");
+        if (!src || srcSize == 0) {
+            fprintf(stderr, "Failed to read shaders/triangle_instanced.vert\n");
+        } else {
+            shaderc_compile_options_t options = shaderc_compile_options_initialize();
+            shaderc_compile_options_set_target_env(options, shaderc_target_env_vulkan, shaderc_env_version_vulkan_1_1);
+            shaderc_compile_options_set_optimization_level(options, shaderc_optimization_level_performance);
+            shaderc_compilation_result_t result = shaderc_compile_into_spv(
+                g_shaderc_compiler, src, srcSize, shaderc_glsl_vertex_shader, "shader", "main", options);
+            shaderc_compile_options_release(options);
+
+            if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+                fprintf(stderr, "Instanced vertex shader compilation failed:\n%s\n",
+                        shaderc_result_get_error_message(result));
+                shaderc_result_release(result);
+            } else {
+                size_t spvSize = shaderc_result_get_length(result);
+                VkShaderModuleCreateInfo moduleInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+                moduleInfo.codeSize = spvSize;
+                moduleInfo.pCode = (const uint32_t *)shaderc_result_get_bytes(result);
+                VkResult vkResult = vkCreateShaderModule(device, &moduleInfo, NULL, (VkShaderModule *)&g_instanceVertShader);
+                if (vkResult != VK_SUCCESS) {
+                    fprintf(stderr, "Failed to create instanced vertex shader module: %d\n", vkResult);
+                    g_instanceVertShader = VK_NULL_HANDLE;
+                }
+                shaderc_result_release(result);
+            }
+            free(src);
         }
     }
 
@@ -2127,13 +2168,10 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
 void graphics_draw_instanced(Model *model,
                              Material mat,
                              const float *transforms4x4,
+                             const float *viewProjection4x4,
                              size_t count)
 {
-    if (mat) {
-        graphics_setmaterial(mat);
-    }
-
-    if (!model || graphics_isminimized()) {
+    if (!model || !transforms4x4 || count == 0 || graphics_isminimized()) {
         return;
     }
 
@@ -2141,20 +2179,58 @@ void graphics_draw_instanced(Model *model,
         return;
     }
 
-    /* Upload first transform to global uniform buffer and bind at slot 0 */
-    if (transforms4x4 && g_uniformBuffer) {
-        graphics_updatebuffer((Buffer)g_uniformBuffer, transforms4x4, 64);
-        graphics_binduniformbuffer((Buffer)g_uniformBuffer, 0);
+    /* Bind inside the pass: descriptor binds are recorded commands, so doing
+     * this before graphics_predraw() would place it outside the render pass. */
+    graphics_setmaterial(mat);
+
+    /* Instance transforms as one mat4 per instance (binding 1) */
+    Buffer instanceBuffer = graphics_createvertexbuffer(transforms4x4, count * sizeof(float) * 16);
+    if (!instanceBuffer) {
+        return;
     }
 
-    // Bind default 3D pipeline if no custom pipeline is bound
-    if (currentPipeline != graphicsPipeline) {
-        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-        currentPipeline = graphicsPipeline;
+    Shader instVert = g_instanceVertShader;
+    Pipeline p = NULL;
+    if (instVert && g_defaultFragShader) {
+        RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
+        p = graphics_createpipeline(instVert, g_defaultFragShader, VERTEX_FORMAT_INSTANCE, state);
+    }
+    if (!p) {
+        fprintf(stderr, "Vulkan: instanced pipeline unavailable, skipping draw\n");
+        graphics_destroybuffer(instanceBuffer);
+        return;
     }
 
-    VkDeviceSize offsets[] = {0};
-    uint32_t instanceCount = count == 0 ? 1 : (uint32_t)count;
+    // Bind instanced pipeline
+    if (currentPipeline != p) {
+        vkCmdBindPipeline(commandBuffers[imageIndex], VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)p);
+        currentPipeline = (VkPipeline)p;
+    }
+
+    /* Shared view-projection for every instance */
+    struct {
+        float mvp[16];
+        float model[16];
+    } pushData;
+    static const float identityModel[16] = {
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1
+    };
+    memcpy(pushData.model, identityModel, sizeof(pushData.model));
+    if (viewProjection4x4) {
+        memcpy(pushData.mvp, viewProjection4x4, sizeof(pushData.mvp));
+    } else {
+        memcpy(pushData.mvp, identityModel, sizeof(pushData.mvp));
+    }
+    vkCmdPushConstants(commandBuffers[imageIndex], pipelineLayout,
+                       VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(pushData), &pushData);
+
+    GPUBuffer *ib = (GPUBuffer *)instanceBuffer;
+    VkDeviceSize vertexOffsets[] = {0, 0};
+    VkBuffer vertexBuffers[2] = {VK_NULL_HANDLE, ib->buffer};
+    uint32_t instanceCount = (uint32_t)count;
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
@@ -2162,10 +2238,14 @@ void graphics_draw_instanced(Model *model,
         if (!vertexBuffer || !mesh->indexBuffer || mesh->indexCount == 0) {
             continue;
         }
-        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 1, &vertexBuffer, offsets);
+        vertexBuffers[0] = vertexBuffer;
+
+        vkCmdBindVertexBuffers(commandBuffers[imageIndex], 0, 2, vertexBuffers, vertexOffsets);
         vkCmdBindIndexBuffer(commandBuffers[imageIndex], (VkBuffer)mesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(commandBuffers[imageIndex], mesh->indexCount, instanceCount, 0, 0, 0);
     }
+
+    graphics_destroybuffer(instanceBuffer);
 }
 
 void graphics_draw_buffers(Buffer vertexBuffer,
@@ -3340,7 +3420,8 @@ void graphics_shutdown(void)
 static void graphics_get_vertex_input_state(VertexFormat format,
                                              VkVertexInputBindingDescription *bindingDesc,
                                              VkVertexInputAttributeDescription *attrDescs,
-                                             uint32_t *attrCount)
+                                             uint32_t *attrCount,
+                                             VkVertexInputBindingDescription *instanceDesc)
 {
     bindingDesc->binding = 0;
     bindingDesc->inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -3413,6 +3494,52 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[1].location = 1;
             attrDescs[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
             attrDescs[1].offset = sizeof(float) * 3;
+            break;
+
+        case VERTEX_FORMAT_INSTANCE:
+            bindingDesc->stride = sizeof(Vertex);
+            *attrCount = 5;
+
+            // Position / Normal / Tangent / Bitangent / TexCoords — same as
+            // VERTEX_FORMAT_FULL, on binding 0 stepped per vertex.
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = offsetof(Vertex, position);
+
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[1].offset = offsetof(Vertex, normal);
+
+            attrDescs[2].binding = 0;
+            attrDescs[2].location = 2;
+            attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[2].offset = offsetof(Vertex, tangent);
+
+            attrDescs[3].binding = 0;
+            attrDescs[3].location = 3;
+            attrDescs[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[3].offset = offsetof(Vertex, bitangent);
+
+            attrDescs[4].binding = 0;
+            attrDescs[4].location = 4;
+            attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
+            attrDescs[4].offset = offsetof(Vertex, texCoords);
+
+            /* Per-instance mat4 on binding 1, stepped per instance, read as
+             * vertex attributes 5-8 (one vec4 per matrix column). */
+            instanceDesc->binding = 1;
+            instanceDesc->stride = sizeof(float) * 16;
+            instanceDesc->inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+            for (uint32_t c = 0; c < 4; c++) {
+                attrDescs[5 + c].binding = 1;
+                attrDescs[5 + c].location = 5 + c;
+                attrDescs[5 + c].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+                attrDescs[5 + c].offset = c * sizeof(float) * 4;
+            }
+            *attrCount = 9;
             break;
     }
 }
@@ -3495,11 +3622,14 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     VkPipelineDynamicStateCreateInfo dynamicState = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     const VkDynamicState dynamicStates[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
-    VkVertexInputBindingDescription bindingDescription = {};
-    VkVertexInputAttributeDescription attributeDescriptions[5] = {};
+    VkVertexInputBindingDescription bindingDescriptions[2] = {};
+    VkVertexInputBindingDescription *bindingDescription = &bindingDescriptions[0];
+    VkVertexInputBindingDescription instanceBindingDescription = {};
+    VkVertexInputAttributeDescription attributeDescriptions[9] = {};
     uint32_t attributeCount = 0;
 
-    graphics_get_vertex_input_state(format, &bindingDescription, attributeDescriptions, &attributeCount);
+    graphics_get_vertex_input_state(format, bindingDescription, attributeDescriptions,
+                                    &attributeCount, &instanceBindingDescription);
 
     vertShaderStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStage.module = pipeline->vertShader;
@@ -3513,9 +3643,15 @@ Pipeline graphics_createpipeline(Shader _vertShader, Shader _fragShader,
     stages[1] = fragShaderStage;
 
     vertexInput.vertexBindingDescriptionCount = 1;
-    vertexInput.pVertexBindingDescriptions = &bindingDescription;
+    vertexInput.pVertexBindingDescriptions = bindingDescriptions;
     vertexInput.vertexAttributeDescriptionCount = attributeCount;
     vertexInput.pVertexAttributeDescriptions = attributeDescriptions;
+
+    /* VERTEX_FORMAT_INSTANCE adds a second, per-instance binding */
+    if (format == VERTEX_FORMAT_INSTANCE) {
+        bindingDescriptions[1] = instanceBindingDescription;
+        vertexInput.vertexBindingDescriptionCount = 2;
+    }
 
     inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 

@@ -180,11 +180,13 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4)
 void graphics_draw_instanced(Model *model,
                              Material mat,
                              const float *transforms4x4,
+                             const float *viewProjection4x4,
                              size_t count)
 {
     (void)model;
     (void)mat;
     (void)transforms4x4;
+    (void)viewProjection4x4;
     (void)count;
 }
 

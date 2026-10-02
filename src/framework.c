@@ -27,6 +27,11 @@ static Model *g_testModel = NULL;
 static Material g_litMaterial = NULL;
 static float g_elapsed = 0.0f;
 
+/* Instanced grid drawn with a single graphics_draw_instanced() call */
+#define INSTANCED_GRID_SIZE 10
+#define INSTANCED_GRID_COUNT (INSTANCED_GRID_SIZE * INSTANCED_GRID_SIZE)
+static Material g_gridMaterial = NULL;
+
 /* Camera + scene graph */
 static Camera g_camera;
 static Scene g_scene;
@@ -116,6 +121,27 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_vec3(g_litMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
         graphics_material_set_vec3(g_litMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
         graphics_material_set_vec3(g_litMaterial, "albedo", 0.85f, 0.55f, 0.25f);
+    }
+
+    /* Instanced grid material: slot order must match the setters, same as
+     * g_litMaterial, but a different albedo so the grid reads as its own
+     * pass. The model matrix is ignored by the instanced shader (each
+     * instance carries its own), so it stays identity. */
+    g_gridMaterial = graphics_creatematerial(NULL);
+    if (g_gridMaterial) {
+        graphics_material_set_float(g_gridMaterial, "ambient", 0.2f);
+        graphics_material_set_float(g_gridMaterial, "specular", 0.5f);
+        graphics_material_set_float(g_gridMaterial, "shininess", 48.0f);
+        graphics_material_set_vec3(g_gridMaterial, "lightDir", 0.35f, -0.8f, -0.45f);
+        graphics_material_set_vec3(g_gridMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
+        graphics_material_set_vec3(g_gridMaterial, "albedo", 0.35f, 0.6f, 0.85f);
+        static const float identity[16] = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        graphics_material_set_mat4(g_gridMaterial, identity);
     }
 
     /* Fly camera: WASD + E/Q to move, right-drag to look, wheel to zoom */
@@ -209,6 +235,49 @@ void framework_draw(void)
                 graphics_material_set_mat4(g_litMaterial, world);
             }
             graphics_drawmodel(g_testModel, g_litMaterial, mvp);
+        }
+
+        /* Instanced grid: one draw call places all copies via a per-instance
+         * mat4, so it visibly proves each instance gets its own transform. */
+        if (g_gridMaterial) {
+            static float instanceTransforms[INSTANCED_GRID_COUNT][16];
+            static float gridView[16];
+            static float gridMvp[16];
+            static float gridModel[16];
+            static const float gridIdentity[16] = {
+                1, 0, 0, 0,
+                0, 1, 0, 0,
+                0, 0, 1, 0,
+                0, 0, 0, 1
+            };
+            int n = 0;
+
+            math_identity(gridModel);
+            math_scale(gridModel, gridModel, 0.12f, 0.12f, 0.12f);
+            for (int gx = 0; gx < INSTANCED_GRID_SIZE; gx++) {
+                for (int gz = 0; gz < INSTANCED_GRID_SIZE; gz++) {
+                    /* Camera sits at +z looking down -Z, so the grid goes at
+                     * negative z (in front of the origin) and below the
+                     * scene graph cubes to stay clear of them */
+                    float x = (gx - INSTANCED_GRID_SIZE / 2) * 0.2f;
+                    float z = -2.2f + (gz - INSTANCED_GRID_SIZE / 2) * 0.2f;
+                    math_identity(instanceTransforms[n]);
+                    math_translate(instanceTransforms[n], instanceTransforms[n], x, -0.9f, z);
+                    math_multiply(instanceTransforms[n], gridModel, instanceTransforms[n]);
+                    n++;
+                }
+            }
+
+            graphics_material_set_vec3(g_gridMaterial, "cameraPos",
+                                       g_camera.position[0],
+                                       g_camera.position[1],
+                                       g_camera.position[2]);
+
+            /* Per-instance model matrices above; shared view-projection here */
+            math_multiply(gridView, view, gridIdentity);
+            math_multiply(gridMvp, proj, gridView);
+            graphics_draw_instanced(g_testModel, g_gridMaterial,
+                                    &instanceTransforms[0][0], gridMvp, (size_t)n);
         }
     }
 

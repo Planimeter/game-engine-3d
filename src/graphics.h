@@ -32,7 +32,9 @@ typedef enum {
 typedef enum {
 	VERTEX_FORMAT_FULL,     // Position, Normal, UV, Tangent, Bitangent
 	VERTEX_FORMAT_POS_UV,   // Position, UV only (for text/UI)
-	VERTEX_FORMAT_POS_COLOR // Position, Color only (for debug)
+	VERTEX_FORMAT_POS_COLOR,// Position, Color only (for debug)
+	VERTEX_FORMAT_INSTANCE  // VERTEX_FORMAT_FULL vertices + a per-instance mat4
+	                         // at buffer(1) (locations 5-8) for graphics_draw_instanced
 } VertexFormat;
 
 typedef struct {
@@ -79,6 +81,7 @@ void        graphics_drawmodel(Model *model,
 void        graphics_draw_instanced(Model *model,
                                     Material mat,
                                     const float *transforms4x4,
+                                    const float *viewProjection4x4,
                                     size_t count);
 void        graphics_draw_buffers(Buffer vertexBuffer,
                                   Buffer indexBuffer,

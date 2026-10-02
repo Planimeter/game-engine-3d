@@ -117,6 +117,8 @@ static int g_minimized = 0;
 /* Default shaders */
 static MetalShader *g_defaultVertShader = NULL;
 static MetalShader *g_defaultFragShader = NULL;
+/* Instanced variant: adds a per-instance mat4 (vertex attributes 5-8). */
+static MetalShader *g_instanceVertShader = NULL;
 
 /* Text rendering shaders (embedded MSL, used when SPIR-V not available) */
 static MetalShader *g_textVertShader = NULL;
@@ -176,6 +178,35 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
             vd.attributes[1].bufferIndex = 0;
 
             vd.layouts[0].stride = 24;
+            vd.layouts[0].stepRate = 1;
+            vd.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
+            break;
+        }
+        case VERTEX_FORMAT_INSTANCE: {
+            /* Same vertex layout as VERTEX_FORMAT_FULL. Instance transforms are
+             * read by [[instance_id]] from buffer(1) in the shader, so the
+             * descriptor needs no per-instance layout. */
+            vd.attributes[0].format = MTLVertexFormatFloat3;
+            vd.attributes[0].offset = offsetof(Vertex, position);
+            vd.attributes[0].bufferIndex = 0;
+
+            vd.attributes[1].format = MTLVertexFormatFloat3;
+            vd.attributes[1].offset = offsetof(Vertex, normal);
+            vd.attributes[1].bufferIndex = 0;
+
+            vd.attributes[2].format = MTLVertexFormatFloat3;
+            vd.attributes[2].offset = offsetof(Vertex, tangent);
+            vd.attributes[2].bufferIndex = 0;
+
+            vd.attributes[3].format = MTLVertexFormatFloat3;
+            vd.attributes[3].offset = offsetof(Vertex, bitangent);
+            vd.attributes[3].bufferIndex = 0;
+
+            vd.attributes[4].format = MTLVertexFormatFloat2;
+            vd.attributes[4].offset = offsetof(Vertex, texCoords);
+            vd.attributes[4].bufferIndex = 0;
+
+            vd.layouts[0].stride = sizeof(Vertex);
             vd.layouts[0].stepRate = 1;
             vd.layouts[0].stepFunction = MTLVertexStepFunctionPerVertex;
             break;
@@ -988,6 +1019,83 @@ void graphics_init() {
     g_defaultVertShader = (MetalShader *)graphics_createshader(SHADER_STAGE_VERTEX, default3dCombined, strlen(default3dCombined), NULL, 0);
     g_defaultFragShader = (MetalShader *)graphics_createshader(SHADER_STAGE_FRAGMENT, default3dCombined, strlen(default3dCombined), NULL, 0);
 
+    /* Instanced 3D shader: identical to the default except the model matrix
+     * arrives per instance as vertex attributes 5-8 (mat4 columns) from
+     * buffer(1) with MTLVertexStepFunctionPerInstance, instead of a single
+     * transform at buffer(1). Material layout stays identical. */
+    const char *instance3dCombined =
+        "#include <metal_stdlib>\n"
+        "using namespace metal;\n"
+        "\n"
+        "struct VertexIn {\n"
+        "    float3 position  [[attribute(0)]];\n"
+        "    float3 normal    [[attribute(1)]];\n"
+        "    float3 tangent   [[attribute(2)]];\n"
+        "    float3 bitangent [[attribute(3)]];\n"
+        "    float2 texcoord  [[attribute(4)]];\n"
+        "};\n"
+        "\n"
+        "struct VertexOut {\n"
+        "    float4 position [[position]];\n"
+        "    float3 worldPos;\n"
+        "    float3 worldNormal;\n"
+        "};\n"
+        "\n"
+        "struct TransformData {\n"
+        "    float4x4 mvp;\n"
+        "};\n"
+        "\n"
+        "struct MaterialData {\n"
+        "    float floats[32];\n"
+        "    float4 vec3s_padded[16];\n"
+        "    float4x4 extraMatrix;\n"
+        "};\n"
+        "\n"
+        "vertex VertexOut vertex_main(\n"
+        "    VertexIn v [[stage_in]],\n"
+        "    uint iid [[instance_id]],\n"
+        "    constant TransformData &transform [[buffer(3)]],\n"
+        "    constant float4 *instances [[buffer(1)]],\n"
+        "    constant MaterialData &material [[buffer(2)]]\n"
+        ") {\n"
+        "    VertexOut out;\n"
+        /* Instance transforms are read by instance_id from buffer(1) rather
+     * than stepped per instance through the vertex descriptor: MSL only feeds
+     * [[attribute]] slots the descriptor declares, and a descriptor-only
+     * per-instance buffer was silently ignored here. */
+        "    float4x4 model = float4x4(instances[iid*4+0], instances[iid*4+1], instances[iid*4+2], instances[iid*4+3]);\n"
+        "    float4 p = model * float4(v.position, 1.0);\n"
+        "    out.position = transform.mvp * p;\n"
+        "    out.worldPos = p.xyz;\n"
+        "    float3x3 normalMat = float3x3(model[0].xyz, model[1].xyz, model[2].xyz);\n"
+        "    out.worldNormal = normalize(normalMat * v.normal);\n"
+        "    return out;\n"
+        "}\n"
+        "\n"
+        "fragment float4 fragment_main(\n"
+        "    VertexOut in [[stage_in]],\n"
+        "    constant MaterialData &material [[buffer(2)]]\n"
+        ") {\n"
+        "    float ambient  = material.floats[0];\n"
+        "    float specular = material.floats[1];\n"
+        "    float shininess = material.floats[2];\n"
+        "    float3 lightDir = material.vec3s_padded[0].xyz;\n"
+        "    float3 cameraPos = material.vec3s_padded[1].xyz;\n"
+        "    float3 albedo = material.vec3s_padded[2].xyz;\n"
+        "\n"
+        "    float3 N = normalize(in.worldNormal);\n"
+        "    float3 L = normalize(-lightDir);\n"
+        "    float3 V = normalize(cameraPos - in.worldPos);\n"
+        "    float3 H = normalize(L + V);\n"
+        "\n"
+        "    float ndl = max(dot(N, L), 0.0);\n"
+        "    float spec = pow(max(dot(N, H), 0.0), max(shininess, 1.0)) * specular;\n"
+        "    float3 color = albedo * (ambient + (1.0 - ambient) * ndl) + spec;\n"
+        "    return float4(color, 1.0);\n"
+        "}\n";
+
+    g_instanceVertShader = (MetalShader *)graphics_createshader(SHADER_STAGE_VERTEX, instance3dCombined, strlen(instance3dCombined), NULL, 0);
+
     /* Default material with sane lighting so draws without a material still
      * shade correctly (layout must match graphics_material_set_* order). */
     g_defaultMaterial = (MetalMaterial *)graphics_creatematerial(NULL);
@@ -1105,6 +1213,7 @@ void graphics_shutdown() {
 
     if (g_defaultVertShader) graphics_destroyshader((Shader)g_defaultVertShader);
     if (g_defaultFragShader) graphics_destroyshader((Shader)g_defaultFragShader);
+    if (g_instanceVertShader) graphics_destroyshader((Shader)g_instanceVertShader);
 
     if (g_renderPassDescriptor) [g_renderPassDescriptor release];
     g_renderPassDescriptor = nil;
@@ -1290,26 +1399,46 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     }
 }
 
-void graphics_draw_instanced(Model *model, Material mat, const float *transforms4x4, size_t count) {
-    if (!model || !g_currentEncoder) return;
+void graphics_draw_instanced(Model *model, Material mat, const float *transforms4x4,
+                              const float *viewProjection4x4, size_t count) {
+    if (!model || !g_currentEncoder || count == 0) return;
 
     MetalMaterial *mm = (MetalMaterial *)mat;
-    Shader vertShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultVertShader;
+    Shader vertShader = (mm && mm->shader) ? mm->shader : (Shader)g_instanceVertShader;
     Shader fragShader = (mm && mm->shader) ? mm->shader : (Shader)g_defaultFragShader;
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
-    Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_FULL, state);
+    Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_INSTANCE, state);
     if (p) graphics_bindpipeline(p);
 
-    /* Upload first transform to uniform buffer and bind at index 1 */
-    if (transforms4x4 && g_uniformBuffer) {
-        memcpy(metal_buffer_get_contents(g_uniformBuffer), transforms4x4, 64);
-        metal_encoder_set_vertex_buffer(g_currentEncoder, g_uniformBuffer, 0, 1);
+    /* Shared view-projection at buffer(3) (copied at encode time so later
+     * CPU writes can't disturb an in-flight frame) */
+    if (viewProjection4x4) {
+        metal_encoder_set_vertex_bytes(g_currentEncoder, viewProjection4x4, 64, 3);
     }
 
     /* Bind material uniforms (fall back to the default material) */
     graphics_setmaterial(mat ? mat : (Material)g_defaultMaterial);
+
+    /* One mat4 per instance, stepped per instance by the vertex descriptor at
+     * buffer(1). Bound after the material so nothing else claims slot 1.
+     * Without this the whole array would collapse onto instance 0. */
+    /* Instance transforms live in a cached buffer that grows on demand. It
+     * cannot be destroyed after encoding: releasing the MTLBuffer here would
+     * free memory the in-flight command buffer still reads, and every
+     * instance would sample the same recycled bytes. */
+    static MetalBuffer *g_instanceBuffer = NULL;
+    const size_t needed = count * sizeof(float) * 16;
+    if (!g_instanceBuffer || g_instanceBuffer->size < needed) {
+        if (g_instanceBuffer) {
+            graphics_destroybuffer((Buffer)g_instanceBuffer);
+        }
+        g_instanceBuffer = (MetalBuffer *)graphics_createvertexbuffer(NULL, needed);
+        if (!g_instanceBuffer) return;
+    }
+    metal_buffer_update(g_instanceBuffer->buffer, transforms4x4, needed);
+    metal_encoder_set_vertex_buffer(g_currentEncoder, g_instanceBuffer->buffer, 0, 1);
 
     for (uint32_t i = 0; i < model->meshCount; i++) {
         Mesh *mesh = &model->meshes[i];
@@ -1320,10 +1449,10 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
         }
 
         if (mesh->indexBuffer && mesh->indexCount > 0) {
-            MetalBuffer *ib = (MetalBuffer *)mesh->indexBuffer;
+            MetalBuffer *idx = (MetalBuffer *)mesh->indexBuffer;
             metal_encoder_draw_indexed_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle,
                                                   mesh->indexCount, MTLIndexTypeUInt32,
-                                                  ib->buffer, 0, (unsigned long)count);
+                                                  idx->buffer, 0, (unsigned long)count);
         }
     }
 }

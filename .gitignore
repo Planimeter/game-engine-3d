@@ -444,3 +444,6 @@ FodyWeavers.xsd
 *.sln
 build/*
 third_party/*
+
+# Vulkan/MoltenVK test build dir
+build-vk/
