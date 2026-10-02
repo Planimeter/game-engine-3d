@@ -35,6 +35,12 @@
 static const uint32_t MIN_SWAPCHAIN_IMAGES = 2;
 static const float CLEAR_COLOR[4] = {0.01f, 0.01f, 0.033f, 1.0f};
 
+/* Frames in flight. Swapchain images are capped at 16 (see
+ * graphics_getswapchainimages) and per-frame semaphores, fences and
+ * descriptor sets are all sized from this, so it is defined before any
+ * state that depends on it. */
+#define MAX_FRAMES_IN_FLIGHT 16
+
 /* 4.2. Instances */
 static VkInstance instance;
 
@@ -59,10 +65,16 @@ static VkCommandPool *commandPools;
 
 /* 7.3. Fences */
 static VkFence *fences;
+/* Fence per frame slot, waited before acquiring that slot's semaphore pair. */
+static VkFence frameFences[MAX_FRAMES_IN_FLIGHT];
 
 /* 7.4. Semaphores */
-static VkSemaphore acquireSemaphore;
-static VkSemaphore releaseSemaphore;
+/* One acquire + release semaphore per swapchain image. A single pair cannot be
+ * reused while a previous frame's wait/signal is still pending
+ * (VUID-vkAcquireNextImageKHR-semaphore-01779,
+ * VUID-vkQueueSubmit-pSignalSemaphores-00067). */
+static VkSemaphore acquireSemaphores[MAX_FRAMES_IN_FLIGHT];
+static VkSemaphore releaseSemaphores[MAX_FRAMES_IN_FLIGHT];
 
 /* 8. Render Pass */
 static VkRenderPass renderPass;
@@ -123,10 +135,6 @@ static VmaAllocation depthAllocation = VK_NULL_HANDLE;
 static VkImageView *swapchainImageViews;
 
 /* 14. Resource Descriptors */
-/* Swapchain images are capped at 16 (see graphics_getswapchainimages), and
- * fences are per image, so this is the frames-in-flight bound too. */
-#define MAX_FRAMES_IN_FLIGHT 16
-
 /* Bindless texture slots. Nothing in the engine binds more than a couple at a
  * time (text uses slot 0), and one set is allocated per frame in flight, so
  * this has to stay modest: 16384 was both wasteful and over MoltenVK's
@@ -180,6 +188,11 @@ static VkSwapchainKHR swapchain;
 static uint32_t swapchainImageCount;
 static VkImage *swapchainImages;
 static uint32_t imageIndex;
+/* Rotating frame counter, used to pick an acquire semaphore before
+ * vkAcquireNextImageKHR has written imageIndex. */
+static uint32_t g_frameIndex;
+/* Frame slot of the image currently being recorded, for semaphore pairing. */
+static uint32_t imageFrameIndex;
 static VkSurfaceFormatKHR swapchainSurfaceFormat = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html#initialization-instances */
@@ -703,6 +716,16 @@ static void graphics_createfences()
             exit(EXIT_FAILURE);
         }
     }
+
+    /* One fence per frame slot, matching the per-slot semaphore pairs. */
+    for (i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+    {
+        result = vkCreateFence(device, &createInfo, NULL, &frameFences[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create frame fence %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#synchronization-semaphores */
@@ -711,16 +734,21 @@ static void graphics_createsemaphores()
     VkSemaphoreCreateInfo createInfo = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
     VkResult result;
 
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
-    result = vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphore);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create acquire semaphore: %d\n", result);
-        exit(EXIT_FAILURE);
-    }
-    result = vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphore);
-    if (result != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create release semaphore: %d\n", result);
-        exit(EXIT_FAILURE);
+    /* One pair per swapchain image so a frame's semaphores are never reused
+     * while an earlier frame's wait/signal is still pending. */
+    for (size_t i = 0; i < swapchainImageCount; i++)
+    {
+        /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkCreateSemaphore */
+        result = vkCreateSemaphore(device, &createInfo, NULL, &acquireSemaphores[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create acquire semaphore %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
+        result = vkCreateSemaphore(device, &createInfo, NULL, &releaseSemaphores[i]);
+        if (result != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create release semaphore %zu: %d\n", i, result);
+            exit(EXIT_FAILURE);
+        }
     }
 }
 
@@ -1528,6 +1556,13 @@ static void graphics_destroyfences()
         free(fences);
         fences = NULL;
     }
+
+    for (i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        if (frameFences[i] != VK_NULL_HANDLE) {
+            vkDestroyFence(device, frameFences[i], NULL);
+            frameFences[i] = VK_NULL_HANDLE;
+        }
+    }
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkFreeCommandBuffers */
@@ -1563,13 +1598,15 @@ static void graphics_destroycommandpools()
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#vkDestroySemaphore */
 static void graphics_destroysemaphores()
 {
-    if (releaseSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(device, releaseSemaphore, NULL);
-        releaseSemaphore = VK_NULL_HANDLE;
-    }
-    if (acquireSemaphore != VK_NULL_HANDLE) {
-        vkDestroySemaphore(device, acquireSemaphore, NULL);
-        acquireSemaphore = VK_NULL_HANDLE;
+    for (size_t i = 0; i < swapchainImageCount; i++) {
+        if (releaseSemaphores[i] != VK_NULL_HANDLE) {
+            vkDestroySemaphore(device, releaseSemaphores[i], NULL);
+            releaseSemaphores[i] = VK_NULL_HANDLE;
+        }
+        if (acquireSemaphores[i] != VK_NULL_HANDLE) {
+            vkDestroySemaphore(device, acquireSemaphores[i], NULL);
+            acquireSemaphores[i] = VK_NULL_HANDLE;
+        }
     }
 }
 
@@ -1578,20 +1615,38 @@ static VkResult graphics_acquirenextimage()
 {
     VkResult res;
 
-    res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphore, VK_NULL_HANDLE, &imageIndex);
+    /* Wait on this frame slot's fence *before* acquiring, not after on the
+     * image's fence. The acquire semaphore may still have the previous
+     * frame's signal pending, and vkAcquireNextImageKHR requires a semaphore
+     * with no outstanding operations
+     * (VUID-vkAcquireNextImageKHR-semaphore-01779). Waiting first also means
+     * framesInFlight is effectively 1, which is why rotating over the image
+     * count is safe here. */
+    if (frameFences[g_frameIndex] != VK_NULL_HANDLE)
+    {
+        vkWaitForFences(device, 1, &frameFences[g_frameIndex], VK_TRUE, UINT64_MAX);
+        vkResetFences(device, 1, &frameFences[g_frameIndex]);
+    }
+
+    res = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquireSemaphores[g_frameIndex], VK_NULL_HANDLE, &imageIndex);
     if (res != VK_SUCCESS)
     {
         return res;
-    }
-    if (fences[imageIndex] != VK_NULL_HANDLE)
-    {
-        vkWaitForFences(device, 1, &fences[imageIndex], VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &fences[imageIndex]);
     }
     if (commandPools[imageIndex] != VK_NULL_HANDLE)
     {
         vkResetCommandPool(device, commandPools[imageIndex], 0);
     }
+
+    /* Submit and present must use the same semaphore pair that acquired this
+     * image, so record which frame slot it belongs to. */
+    imageFrameIndex = g_frameIndex;
+
+    /* Advance to the next frame's semaphore pair. The fence wait above means
+     * at most swapchainImageCount frames are ever in flight, which never
+     * exceeds MAX_FRAMES_IN_FLIGHT. */
+    g_frameIndex = (g_frameIndex + 1) % (swapchainImageCount < MAX_FRAMES_IN_FLIGHT
+                                         ? swapchainImageCount : MAX_FRAMES_IN_FLIGHT);
     return VK_SUCCESS;
 }
 
@@ -1600,8 +1655,7 @@ void graphics_init()
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap4.html */
     graphics_createinstance();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
-    graphics_enumeratephysicaldevices();
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
+    graphics_enumeratephysicaldevices();    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html */
     graphics_createsurface();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_createdevice();
@@ -1609,8 +1663,6 @@ void graphics_init()
     graphics_createallocator();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html */
     graphics_getqueue();
-    /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
-    graphics_createsemaphores();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html */
     graphics_createbindlessdescriptors();
     /* UBO descriptor set for uniform buffers */
@@ -1643,10 +1695,33 @@ void graphics_init()
     graphics_allocatecommandbuffers();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html */
     graphics_createfences();
+    /* Semaphores are per swapchain image, so they must come after
+     * graphics_getswapchainimages() has set swapchainImageCount. */
+    graphics_createsemaphores();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap12.html */
     graphics_createimageviews();
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap8.html */
     graphics_createframebuffers();
+
+    /* Seed the material descriptor (set 1, binding 1) so it is valid before the
+     * first setmaterial() records a pending write. Without this the first
+     * draw reads an uninitialised descriptor
+     * (VUID-vkCmdDrawIndexed-None-08114). */
+    {
+        static const float identity[16] = {
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1
+        };
+        GPUBuffer *seed = (GPUBuffer *)graphics_createuniformbuffer(UNIFORM_BUFFER_SIZE);
+        if (seed) {
+            graphics_updatebuffer((Buffer)seed, identity, sizeof(identity));
+            graphics_binduniformbuffer((Buffer)seed, 1);
+            graphics_flushdescriptorwrites();
+        }
+    }
+
     atexit(graphics_shutdown);
 }
 
@@ -3380,13 +3455,13 @@ void graphics_postdraw()
     submit.commandBufferCount   = 1;
     submit.pCommandBuffers      = &commandBuffers[imageIndex];
     submit.waitSemaphoreCount   = 1;
-    submit.pWaitSemaphores      = &acquireSemaphore;
+    submit.pWaitSemaphores      = &acquireSemaphores[imageFrameIndex];
     submit.pWaitDstStageMask    = &waitStage;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores    = &releaseSemaphore;
+    submit.pSignalSemaphores    = &releaseSemaphores[imageFrameIndex];
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#vkQueueSubmit */
-    vkQueueSubmit(queue, 1, &submit, fences[imageIndex]);
+    vkQueueSubmit(queue, 1, &submit, frameFences[imageFrameIndex]);
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkQueuePresentKHR */
@@ -3404,7 +3479,7 @@ void graphics_present()
     presentInfo.pSwapchains        = &swapchain;
     presentInfo.pImageIndices      = &imageIndex;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores    = &releaseSemaphore;
+    presentInfo.pWaitSemaphores    = &releaseSemaphores[imageFrameIndex];
 
     res = vkQueuePresentKHR(queue, &presentInfo);
 
