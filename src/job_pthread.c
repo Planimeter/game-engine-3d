@@ -148,6 +148,10 @@ struct JobSystem {
     JobQueue               queues[MAX_WORKERS];
     pthread_t              threads[MAX_WORKERS];
     uint32_t               workerCount;
+    /* How many entries of `threads` were actually created. job_create() bails
+     * out through job_destroy() on a partial failure, and joining a slot that
+     * was never filled in is undefined, so only live threads are joined. */
+    uint32_t               liveThreads;
     _Atomic(int)            running;         /* atomic */
     _Atomic(uint64_t)       nextJobId;       /* atomic */
     _Atomic(uint64_t)       nextSlotHint;    /* atomic — ring buffer allocator hint */
@@ -361,6 +365,7 @@ JobSystem *job_create(uint32_t workerThreadCount)
             job_destroy(sys);
             return NULL;
         }
+        sys->liveThreads++;
     }
 
     return sys;
@@ -372,12 +377,20 @@ void job_destroy(JobSystem *jobSystem)
 
     atomic_store(&jobSystem->running, 0);
 
-    /* Wake all sleeping workers so they see running == 0 and exit */
+    /* Wake all sleeping workers so they see running == 0 and exit. The mutex
+     * must be held across each broadcast: a condition variable can only be
+     * signalled by a thread that holds the associated lock, and a worker
+     * that has checked `running` but not yet entered cond_wait() would
+     * otherwise sleep forever. Broadcasting unlocked lets that worker miss
+     * the signal, and the pthread_join() below then blocks until the process
+     * is killed — which is how this used to end in a shutdown hang. */
     for (uint32_t i = 0; i < jobSystem->workerCount; i++) {
+        pthread_mutex_lock(&jobSystem->queues[i].mutex);
         pthread_cond_broadcast(&jobSystem->queues[i].workAvailable);
+        pthread_mutex_unlock(&jobSystem->queues[i].mutex);
     }
 
-    for (uint32_t i = 0; i < jobSystem->workerCount; i++) {
+    for (uint32_t i = 0; i < jobSystem->liveThreads; i++) {
         pthread_join(jobSystem->threads[i], NULL);
     }
 
