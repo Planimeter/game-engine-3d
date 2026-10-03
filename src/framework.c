@@ -5,6 +5,7 @@
 #include "graphics.h"
 #include "audio.h"
 #include "footstep.h"
+#include "selftest.h"
 #include "font.h"
 #include "text.h"
 #include "math_c.h"
@@ -13,6 +14,7 @@
 #include "player.h"
 #include "scene.h"
 #include "terrain.h"
+#include "tilemap.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -44,13 +46,18 @@ static float g_boneMatrices[MAX_SKIN_BONES * 16];
 static int g_animIndex = -1;
 static ModelAnimationInfo g_animInfo = {NULL, 0.0f, 0};
 
-/* Procedural landscape. Generated at startup rather than loaded, so there
- * is no asset dependency and it is deterministic for a given seed.
- * Amplitude is modest relative to the extent so hills read as walkable
- * ground rather than cliffs that swallow the camera. */
-#define TERRAIN_RESOLUTION 129
-#define TERRAIN_EXTENT 600.0f
-#define TERRAIN_AMPLITUDE 9.0f
+/* Tiled world. A grid of flat-topped blocks on a lattice rather than a smooth
+ * heightfield: the blocky skyline is the readable, deliberately low-detail look
+ * this style wants, and a lattice gives an exact ground height that collision
+ * and the camera can both read, so a tile step cannot show up as the view
+ * hovering over or sinking into the ground.
+ *
+ * 128 tiles of 4 units is a 512-unit map, which is what TERRAIN_EXTENT means
+ * for the character's bounds clamp. */
+#define TERRAIN_TILES 128
+#define TERRAIN_TILE_SIZE 4.0f
+#define TERRAIN_EXTENT (TERRAIN_TILES * TERRAIN_TILE_SIZE)
+#define TERRAIN_AMPLITUDE 9.0f   /* read by physics_terrain_height's signature */
 #define TERRAIN_SEED 20261002u
 static Model *g_terrain = NULL;
 static Material g_terrainMaterial = NULL;
@@ -67,6 +74,7 @@ static Material g_terrainMaterial = NULL;
 static Model *g_sky = NULL;
 static Material g_skyMaterial = NULL;
 static Texture g_skyGradient = NULL;
+
 static void framework_create_sky(void);
 static void framework_create_footsteps(void);
 static void framework_update_sky_gradient(void);
@@ -86,7 +94,8 @@ static void framework_set_look(int active);
  * screen is daylight rather than a black landscape. */
 static float g_timeOfDay = 0.34f; /* fraction of a cycle: 0 midnight, 0.5 noon */
 static float g_sunDirection[3] = {0.0f, 1.0f, 0.0f};
-static int g_skyGradientDirty = 1;
+/* Forces one gradient upload on the first update after the texture exists. */
+static int g_skyGradientJustCreated = 1;
 
 /* Controls overlay. Text objects are allocated once and rewritten each frame
  * by text_set(), which avoids per-frame allocation in the render loop. */
@@ -98,6 +107,14 @@ static Text *g_helpText[HELP_LINE_COUNT];
  * plays whatever loaded. */
 static FootstepSystem *g_footsteps = NULL;
 static int g_wasGrounded = 1;
+
+/* In-game self test. Opt-in via GAME_SELFTEST=1: it drives the character
+ * through a scripted sequence and reports on screen, so the controller is
+ * verified on the real terrain inside the real window rather than against a
+ * synthetic map in a separate harness. Off by default because it takes over
+ * the camera. */
+static SelfTest g_selftest;
+static int g_selftestActive = 0;
 
 static void framework_create_footsteps(void)
 {
@@ -258,11 +275,15 @@ static void framework_sample_sky_palette(float zenith[3], float horizon[3])
 }
 
 /* Sun direction on the celestial sphere, tilted so the sun does not pass
- * straight overhead. `dir` points from the world toward the sun. */
+ * straight overhead. `dir` points from the world toward the sun.
+ *
+ * The quarter-cycle offset puts sunrise at t = 0.25: the sun has to be on the
+ * horizon there, so the angle is measured from sunrise, not from midnight.
+ * Without the offset the sun sits a quarter cycle out of phase with the sky
+ * palette, and the sky darkens at the moment the sun is highest. */
 static void framework_compute_sun(float dir[3])
 {
-    /* 0 at midnight (below the horizon), 0.5 at noon (overhead). */
-    float angle = (g_timeOfDay - 0.5f) * 2.0f * 3.14159265f;
+    float angle = (g_timeOfDay - 0.25f) * 2.0f * 3.14159265f;
     float x = cosf(angle) * SUN_TILT * 3.0f;
     float y = sinf(angle);
     float z = cosf(angle) * 0.45f;
@@ -286,6 +307,7 @@ static float framework_sun_elevation(void)
     framework_compute_sun(g_sunDirection);
     return g_sunDirection[1] > 0.0f ? g_sunDirection[1] : 0.0f;
 }
+
 
 static void framework_update_sky_gradient(void)
 {
@@ -324,16 +346,19 @@ static void framework_update_sky_gradient(void)
     }
 
     graphics_updatetexture(g_skyGradient, 0, 0, 1, SKY_GRADIENT_H, pixels);
-    g_skyGradientDirty = 0;
 }
 
 static void framework_create_sky_gradient(void)
 {
-    /* One row to start, then the real update writes the full height. The
-     * texture is created empty so the update path is the only one that ever
-     * decides what the sky looks like. */
-    static const unsigned char empty[4] = {0, 0, 0, 255};
-    g_skyGradient = graphics_createtexture_rgba(1, 1, empty);
+    /* Created at its full height, not 1x1. graphics_updatetexture() blits into
+     * an existing texture and cannot resize one, so a texture made at 1x1 stays
+     * 1x1 however many rows are written to it: the whole gradient collapses to
+     * a single pixel, and sampling that one pixel across the dome gives a flat
+     * white sky. The update below still writes every row on the first frame,
+     * but it writes into a texture that is already the right size. */
+    enum { SKY_GRADIENT_H = 64 };
+    static const unsigned char empty[SKY_GRADIENT_H * 4] = {0};
+    g_skyGradient = graphics_createtexture_rgba(1, SKY_GRADIENT_H, empty);
     framework_update_sky_gradient();
 }
 
@@ -554,22 +579,27 @@ void framework_load(int argc, char *argv[])
         }
     }
 
-    /* Procedural landscape. */
+    /* Tiled landscape. One vertex per tile corner at resolution 1, so the
+     * surface is stepped and every tile is flat. */
     {
-        void *mesh = terrain_build_mesh(TERRAIN_RESOLUTION, TERRAIN_EXTENT,
-                                        TERRAIN_AMPLITUDE, TERRAIN_SEED);
+        TileMapConfig config;
+        config.size = TERRAIN_TILE_SIZE;
+        config.resolution = 1.0f;
+        config.seed = TERRAIN_SEED;
+
+        void *mesh = tilemap_build_mesh(&config);
         if (mesh) {
-            uint32_t side = TERRAIN_RESOLUTION * TERRAIN_RESOLUTION;
-            uint32_t quads = (TERRAIN_RESOLUTION - 1) * (TERRAIN_RESOLUTION - 1);
-            /* terrain_build_mesh lays vertices then indices in one block. */
+            uint32_t side = (uint32_t)TERRAIN_TILES * TERRAIN_TILES;
+            uint32_t quads = (uint32_t)(TERRAIN_TILES - 1) * (TERRAIN_TILES - 1);
+            /* tilemap_build_mesh lays vertices then indices in one block. */
             g_terrain = graphics_createmesh(
                 mesh, side, 22 * sizeof(float),
                 (const uint32_t *)(mesh + (size_t)side * 22 * sizeof(float)),
                 (size_t)quads * 6);
-            terrain_free_mesh(mesh);
+            tilemap_free_mesh(mesh);
             if (g_terrain) {
-                printf("Terrain: %dx%d grid, %.0f units across, seed %u\n",
-                       TERRAIN_RESOLUTION, TERRAIN_RESOLUTION,
+                printf("Terrain: %dx%d tiles, %.0f units across, seed %u\n",
+                       TERRAIN_TILES, TERRAIN_TILES,
                        TERRAIN_EXTENT, TERRAIN_SEED);
             }
         }
@@ -585,6 +615,18 @@ void framework_load(int argc, char *argv[])
     framework_create_sky();
 
     framework_create_footsteps();
+
+    /* Opt-in self test. The overlay reuses the three help text objects: there
+     * are more results than objects, so the list scrolls and older results
+     * drop off the top. That is enough to read a pass or a fail, which is the
+     * point — this is a diagnostic, not a report to admire. */
+    {
+        const char *env = getenv("GAME_SELFTEST");
+        if (env && env[0] == '1') {
+            g_selftestActive = 1;
+            selftest_begin(&g_selftest);
+        }
+    }
 
     /* Lit material: floats are ambient/specular/shininess, vec3s are
      * light direction/camera position/albedo (slot order matters — the
@@ -748,10 +790,6 @@ void framework_update(uint64_t deltaTime)
             snprintf(fpsText, sizeof(fpsText), "FPS: %d", g_displayFps);
             text_set(g_testText, fpsText);
         }
-        printf("POS %.3f %.3f %.3f GRND %d\n",
-               g_player.position[0], g_player.position[1], g_player.position[2],
-               g_player.grounded);
-        fflush(stdout);
     }
 
     float dt = (float)deltaTime / 1000.0f;
@@ -770,11 +808,20 @@ void framework_update(uint64_t deltaTime)
         g_timeOfDay += dt / DAY_LENGTH_SECONDS;
         g_timeOfDay -= floorf(g_timeOfDay);
 
-        /* A hundredth of a cycle is well under one gradient row, so anything
-         * finer would upload identical bytes. */
-        if (fabsf(g_timeOfDay - before) > 0.0f) {
+        /* Re-upload the gradient a few times a minute, not every frame.
+         *
+         * graphics_updatetexture() allocates a staging buffer and builds its
+         * own MTLCommandQueue per call, so one per frame means ~119 command
+         * queues a second — enough to stall the whole desktop, not just the
+         * game. The cycle is 240s, so a 0.002 step is one update every half
+         * second and the gradient moves less than a single row in between.
+         * Without this the sky is still smooth; it is just not re-uploaded
+         * 119 times for every visible change. */
+        if (fabsf(g_timeOfDay - before) >= 0.002f ||
+            g_skyGradientJustCreated) {
             framework_compute_sun(g_sunDirection);
             framework_update_sky_gradient();
+            g_skyGradientJustCreated = 0;
         }
     }
 
@@ -800,6 +847,14 @@ void framework_update(uint64_t deltaTime)
                             g_player.velocity[2] * g_player.velocity[2]);
         footstep_update(g_footsteps, speed, g_player.grounded, g_wasGrounded, dt);
         g_wasGrounded = g_player.grounded;
+    }
+
+    /* The self test drives the character itself, so it runs after the normal
+     * input path and before the camera follows, which means the camera tracks
+     * whatever the test is doing. */
+    if (g_selftestActive) {
+        selftest_update(&g_selftest, &g_player, &input, g_camera.yaw, dt,
+                        g_propCount > 0 ? g_propBoxes : NULL, g_propCount);
     }
 
     /* Camera follows the character's eyes. Only orientation is its own, so
@@ -939,6 +994,7 @@ void framework_draw(void)
             graphics_drawmodel(g_sky, g_skyMaterial, mvp);
         }
 
+
         scene_update(&g_scene);
         for (int i = 0; i < SCENE_MAX_NODES; i++) {
             const float *world = scene_world(&g_scene, i);
@@ -1032,8 +1088,11 @@ void framework_draw(void)
     font_begin_batch(g_testFont);
     text_draw(g_testText, 8.0f, 8.0f, 0.0f,
               1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-    /* Controls, so the bindings do not have to be remembered or guessed. */
-    {
+    /* Controls, so the bindings do not have to be remembered or guessed.
+     * Skipped while the self test runs: it draws its results over this same
+     * space, and drawing both at once overlaps them into an unreadable mess
+     * of interleaved glyphs. */
+    if (!g_selftestActive) {
         static const char *lines[] = {
             "WASD  move     Shift  sprint     Space  jump",
             "mouse  look     Esc  release cursor",
@@ -1059,6 +1118,21 @@ void framework_draw(void)
                      : "the character walks the terrain; the world stays put");
             text_draw(g_helpText[2], 8.0f, y - 18.0f, 0.0f, 1.0f, 1.0f,
                       0.0f, 0.0f, 0.0f, 0.0f);
+        }
+
+        /* Self test report, replacing the controls while it runs. The checks
+         * are the reason to look at the screen during a run, so they take the
+         * space rather than being appended under the help text. */
+        if (g_selftestActive) {
+            float ty = 30.0f;
+            for (int i = 0; i < HELP_LINE_COUNT; i++) {
+                text_set(g_helpText[i], i < HELP_LINE_COUNT - 1
+                         ? selftest_line(&g_selftest, i)
+                         : selftest_status(&g_selftest));
+                text_draw(g_helpText[i], 8.0f, ty, 0.0f, 1.0f, 1.0f,
+                          0.0f, 0.0f, 0.0f, 0.0f);
+                ty += 18.0f;
+            }
         }
     }
     font_end_batch(g_testFont);

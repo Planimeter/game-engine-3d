@@ -16,8 +16,17 @@ extern "C" {
  * Nothing here rotates or moves the world; callers move the character. */
 
 /* Terrain surface height at a world position, in the same units the mesh was
- * built with. */
+ * built with. This is the stepped tile lattice, not a smooth heightfield. */
 float physics_terrain_height(float x, float z, uint32_t seed, float amplitude);
+
+/* Tile edge length of the world. The map is square and centred on the origin,
+ * so its extent is tilesPerSide * this. */
+float physics_tile_size(void);
+
+/* How tall a single tile step is. The character controller's step height is
+ * derived from this, so a tile ledge stays walkable; see the comment on the
+ * implementation for why guessing it separately goes wrong. */
+float physics_terrain_step(void);
 
 /* An axis-aligned box the character cannot walk through. Props come from the
  * scene graph, so a cube you can see is a cube you collide with. */

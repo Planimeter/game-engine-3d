@@ -474,8 +474,21 @@ JobHandle job_submit(JobSystem *jobSystem, const JobDescriptor *descriptor)
         JobQueue *queue = &jobSystem->queues[queueIndex % jobSystem->workerCount];
 
         pthread_mutex_lock(&queue->mutex);
-        /* Spin-wait for space (should be extremely rare — queue is 1024 entries) */
+        /* Wait for space, giving up if the system is shutting down.
+         *
+         * This used to be an unconditional sleep-and-retry with no exit
+         * condition, which is a second lost-wakeup bug in the same shape as
+         * the two already fixed here: if the queue filled at the same moment
+         * the main thread decided to quit, the submitting thread kept waiting
+         * for room that would never come. job_destroy() was then waiting on
+         * workers that were waiting on this, and the process hung until it was
+         * killed. Checking `running` makes the wait bounded by shutdown.
+         */
         while (queue->tail - queue->head >= MAX_JOB_QUEUE) {
+            if (!atomic_load(&jobSystem->running)) {
+                pthread_mutex_unlock(&queue->mutex);
+                return (JobHandle){0};
+            }
             pthread_mutex_unlock(&queue->mutex);
             pthread_sleep_np(1);
             pthread_mutex_lock(&queue->mutex);

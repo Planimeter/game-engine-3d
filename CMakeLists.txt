@@ -198,16 +198,11 @@ if(NOT TARGET libcef_lib)
     )
 endif()
 
-# Character controller checks. Standalone, so the controller can be verified
-# without a window or synthetic key events. Build with:
-#   cmake --build build --target test_player && ./build/test_player
-add_executable(test_player EXCLUDE_FROM_ALL
-    src/player.c
-    src/physics.c
-    src/terrain.c
-    tests/test_player.c
-    )
-target_include_directories(test_player PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+# The character controller is verified in-game instead: run the game with
+# GAME_SELFTEST=1 and the checks report on screen. A standalone harness
+# asserts against a synthetic map, and the tiled world is exactly the case
+# that behaves differently — steps, stair climbing and step-down snapping do
+# not appear on a flat plane. See src/selftest.c.
 
 # Footstep cadence checks. The test supplies its own audio backend, so it can
 # count what was played without an audio device.
@@ -249,8 +244,10 @@ set(SOURCES
     src/model_assimp.cpp
     src/physics.c
     src/player.c
+    src/selftest.c
     src/scene.c
     src/text.c
+    src/tilemap.c
     src/timer_sdl.c
     src/vk_mem_alloc.cpp
     src/window_sdl.c

@@ -60,7 +60,12 @@ void player_init(Player *p, float x, float z, uint32_t seed, float amplitude,
     p->gravity = 26.0f;
     p->jumpSpeed = 11.0f;
     p->maxSlope = 0.9599f;   /* ~55 degrees */
-    p->stepHeight = 0.7f;
+    /* Tied to the world's own tile step, with headroom: the ground is a
+     * lattice of flat blocks, so every step between neighbours is a vertical
+     * ledge of that height. A step height below it means the character cannot
+     * walk up a single tile and crawls at a fraction of walk speed, which
+     * looks like broken momentum rather than an unwalkable world. */
+    p->stepHeight = physics_terrain_step();
     p->terminalVelocity = -120.0f;
 
     /* Drop onto the surface rather than starting buried or in the air. */
@@ -253,7 +258,25 @@ void player_update(Player *p, const PlayerInput *input, float yaw, float dt,
                     p->velocity[1] = 0.0f;
                 }
                 p->grounded = 1;
-            } else if (p->position[1] - ground > PLAYER_EPSILON) {
+            } else if (p->position[1] - ground <= p->stepHeight &&
+                       p->velocity[1] <= 0.0f) {
+                /* Snap down onto a lower step rather than falling onto it.
+                 *
+                 * The ground is a lattice of flat blocks, so walking off any
+                 * tile drops the character by a full step. Without this the
+                 * feet leave the surface and gravity has to close a gap that
+                 * is always within step height, which reads as a stumble: the
+                 * character is briefly airborne on every single step and the
+                 * camera bobs with it.
+                 *
+                 * The velocity test is what keeps a jump working. A jump rises
+                 * first, and it has to clear more than a step before gravity
+                 * brings it back down to this test — so a rising character is
+                 * never snapped, only one that is already falling. */
+                p->position[1] = ground;
+                p->velocity[1] = 0.0f;
+                p->grounded = 1;
+            } else {
                 p->grounded = 0;
             }
         }
