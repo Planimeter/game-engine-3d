@@ -66,6 +66,24 @@ void player_init(Player *p, float x, float z, uint32_t seed, float amplitude,
      * walk up a single tile and crawls at a fraction of walk speed, which
      * looks like broken momentum rather than an unwalkable world. */
     p->stepHeight = physics_terrain_step();
+
+    /* A jump has to clear the step height with room to spare, or the
+     * step-down snap fires at the apex and pulls the character straight back
+     * down: the jump visibly rises a little and cancels, which reads as the
+     * jump not working rather than as a collision.
+     *
+     * The apex is jumpSpeed^2 / (2 * gravity), so requiring it to exceed the
+     * step height means jumpSpeed > sqrt(2 * gravity * stepHeight). Deriving
+     * the speed from the step height keeps the two from drifting apart again,
+     * which is what let the apex land 0.12 units short of the step in the
+     * first place. */
+    {
+        float needed = sqrtf(2.0f * p->gravity * p->stepHeight * 1.8f);
+        if (needed > p->jumpSpeed) {
+            p->jumpSpeed = needed;
+        }
+    }
+
     p->terminalVelocity = -120.0f;
 
     /* Drop onto the surface rather than starting buried or in the air. */

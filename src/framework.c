@@ -7,6 +7,7 @@
 #include "footstep.h"
 #include "selftest.h"
 #include "font.h"
+#include "image.h"
 #include "text.h"
 #include "math_c.h"
 #include "camera.h"
@@ -61,6 +62,8 @@ static ModelAnimationInfo g_animInfo = {NULL, 0.0f, 0};
 #define TERRAIN_SEED 20261002u
 static Model *g_terrain = NULL;
 static Material g_terrainMaterial = NULL;
+/* Ground texture, tiled across the terrain through world-unit UVs. */
+static Texture g_groundTexture = NULL;
 
 /* Sky. An inward-facing dome centred on the camera, shaded by a vertical
  * gradient texture. It is ordinary geometry drawn with the existing
@@ -204,6 +207,10 @@ static void framework_shutdown(void)
     if (g_footsteps) {
         footstep_destroy(g_footsteps);
         g_footsteps = NULL;
+    }
+    if (g_groundTexture) {
+        image_free(g_groundTexture);
+        g_groundTexture = NULL;
     }
     if (g_skyGradient) {
         graphics_destroytexture(g_skyGradient);
@@ -614,6 +621,14 @@ void framework_load(int argc, char *argv[])
     framework_compute_sun(g_sunDirection);
     framework_create_sky();
 
+    /* Ground texture. Loaded through image_load() so it goes through the same
+     * stb_image path the rest of the engine uses, rather than embedding raw
+     * pixels. */
+    g_groundTexture = image_load("ground.png");
+    if (!g_groundTexture) {
+        fprintf(stderr, "Failed to load ground.png; terrain will be untextured\n");
+    }
+
     framework_create_footsteps();
 
     /* Opt-in self test. The overlay reuses the three help text objects: there
@@ -679,12 +694,19 @@ void framework_load(int argc, char *argv[])
         graphics_material_set_float(g_terrainMaterial, "ambient", 0.22f);
         graphics_material_set_float(g_terrainMaterial, "specular", 0.08f);
         graphics_material_set_float(g_terrainMaterial, "shininess", 8.0f);
+        /* The ground texture goes in the ordinary diffuse slot. Without it the
+         * terrain is one uniform albedo across 512 units, which reads as a flat
+         * green plane no matter how the lighting is tuned. */
         graphics_material_set_float(g_terrainMaterial, "diffuseSlot", -1.0f);
         graphics_material_set_float(g_terrainMaterial, "normalSlot", -1.0f);
         graphics_material_set_vec3(g_terrainMaterial, "lightDir", -g_sunDirection[0],
                                    -g_sunDirection[1], -g_sunDirection[2]);
         graphics_material_set_vec3(g_terrainMaterial, "cameraPos", 0.0f, 0.0f, 3.0f);
-        graphics_material_set_vec3(g_terrainMaterial, "albedo", 0.32f, 0.46f, 0.24f);
+        /* White, because the ground texture carries the colour. The shader
+         * multiplies albedo by the diffuse sample, so a coloured albedo on top
+         * of a coloured texture multiplies twice and the terrain comes out at
+         * roughly a third of the brightness it should be. */
+        graphics_material_set_vec3(g_terrainMaterial, "albedo", 1.0f, 1.0f, 1.0f);
     }
 
     /* Character starts on the surface well behind the scene cubes, so it
@@ -899,7 +921,19 @@ void framework_draw(void)
             /* A floor high enough to read as moonlit ground rather than an
              * unlit scene: at night only this term survives, since the
              * direct term clamps to zero once the sun is down. */
-            float ambient = 0.30f + 0.14f * elevation;
+            /* Exposure.
+             *
+             * The shader is albedo * (ambient + (1 - ambient) * ndl), so the
+             * brightest a lit surface gets is the full albedo and the darkest
+             * is ambient * albedo. With a dark ambient the terrain measured 21%
+             * luminance on screen, which is not "moody" — it is unreadable.
+             *
+             * Ambient is high here because the sun term alone leaves any
+             * surface facing away from the light at zero, and on a landscape
+             * with slopes in every direction that is most of what is on
+             * screen. A day/night cycle gets its range from the palette and the
+             * sun direction, not from crushing the ambient. */
+            float ambient = 0.55f + 0.30f * elevation;
 
             /* Fraction of the frame that reads as night, used to tint. */
             float night = 1.0f - elevation * 3.0f;
@@ -909,7 +943,9 @@ void framework_draw(void)
             /* Pull the albedos toward a cold blue-grey. Terrain green loses
              * the most saturation, which is what makes night read as blue
              * rather than merely dark. */
-            static const float MOON[3] = {0.34f, 0.38f, 0.52f};
+            /* Night tints toward a desaturated blue rather than dimming, so
+             * night reads as cold rather than as a black screen. */
+            static const float MOON[3] = {0.72f, 0.80f, 1.00f};
 
             if (g_litMaterial) {
                 graphics_material_set_vec3(g_litMaterial, "cameraPos",
@@ -932,10 +968,12 @@ void framework_draw(void)
                                            -g_sunDirection[1],
                                            -g_sunDirection[2]);
                 graphics_material_set_float(g_terrainMaterial, "ambient", ambient);
+                /* Night tints toward moonlight rather than toward a colour,
+                 * since the texture already supplies the base colour. */
                 graphics_material_set_vec3(g_terrainMaterial, "albedo",
-                                           0.32f + (MOON[0] - 0.32f) * night,
-                                           0.46f + (MOON[1] - 0.46f) * night,
-                                           0.24f + (MOON[2] - 0.24f) * night);
+                                           1.0f + (MOON[0] - 1.0f) * night,
+                                           1.0f + (MOON[1] - 1.0f) * night,
+                                           1.0f + (MOON[2] - 1.0f) * night);
             }
             if (g_gridMaterial) {
                 graphics_material_set_vec3(g_gridMaterial, "lightDir",
@@ -1028,7 +1066,11 @@ void framework_draw(void)
                                        g_camera.position[1],
                                        g_camera.position[2]);
             graphics_material_set_mat4(g_terrainMaterial, identity);
-            graphics_bindmodeltexture(g_terrain, g_terrainMaterial);
+            if (g_groundTexture) {
+                graphics_bindtexture(g_groundTexture, 1);
+            } else {
+                graphics_bindmodeltexture(g_terrain, g_terrainMaterial);
+            }
             math_multiply(mvp, proj, view);
             graphics_drawmodel(g_terrain, g_terrainMaterial, mvp);
         }
