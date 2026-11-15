@@ -373,6 +373,26 @@ The job system (`job_pthread.c`, ~23KB) is the most sophisticated component and 
 
 ---
 
+## Merge consolidation (2026-11-15)
+
+Pulling `origin/main` back into this branch meant 25 conflicts across six files. The branch had moved further on the graphics layer, so most resolved to this side; the four calls worth recording:
+
+1. **Vulkan backend stays as this branch had it** — per-frame descriptor sets, one semaphore pair per swapchain image, the 16-slot discrete UBO binding layout, deferred `vkUpdateDescriptorSets` through `graphics_flushdescriptorwrites()`, the SPIR-V passthrough in `graphics_createshader()`, and skin attributes at location 5/6 as `vec4` weights then `ivec4` indices. From origin it took the persistently mapped uniform buffer, which also meant collapsing the duplicated `GPUBuffer` typedef the merge left behind into one definition carrying `persistentMap`.
+2. **`shaders/triangle.vert` stays on push constants** — `{mvp, model}` in a push-constant block with Material at set 1 binding 1. Origin's version had a single UBO at set 1 binding 0, which does not match the merged backend.
+3. **`framework.c` keeps the current draw path** — sky dome, terrain, scene nodes, instanced grid. Origin's version predates all four.
+4. **`model_assimp.cpp` keeps both animation representations.** The hierarchy path (`model_pose()`, `model_pose_by_index()`) and the scene-node path (`model_update()`, `model_get_bone_matrices()`) both survive; `model_destroy()` frees both.
+
+**OpenGL is gone, not merged back.** `origin/main` still carried the `USE_OPENGL` option, the `src/graphics_opengl_sdl.c` source entry and the OpenGL link block, so the auto-merge resurrected a backend this branch deleted in ccb56ac6. The file was removed again and the option and every branch referencing it dropped from `CMakeLists.txt`.
+
+Two defects surfaced while verifying the merge, both pre-existing on this branch rather than merge artifacts:
+
+- **2D text was flipped.** `font_pixel_to_ndc()` mapped pixel y straight into NDC, so y=8 landed along the bottom edge and every glyph was mirrored. Both backends' text shaders already expect GL-style y-up clip space (Vulkan negates y on the way out), so the fix is `1.0f - (py / h) * 2.0f`.
+- **The self test never drew its results.** The report block sat inside `if (!g_selftestActive)`, so its own `if (g_selftestActive)` was unreachable and a `GAME_SELFTEST=1` run showed only the controls. The report is now a sibling branch.
+
+**Verification:** both configurations link and both render the scene from the real window. With `GAME_SELFTEST=1`, Metal reports 4 checks / 2 failed and Vulkan 5 checks / 1 failed (the counts differ because phases advance on frame count, not on identical frame timing); `walks at walk speed` fails on both, measuring 22.31 u/s and 19.68 u/s. Vulkan still renders the scene differently from Metal — black sky, night-tinted terrain, no scene cubes — which the merge did not cause and which is not yet diagnosed.
+
+---
+
 ## Rating: 9/10
 
 Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 and P1 rendering pipeline defects have been fixed in both Metal and Vulkan backends -- the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, Vulkan runtime GLSL->SPIR-V compilation via shaderc with SPIR-V passthrough support, and text rendering fixes (Y-flip correction, glyph upload flush order). The Vulkan render pass now supports optional depth attachment for pipelines that don't need depth testing. Build system hardened for MSVC with consistent /MD runtime, CMP0091 propagation, and SPIRV-Tools static linking.
