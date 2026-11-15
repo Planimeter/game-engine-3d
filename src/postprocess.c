@@ -28,6 +28,10 @@ static int        g_ready      = 0;
 static int        g_active     = 0;  /* the scene pass is open */
 static ColorFormat g_sceneFormat = COLOR_FORMAT_RGBA16F;
 
+/* Effect state and the material that carries it to the composite shader. */
+static Material   g_postMaterial = NULL;
+static float      g_barrel       = 0.0f;
+
 /* Scene target format. RGBA16F is the shipping choice: float storage, so
  * effects see values above 1.0 instead of a clipped 8-bit frame.
  *
@@ -77,15 +81,52 @@ static const char *POST_MSL =
     "    return out;\n"
     "}\n"
     "\n"
-    /* No effect enabled: the scene is read back exactly as it was written, so
-     * the composited frame is the direct render. Alpha is forced opaque since
-     * the scene target carries no meaningful alpha. */
+    /* Material layout must match metal_material_pack(): 32 floats, then 16
+     * padded vec3s, then the matrix kept for parity. */
+    "struct MaterialData {\n"
+    "    float floats[32];\n"
+    "    float4 vec3s_padded[16];\n"
+    "    float4x4 extraMatrix;\n"
+    "};\n"
+    "\n"
+    /* Material slots, which are positional: floats[0] is the barrel amount,
+     * floats[1] the frame aspect. postprocess_configure_material() writes them
+     * in that order, which is what fixes the indices. */
     "fragment float4 fragment_main(VertexOut in [[stage_in]],\n"
+    "                              constant MaterialData &material [[buffer(2)]],\n"
     "                              texture2d<float> sceneTex [[texture(1)]],\n"
     "                              sampler sceneSampler [[sampler(1)]]) {\n"
-    "    float4 scene = sceneTex.sample(sceneSampler, in.uv);\n"
+    "    float barrel = material.floats[0];\n"
+    "    float aspect = material.floats[1];\n"
+    "\n"
+    "    float2 uv = in.uv;\n"
+    "    if (barrel > 0.0) {\n"
+    /* Radii are measured in aspect-corrected space so the distortion is
+     * circular on a non-square frame. */
+    "        float2 c = uv - float2(0.5);\n"
+    "        c.x *= aspect;\n"
+    "        float r2 = dot(c, c);\n"
+    /* Normalising by the corner radius keeps the frame corners where they are.
+     * Without it the warped lookup runs off the target at the edges and the
+     * clamp smears the border into a visible frame. */
+    "        float rmax2 = 0.25 * aspect * aspect + 0.25;\n"
+    "        c *= (1.0 + barrel * r2) / (1.0 + barrel * rmax2);\n"
+    "        c.x /= aspect;\n"
+    "        uv = c + float2(0.5);\n"
+    "    }\n"
+    "\n"
+    "    float4 scene = sceneTex.sample(sceneSampler, uv);\n"
     "    return float4(scene.rgb, 1.0);\n"
     "}\n";
+
+/* Push the effect settings onto the material. The first call fixes the slot
+ * order (barrel, then aspect), so the shader's indices stay valid. */
+static void postprocess_configure_material(float aspect)
+{
+    if (!g_postMaterial) return;
+    graphics_material_set_float(g_postMaterial, "barrel", g_barrel);
+    graphics_material_set_float(g_postMaterial, "aspect", aspect);
+}
 #endif
 
 /* Recreate the scene target at the current drawable size. Returns 0 when the
@@ -145,6 +186,16 @@ void postprocess_init(void)
         return;
     }
 
+    /* Uniform carrier for the effect settings. The shaders come from the pair
+     * above, not from the material, which only holds the float block. */
+    g_postMaterial = graphics_creatematerial(NULL);
+    if (!g_postMaterial) {
+        fprintf(stderr, "Post-process: could not create the effect material; "
+                        "drawing directly to the swapchain\n");
+        postprocess_shutdown();
+        return;
+    }
+
     if (!postprocess_ensure_target()) {
         fprintf(stderr, "Post-process: no offscreen target on this backend; "
                         "drawing directly to the swapchain\n");
@@ -179,6 +230,10 @@ void postprocess_shutdown(void)
         graphics_destroyshader(g_postFrag);
         g_postFrag = NULL;
     }
+    if (g_postMaterial) {
+        graphics_destroymaterial(g_postMaterial);
+        g_postMaterial = NULL;
+    }
     g_width = 0;
     g_height = 0;
 }
@@ -198,6 +253,7 @@ void postprocess_begin(void)
 
 void postprocess_end(void)
 {
+#if POSTPROCESS_SUPPORTED
     if (!g_active) return;
     g_active = 0;
 
@@ -207,5 +263,21 @@ void postprocess_end(void)
      * pass open is deliberate: the 2D overlay draws into it next, outside the
      * effect, so text stays sharp and undistorted. */
     graphics_beginpass(NULL);
-    graphics_draw_fullscreen(g_sceneColor, g_postVert, g_postFrag, NULL);
+
+    postprocess_configure_material(g_height > 0
+                                   ? (float)g_width / (float)g_height
+                                   : 1.0f);
+    graphics_draw_fullscreen(g_sceneColor, g_postVert, g_postFrag, g_postMaterial);
+#endif
+}
+
+void postprocess_set_barrel(float amount)
+{
+    if (amount < 0.0f) amount = 0.0f;
+    g_barrel = amount;
+}
+
+float postprocess_barrel(void)
+{
+    return g_barrel;
 }

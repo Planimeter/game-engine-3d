@@ -426,6 +426,23 @@ The 3D scene drew straight to the swapchain, so a camera effect would have had t
 
 Live window: same scene, 82 FPS, overlay unaffected.
 
+### Barrel distortion, the first camera effect (2026-11-15)
+
+The composite pass is where camera effects live, and the first one is radial lens distortion: `postprocess_set_barrel(amount)`, default 0.25 from `FRAMEWORK_BARREL_DEFAULT`, overridable with `GAME_BARREL=<amount>` and toggled at runtime with **B** (so the distorted frame can be compared against the undistorted one without restarting).
+
+- The composite shader remaps `uv` by `c *= (1 + barrel*r²) / (1 + barrel*rmax²)`, with `c` measured in aspect-corrected space so the distortion is circular on a non-square frame. Positive amounts magnify the centre and compress the edges, which bows straight lines away from frame centre the way a wide lens does.
+- The `1 + barrel*rmax²` divisor locks the frame corners in place. Without it the warped lookup runs off the target at the edges and the clamp sampler smears the border into a visible frame — the artefact that makes naive barrel shaders look cheap.
+- Strengths: 0.15 reads as barely there, 0.25 is clearly glass, 0.35 is a strong wide angle, and past ~0.6 the corners stop reading.
+
+Verification, `GAME_CAPTURE` at 1280×960:
+
+| Setting | Capture | Result |
+|---|---|---|
+| `GAME_BARREL=0` | `8e3ca546` | identical to the no-effect capture in the commit above |
+| default 0.25 | `3e8acf17` | 980,365 of 1,228,800 pixels changed, mean 16 levels on those pixels, max 198 |
+
+Repeat runs at either setting are byte-identical. The live window runs the effect at 98 FPS with the caption sharp, since the overlay is composited after the effect.
+
 ---
 
 ## Rating: 9/10

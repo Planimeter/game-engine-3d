@@ -36,6 +36,13 @@ void postprocess_begin(void);
  * swapchain pass, which the overlay then draws into. */
 void postprocess_end(void);
 
+/* Camera effects. The barrel amount is radial lens distortion, the way a real
+ * wide lens bends the frame: 0 leaves the image untouched, larger values bow
+ * straight lines away from the centre and magnify the middle of the frame.
+ * 0.15 is a moderate wide-angle; above ~0.5 the corners stop reading. */
+void  postprocess_set_barrel(float amount);
+float postprocess_barrel(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -133,6 +133,14 @@ static const char *g_capturePath = NULL;
 static int g_captureFrames = 4;
 static int g_captureActive = 0;
 
+/* Lens distortion. A wide lens bends straight lines away from the frame
+ * centre; 0.25 is enough to read as glass without the corners falling apart.
+ * B toggles it so the distorted frame can be compared against the undistorted
+ * one without restarting. */
+#define FRAMEWORK_BARREL_DEFAULT 0.25f
+static float g_barrel = FRAMEWORK_BARREL_DEFAULT;
+static int g_barrelOn = 1;
+
 const char *framework_capture_path(void)
 {
     return g_capturePath;
@@ -706,6 +714,18 @@ void framework_load(int argc, char *argv[])
         }
     }
 
+    /* Lens distortion strength, so a capture can be taken with the effect off
+     * (GAME_BARREL=0) or at any strength the pipeline is being tuned to. */
+    {
+        const char *env = getenv("GAME_BARREL");
+        if (env && env[0]) {
+            float amount = (float)atof(env);
+            if (amount < 0.0f) amount = 0.0f;
+            g_barrel = amount;
+        }
+        postprocess_set_barrel(g_barrelOn ? g_barrel : 0.0f);
+    }
+
     /* Lit material: floats are ambient/specular/shininess, vec3s are
      * light direction/camera position/albedo (slot order matters — the
      * material API packs by slot, not by name). The model matrix is
@@ -1227,7 +1247,7 @@ void framework_draw(void)
      * of interleaved glyphs. */
     if (!g_selftestActive) {
         static const char *lines[] = {
-            "WASD  move     Shift  sprint     Space  jump",
+            "WASD  move     Shift  sprint     Space  jump     B  lens",
             "mouse  look     Esc  release cursor",
             ""
         };
@@ -1352,6 +1372,12 @@ void framework_keypressed(const char *key, const char *scancode, int isrepeat)
      * character out of the world. */
     else if (!strcmp(scancode, "Space")) g_keyJump = 1;
     else if (!strcmp(scancode, "Left Shift") || !strcmp(scancode, "Right Shift")) g_keySprint = 1;
+    /* Toggle the lens distortion, edge-triggered like the jump: it is a view
+     * setting, not a held control. */
+    else if (!strcmp(scancode, "B")) {
+        g_barrelOn = !g_barrelOn;
+        postprocess_set_barrel(g_barrelOn ? g_barrel : 0.0f);
+    }
 }
 
 void framework_keyreleased(const char *key, const char *scancode)
