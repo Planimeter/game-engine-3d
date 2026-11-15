@@ -213,3 +213,24 @@ void   metal_command_buffer_wait(void *cb) {
 void  *metal_command_buffer_new_render_encoder(void *cb, void *desc) {
     return [(id<MTLCommandBuffer>)cb renderCommandEncoderWithDescriptor:(MTLRenderPassDescriptor *)desc];
 }
+
+void  *metal_command_buffer_new_blit_encoder(void *cb) {
+    return [(id<MTLCommandBuffer>)cb blitCommandEncoder];
+}
+
+void   metal_blit_copy_texture_to_buffer(void *enc, void *tex, void *buf,
+                                         unsigned long bytesPerRow,
+                                         unsigned long width,
+                                         unsigned long height,
+                                         unsigned long slice) {
+    [(id<MTLBlitCommandEncoder>)enc copyFromTexture:(id<MTLTexture>)tex
+                                        sourceSlice:slice
+                                        sourceLevel:0
+                                       sourceOrigin:MTLOriginMake(0, 0, 0)
+                                         sourceSize:MTLSizeMake(width, height, 1)
+                                           toBuffer:(id<MTLBuffer>)buf
+                                  destinationOffset:0
+                             destinationBytesPerRow:bytesPerRow
+                           destinationBytesPerImage:bytesPerRow * height];
+    [(id<MTLBlitCommandEncoder>)enc endEncoding];
+}

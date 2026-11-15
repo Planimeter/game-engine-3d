@@ -15,6 +15,15 @@ void framework_update(uint64_t dt);
 void framework_draw(void);
 int  framework_quit(void);
 
+/* GAME_CAPTURE. With the variable set, the frame is rendered from a fixed
+ * camera pose with no simulation advancing, so repeated runs produce the
+ * same image and a camera change can be diffed by picture.
+ *  path   - PNG destination, or NULL when capture is off
+ *  frames - how many frames to render before the readback (>= 1) */
+const char *framework_capture_path(void);
+int  framework_capture_frames(void);
+int  framework_capture_active(void);
+
 void framework_lowmemory(void);
 void framework_visible(int visible);
 void framework_move(int x, int y);

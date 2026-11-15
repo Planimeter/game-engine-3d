@@ -161,6 +161,13 @@ Shader      graphics_get_shader_variant(Shader base,
                                         const char **defines,
                                         size_t defineCount);
 
+/* GAME_CAPTURE: arm a readback of the next presented frame, then collect it.
+ * graphics_capture_setup() is called before the draw of the frame to capture;
+ * graphics_capture_read() after graphics_present() returns an RGBA buffer the
+ * caller frees, or NULL when the backend cannot read its drawable back. */
+void        graphics_capture_setup(void);
+unsigned char *graphics_capture_read(int *width, int *height);
+
 /* Metal backend: returns embedded MSL text shaders when SPIR-V unavailable */
 void        graphics_get_text_shaders(Shader *out_vert, Shader *out_frag);
 

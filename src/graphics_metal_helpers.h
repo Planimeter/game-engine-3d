@@ -70,6 +70,14 @@ void   metal_command_buffer_present(void *cb, void *d);
 void   metal_command_buffer_commit(void *cb);
 void   metal_command_buffer_wait(void *cb);
 void  *metal_command_buffer_new_render_encoder(void *cb, void *desc);
+/* Blit used by GAME_CAPTURE: copy a drawable's texture into a shared buffer
+ * so the CPU can read it back after the command buffer completes. */
+void  *metal_command_buffer_new_blit_encoder(void *cb);
+void   metal_blit_copy_texture_to_buffer(void *enc, void *tex, void *buf,
+                                         unsigned long bytesPerRow,
+                                         unsigned long width,
+                                         unsigned long height,
+                                         unsigned long slice);
 
 #ifdef __cplusplus
 }

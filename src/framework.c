@@ -125,6 +125,28 @@ static int g_wasGrounded = 1;
 static SelfTest g_selftest;
 static int g_selftestActive = 0;
 
+/* GAME_CAPTURE. When set, the scene is drawn from a fixed pose with nothing
+ * advancing, so successive runs of the same build render the same image and a
+ * camera or shading change can be diffed by picture rather than by eye. */
+static const char *g_capturePath = NULL;
+static int g_captureFrames = 4;
+static int g_captureActive = 0;
+
+const char *framework_capture_path(void)
+{
+    return g_capturePath;
+}
+
+int framework_capture_frames(void)
+{
+    return g_captureFrames > 0 ? g_captureFrames : 1;
+}
+
+int framework_capture_active(void)
+{
+    return g_captureActive;
+}
+
 static void framework_create_footsteps(void)
 {
     static const char *const stepNames[] = {
@@ -649,6 +671,33 @@ void framework_load(int argc, char *argv[])
         }
     }
 
+    /* GAME_CAPTURE=<path> renders a fixed frame and writes it as a PNG. It
+     * takes precedence over the self test: the capture has to be reproducible,
+     * and the self test drives the character, which would move the camera. */
+    {
+        const char *env = getenv("GAME_CAPTURE");
+        if (env && env[0]) {
+            g_capturePath = env;
+            g_captureActive = 1;
+            g_selftestActive = 0;
+
+            const char *frames = getenv("GAME_CAPTURE_FRAMES");
+            if (frames && frames[0]) {
+                int n = atoi(frames);
+                if (n > 0) {
+                    g_captureFrames = n;
+                }
+            }
+
+            /* A fixed time of day, so the sky and sun direction do not depend
+             * on how long the process has been up. */
+            g_timeOfDay = 0.30f;
+            framework_compute_sun(g_sunDirection);
+            framework_update_sky_gradient();
+            g_skyGradientJustCreated = 0;
+        }
+    }
+
     /* Lit material: floats are ambient/specular/shininess, vec3s are
      * light direction/camera position/albedo (slot order matters — the
      * material API packs by slot, not by name). The model matrix is
@@ -821,6 +870,13 @@ void framework_update(uint64_t deltaTime)
     }
 
     float dt = (float)deltaTime / 1000.0f;
+
+    /* A capture is a still: nothing advances, so the same build renders the
+     * same picture however long the process has been running. */
+    if (g_captureActive) {
+        return;
+    }
+
     g_elapsed += dt;
 
     /* Scene cubes stay put. They used to orbit the root at
@@ -1135,6 +1191,12 @@ void framework_draw(void)
 
     /* Draw FPS text overlay */
     if (!g_testText || !g_testFont) {
+        return;
+    }
+
+    /* A capture is compared against other captures, and the overlay contains
+     * an FPS reading that changes every run. Leave it out of the image. */
+    if (g_captureActive) {
         return;
     }
 

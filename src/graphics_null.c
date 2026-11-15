@@ -90,6 +90,17 @@ void graphics_present()
     }
 }
 
+void graphics_capture_setup(void)
+{
+}
+
+unsigned char *graphics_capture_read(int *width, int *height)
+{
+    (void)width;
+    (void)height;
+    return NULL;
+}
+
 void graphics_resize()
 {
 }

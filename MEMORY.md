@@ -393,6 +393,16 @@ Two defects surfaced while verifying the merge, both pre-existing on this branch
 
 ---
 
+## GAME_CAPTURE (2026-11-15)
+
+`GAME_CAPTURE=<path.png>` renders the scene from a fixed camera pose for `GAME_CAPTURE_FRAMES` frames (default 4), reads the drawable back and exits, so a camera or shading change can be diffed by image rather than by eye. Two runs of the same build produce byte-identical PNGs; that was the design constraint, so the mode freezes the simulation (`framework_update()` returns early after the FPS counter), pins `g_timeOfDay` to 0.30, disables the self test, and skips the text overlay, whose FPS reading would otherwise change every run.
+
+- **Metal** does the readback with a blit of the drawable texture into a shared `MTLBuffer`, queued in the frame's own command buffer in `graphics_postdraw()` and completed by a `waitUntilCompleted` in `graphics_present()`. The drawable is `BGRA8Unorm`, swizzled to RGBA on the CPU.
+- **Vulkan is not wired up yet**: the swapchain image finishes each frame in `PRESENT_SRC_KHR`, so a readback needs a `TRANSFER_SRC` barrier plus a host-visible copy. `graphics_capture_setup()` there prints that it is unimplemented and the run reports `readback unavailable` instead of writing a broken file.
+- **PNG output does not use stb_image_write** — it is not vendored. `image_write_png()` emits zlib *stored* blocks, so captures are large (~5 MB at 1280×960) but valid and deterministic, with no new dependency.
+
+---
+
 ## Rating: 9/10
 
 Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 and P1 rendering pipeline defects have been fixed in both Metal and Vulkan backends -- the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, Vulkan runtime GLSL->SPIR-V compilation via shaderc with SPIR-V passthrough support, and text rendering fixes (Y-flip correction, glyph upload flush order). The Vulkan render pass now supports optional depth attachment for pipelines that don't need depth testing. Build system hardened for MSVC with consistent /MD runtime, CMP0091 propagation, and SPIRV-Tools static linking.

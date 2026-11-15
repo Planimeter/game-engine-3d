@@ -83,6 +83,15 @@ static MetalTexture *g_whiteTexture = NULL;
 static MetalTexture *g_whiteNormal = NULL;
 static MTLRenderPassDescriptor *g_renderPassDescriptor = nil;
 
+/* GAME_CAPTURE state: a blit of the drawable is queued in the frame's command
+ * buffer, then read out of this shared buffer once the frame completes. */
+static id<MTLBuffer> g_captureBuffer = nil;
+static int g_capturePending = 0;
+static int g_captureArmed = 0;
+static int g_captureReady = 0;
+static int g_captureW = 0;
+static int g_captureH = 0;
+
 /* Uniform buffer */
 #define UNIFORM_BUFFER_SIZE 4096
 static id<MTLBuffer> g_uniformBuffer = nil;
@@ -1409,6 +1418,65 @@ void graphics_postdraw() {
         metal_encoder_end_encoding(g_currentEncoder);
         g_currentEncoder = nil;
     }
+
+    /* GAME_CAPTURE: queue a blit of the drawable into a shared buffer while
+     * the command buffer is still open, so graphics_capture_read() has
+     * something to hand back once the frame is presented. */
+    if (g_capturePending && g_currentDrawable && g_currentCommandBuffer) {
+        g_capturePending = 0;
+
+        g_captureW = (int)g_currentDrawable.texture.width;
+        g_captureH = (int)g_currentDrawable.texture.height;
+
+        NSUInteger bytes = (NSUInteger)g_captureW * (NSUInteger)g_captureH * 4;
+        if (!g_captureBuffer || [(id<MTLBuffer>)g_captureBuffer length] < bytes) {
+            if (g_captureBuffer) [(id<MTLBuffer>)g_captureBuffer release];
+            g_captureBuffer = [[(id<MTLDevice>)g_device newBufferWithLength:bytes
+                                                                   options:MTLResourceStorageModeShared] retain];
+        }
+        if (g_captureBuffer) {
+            id<MTLBlitCommandEncoder> blit =
+                (id<MTLBlitCommandEncoder>)metal_command_buffer_new_blit_encoder(g_currentCommandBuffer);
+            metal_blit_copy_texture_to_buffer(blit, g_currentDrawable.texture, g_captureBuffer,
+                                              (unsigned long)g_captureW * 4,
+                                              (unsigned long)g_captureW,
+                                              (unsigned long)g_captureH,
+                                              0);
+            g_captureArmed = 1;
+        }
+    }
+}
+
+void graphics_capture_setup(void) {
+    g_capturePending = 1;
+}
+
+unsigned char *graphics_capture_read(int *outW, int *outH) {
+    if (!g_captureReady || !g_captureBuffer) return NULL;
+
+    int w = g_captureW;
+    int h = g_captureH;
+    const unsigned char *src = (const unsigned char *)metal_buffer_get_contents(g_captureBuffer);
+    if (!src) return NULL;
+
+    unsigned char *rgba = (unsigned char *)malloc((size_t)w * (size_t)h * 4);
+    if (!rgba) return NULL;
+
+    /* The drawable is BGRA8Unorm; PNG wants RGBA. */
+    for (int y = 0; y < h; y++) {
+        const unsigned char *row = src + (size_t)y * (size_t)w * 4;
+        unsigned char *dst = rgba + (size_t)y * (size_t)w * 4;
+        for (int x = 0; x < w; x++) {
+            dst[x * 4 + 0] = row[x * 4 + 2];
+            dst[x * 4 + 1] = row[x * 4 + 1];
+            dst[x * 4 + 2] = row[x * 4 + 0];
+            dst[x * 4 + 3] = 255;
+        }
+    }
+
+    if (outW) *outW = w;
+    if (outH) *outH = h;
+    return rgba;
 }
 
 void graphics_present() {
@@ -1416,6 +1484,14 @@ void graphics_present() {
 
     metal_command_buffer_present(g_currentCommandBuffer, g_currentDrawable);
     metal_command_buffer_commit(g_currentCommandBuffer);
+
+    /* Capture reads the drawable back through a blit queued in this very
+     * command buffer, so the copy is only complete once it finishes. */
+    if (g_captureArmed) {
+        metal_command_buffer_wait(g_currentCommandBuffer);
+        g_captureArmed = 0;
+        g_captureReady = 1;
+    }
 
     [g_currentCommandBuffer release];
     g_currentCommandBuffer = nil;

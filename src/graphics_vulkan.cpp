@@ -3827,6 +3827,22 @@ void graphics_present()
     }
 }
 
+/* GAME_CAPTURE is not wired up for this backend yet: reading the swapchain
+ * image back needs a TRANSFER_SRC barrier and a host-visible copy, and the
+ * render pass currently finishes each image in PRESENT_SRC_KHR. Reported as
+ * unavailable rather than failed silently. */
+void graphics_capture_setup()
+{
+    fprintf(stderr, "GAME_CAPTURE: not implemented for the Vulkan backend\n");
+}
+
+unsigned char *graphics_capture_read(int *width, int *height)
+{
+    (void)width;
+    (void)height;
+    return NULL;
+}
+
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap34.html#vkGetPhysicalDeviceSurfaceCapabilitiesKHR */
 void graphics_resize()
 {
