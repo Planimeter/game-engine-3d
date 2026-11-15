@@ -14,6 +14,7 @@
 #include "camera.h"
 #include "physics.h"
 #include "player.h"
+#include "postprocess.h"
 #include "scene.h"
 #include "terrain.h"
 #include "tilemap.h"
@@ -194,6 +195,10 @@ static const float g_lookSensitivity = 0.0025f; /* radians per pixel */
  * is reported as leaked. */
 static void framework_shutdown(void)
 {
+    /* Before the models and materials it composites, since the scene target
+     * and the compositing shaders are the frame's last consumer. */
+    postprocess_shutdown();
+
     if (g_testText) {
         text_destroy(g_testText);
         g_testText = NULL;
@@ -522,6 +527,7 @@ void framework_init(const char *argv0)
     /* Registered first, so it runs last: atexit is LIFO */
     atexit(framework_shutdown);
     graphics_init();
+    postprocess_init();
 }
 
 void framework_load(int argc, char *argv[])
@@ -961,6 +967,12 @@ void framework_update(uint64_t deltaTime)
 
 void framework_draw(void)
 {
+    /* The 3D scene goes through the offscreen RGBA16F target so the post
+     * process chain has a full-precision frame to work from. Where the backend
+     * has no offscreen target these are no-ops and the scene is drawn straight
+     * to the swapchain. */
+    postprocess_begin();
+
     /* Draw 3D scene */
     if (g_testModel) {
         int w, h;
@@ -1190,6 +1202,10 @@ void framework_draw(void)
                                     &instanceTransforms[0][0], gridMvp, (size_t)n);
         }
     }
+
+    /* Composite the scene into the swapchain. Everything below is the 2D
+     * overlay, which is drawn after the effect so it stays pixel sharp. */
+    postprocess_end();
 
     /* Draw FPS text overlay */
     if (!g_testText || !g_testFont) {

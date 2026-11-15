@@ -47,6 +47,7 @@ struct MetalTexture {
     int width;
     int height;
     int mipmapped;
+    ColorFormat colorFormat;
 };
 
 // Global state
@@ -75,6 +76,16 @@ static id<CAMetalDrawable> g_currentDrawable = nil;
 
 /* Default sampler */
 static id<MTLSamplerState> g_defaultSampler = nil;
+
+/* Post-process sampler: the default one repeats, and an effect that remaps
+ * its coordinates reads outside [0,1] at the frame edge, which would tile the
+ * opposite edge in instead of clamping. */
+static id<MTLSamplerState> g_clampSampler = nil;
+
+/* Colour format of the pass currently being recorded. Pipelines are built for
+ * one format, and the engine's own draw calls (model, instanced) derive
+ * theirs from here rather than from a caller-supplied state. */
+static ColorFormat g_targetFormat = COLOR_FORMAT_RGBA8;
 
 /* 1x1 white fallback. Metal requires a bound texture wherever a shader
  * declares one, and an unbound texture samples as zero — which would render
@@ -251,6 +262,15 @@ static MTLVertexDescriptor *make_vertex_descriptor(VertexFormat format) {
         }
     }
     return [vd retain];
+}
+
+static MTLPixelFormat metal_color_format(ColorFormat format) {
+    switch (format) {
+        case COLOR_FORMAT_RGBA16F: return MTLPixelFormatRGBA16Float;
+        case COLOR_FORMAT_RGBA32F: return MTLPixelFormatRGBA32Float;
+        case COLOR_FORMAT_RGBA8:
+        default:                   return MTLPixelFormatBGRA8Unorm;
+    }
 }
 
 static id<MTLDepthStencilState> make_depth_stencil(RasterState state) {
@@ -629,6 +649,41 @@ Texture graphics_createtexture_rgba(int width, int height, const unsigned char *
     mt->width = width;
     mt->height = height;
     mt->mipmapped = mipmapped;
+    mt->colorFormat = COLOR_FORMAT_RGBA8;
+
+    if (g_textureCount >= g_textureCapacity) {
+        g_textureCapacity = g_textureCapacity ? g_textureCapacity * 2 : 16;
+        MetalTexture **tmp = (MetalTexture **)realloc(g_textures, g_textureCapacity * sizeof(MetalTexture *));
+        if (!tmp) { [tex release]; free(mt); return NULL; }
+        g_textures = tmp;
+    }
+    g_textures[g_textureCount++] = mt;
+    return (Texture)mt;
+}
+
+Texture graphics_createtexture_target(int width, int height, ColorFormat format) {
+    if (width < 1 || height < 1) return NULL;
+
+    MTLTextureDescriptor *desc = [[MTLTextureDescriptor alloc] init];
+    desc.pixelFormat = metal_color_format(format);
+    desc.width = (NSUInteger)width;
+    desc.height = (NSUInteger)height;
+    desc.mipmapLevelCount = 1;
+    /* RenderTarget to draw into it, ShaderRead to sample it in a later pass. */
+    desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;
+
+    id<MTLTexture> tex = (id<MTLTexture>)metal_device_new_texture(g_device, desc);
+    [desc release];
+    if (!tex) return NULL;
+
+    MetalTexture *mt = (MetalTexture *)calloc(1, sizeof(MetalTexture));
+    if (!mt) { [tex release]; return NULL; }
+    mt->texture = tex;
+    mt->width = width;
+    mt->height = height;
+    mt->mipmapped = 0;
+    mt->colorFormat = format;
 
     if (g_textureCount >= g_textureCapacity) {
         g_textureCapacity = g_textureCapacity ? g_textureCapacity * 2 : 16;
@@ -695,7 +750,8 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
             existing->rasterState.depthWrite == state.depthWrite &&
             existing->rasterState.depthTest == state.depthTest &&
             existing->rasterState.backfaceCulling == state.backfaceCulling &&
-            existing->rasterState.blendMode == state.blendMode)
+            existing->rasterState.blendMode == state.blendMode &&
+            existing->rasterState.colorFormat == state.colorFormat)
         {
             return (Pipeline)existing;
         }
@@ -710,7 +766,9 @@ Pipeline graphics_createpipeline(Shader vertShader, Shader fragShader,
     desc.vertexDescriptor = make_vertex_descriptor(format);
 
     MTLRenderPipelineColorAttachmentDescriptor *colorAtt = [MTLRenderPipelineColorAttachmentDescriptor new];
-    colorAtt.pixelFormat = MTLPixelFormatBGRA8Unorm;
+    /* Must match the attachment the pass provides: an offscreen RGBA16F scene
+     * target and the BGRA8 swapchain need separate pipeline states. */
+    colorAtt.pixelFormat = metal_color_format(state.colorFormat);
     colorAtt.blendingEnabled = (state.blendMode != BLEND_NONE);
 
     if (colorAtt.blendingEnabled) {
@@ -902,6 +960,12 @@ void graphics_beginpass(RenderPass pass) {
 
         g_currentPipeline = NULL;
         g_inPass = 1;
+
+        /* Pipelines built for this target's format are the only ones a pass
+         * with this attachment accepts. */
+        g_targetFormat = (mp->colorCount > 0 && mp->colorTextures[0])
+                       ? mp->colorTextures[0]->colorFormat
+                       : COLOR_FORMAT_RGBA8;
     } else {
         /* NULL pass = resume swapchain rendering */
         if (g_currentEncoder) {
@@ -923,6 +987,7 @@ void graphics_beginpass(RenderPass pass) {
 
         g_currentPipeline = NULL;
         g_inPass = 1;
+        g_targetFormat = COLOR_FORMAT_RGBA8;
     }
 }
 
@@ -1000,6 +1065,17 @@ void graphics_init() {
     sampDesc.tAddressMode = MTLSamplerAddressModeRepeat;
     g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];
     [sampDesc release];
+
+    /* Post-process sampling: clamp, no mip chain, and no repeat, since a
+     * distorted lookup at the frame edge must not wrap the far edge in. */
+    MTLSamplerDescriptor *clampDesc = [[MTLSamplerDescriptor alloc] init];
+    clampDesc.minFilter = MTLSamplerMinMagFilterLinear;
+    clampDesc.magFilter = MTLSamplerMinMagFilterLinear;
+    clampDesc.mipFilter = MTLSamplerMipFilterNotMipmapped;
+    clampDesc.sAddressMode = MTLSamplerAddressModeClampToEdge;
+    clampDesc.tAddressMode = MTLSamplerAddressModeClampToEdge;
+    g_clampSampler = [g_device newSamplerStateWithDescriptor:clampDesc];
+    [clampDesc release];
 
     /* The 3D fragment shader samples a texture unconditionally, so make sure
      * a neutral one exists before the first draw. */
@@ -1316,6 +1392,8 @@ void graphics_shutdown() {
 
     metal_destroy_depth_texture(&g_depthTexture);
 
+    if (g_clampSampler) { [g_clampSampler release]; g_clampSampler = nil; }
+
     if (g_defaultMaterial) {
         graphics_destroymaterial((Material)g_defaultMaterial);
         g_defaultMaterial = NULL;
@@ -1436,6 +1514,7 @@ void graphics_predraw() {
     metal_encoder_set_depth_stencil_state(g_currentEncoder, metal_device_new_depth_stencil_state(g_device, d));
 
     g_currentPipeline = NULL;
+    g_targetFormat = COLOR_FORMAT_RGBA8;  /* swapchain */
 }
 
 void graphics_postdraw() {
@@ -1750,6 +1829,7 @@ void graphics_drawmodel(Model *model, Material mat, const float *transform4x4) {
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
+    state.colorFormat = g_targetFormat;
     Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_FULL, state);
     if (p) graphics_bindpipeline(p);
 
@@ -1801,6 +1881,7 @@ void graphics_draw_instanced(Model *model, Material mat, const float *transforms
     if (!vertShader || !fragShader) return;
 
     RasterState state = {.depthWrite = 1, .depthTest = 1, .backfaceCulling = 1, .blendMode = BLEND_NONE};
+    state.colorFormat = g_targetFormat;
     Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_INSTANCE, state);
     if (p) graphics_bindpipeline(p);
 
@@ -1872,4 +1953,45 @@ void graphics_draw_buffers(Buffer vertexBuffer, Buffer indexBuffer, size_t index
                                               (NSUInteger)indexCount, MTLIndexTypeUInt32,
                                               ib->buffer, firstIndex * sizeof(uint32_t), 1);
     }
+}
+
+/* Fullscreen triangle for post-process passes. Positions are in clip space and
+ * the UVs follow from them, extending past the frame so the triangle covers it
+ * with one primitive and no vertex buffer upload per frame. Layout matches
+ * VERTEX_FORMAT_POS_UV: position (float3) then uv (float2). */
+static Buffer g_fullscreenVerts = NULL;
+
+void graphics_draw_fullscreen(Texture source, Shader vertShader, Shader fragShader,
+                              Material mat) {
+    if (!source || !vertShader || !fragShader || !g_currentEncoder) return;
+
+    if (!g_fullscreenVerts) {
+        static const float tri[3 * 5] = {
+            /* x, y, z,      u,  v */
+            -1.0f, -1.0f, 0.0f, 0.0f, 1.0f,
+             3.0f, -1.0f, 0.0f, 2.0f, 1.0f,
+            -1.0f,  3.0f, 0.0f, 0.0f, -1.0f
+        };
+        g_fullscreenVerts = graphics_createvertexbuffer(tri, sizeof(tri));
+        if (!g_fullscreenVerts) return;
+    }
+
+    /* No depth write or test: this is a 2D composite of the frame, drawn over
+     * an already-cleared target. */
+    RasterState state = {0};
+    state.colorFormat = g_targetFormat;
+    Pipeline p = graphics_createpipeline(vertShader, fragShader, VERTEX_FORMAT_POS_UV, state);
+    if (!p) return;
+    graphics_bindpipeline(p);
+
+    MetalBuffer *vb = (MetalBuffer *)g_fullscreenVerts;
+    metal_encoder_set_vertex_buffer(g_currentEncoder, vb->buffer, 0, 0);
+
+    if (mat) graphics_setmaterial(mat);
+
+    MetalTexture *src = (MetalTexture *)source;
+    metal_encoder_set_fragment_texture(g_currentEncoder, src->texture, 1);
+    metal_encoder_set_fragment_sampler_state(g_currentEncoder, g_clampSampler, 1);
+
+    metal_encoder_draw_primitives(g_currentEncoder, MTLPrimitiveTypeTriangle, 0, 3);
 }

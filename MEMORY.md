@@ -403,6 +403,31 @@ Two defects surfaced while verifying the merge, both pre-existing on this branch
 
 ---
 
+## Offscreen scene target and post-process pass (2026-11-15)
+
+The 3D scene drew straight to the swapchain, so a camera effect would have had to live inside every scene shader and would have worked from a frame whose highlights an 8-bit target had already clipped. The frame now goes through `src/postprocess.c`: the scene is rendered into an offscreen colour target, then composited into the swapchain by a fullscreen pass. Effects belong in that composite.
+
+- **`ColorFormat`** (`RGBA8`, `RGBA16F`, `RGBA32F`) and `RasterState.colorFormat`. A pipeline state is built for one attachment format and Metal rejects it in a pass with another, so `graphics_createpipeline()` keys its cache on the format. The engine's own draw calls (`graphics_drawmodel`, `graphics_draw_instanced`) take the format from the pass being recorded: `graphics_predraw()` and `graphics_beginpass()` track it in `g_targetFormat` (swapchain → `RGBA8`, offscreen → the first colour texture's format).
+- **`graphics_createtexture_target(w, h, format)`** creates a private texture that is both a render target and shader-readable. **`graphics_draw_fullscreen(source, vert, frag, mat)`** draws a backend-generated fullscreen triangle (clip-space positions, UVs derived from them) sampling `source` at slot 1 with a clamp-to-edge sampler — the default sampler repeats, and an effect that remaps coordinates reads past the frame edge, which would wrap the opposite edge in.
+- The framework calls `postprocess_begin()`/`postprocess_end()` around the 3D draws only, so the text overlay is composited after the effect: a lens effect must not distort the HUD. Text is drawn in the swapchain pass that the composite leaves open.
+- The target is re-created lazily when the drawable size changes, and `postprocess_begin()` does nothing while minimised (no drawable, zero-width target).
+- **Where the backend cannot do this** (Vulkan: it needs its own render pass and framebuffer for the offscreen target, the same missing piece that blocks the rest of that work) `graphics_createtexture_target()` returns NULL, init says so, and begin/end are no-ops — the frame is drawn straight to the swapchain exactly as before.
+
+### Verification, and why RGBA16F is not bit-exact
+
+`GAME_CAPTURE` at 1280×960, no effect enabled, against the pre-change baseline `721637dd`:
+
+| Scene target | Capture | Result |
+|---|---|---|
+| `RGBA32F` (`GAME_POSTPROCESS_FORMAT=32f`) | `721637dd` | byte-identical |
+| `RGBA16F` (default) | `8e3ca546` | 78,727 of 1,228,800 pixels differ by exactly one level, all terrain |
+
+32F matching exactly proves the path — pass, fullscreen draw, UV mapping, sampler, clear order — is lossless. The 16F difference is storage precision and nothing else: a half carries an 11-bit significand and an 8-bit swapchain step is 1/255, so where a shader value lands within a half-quantum of an 8-bit rounding boundary the composited frame rounds to the neighbouring level. The sky is untouched because it is an unmodified 8-bit gradient and therefore lands exactly on 8-bit values; the terrain is lit arithmetic and lands anywhere. `GAME_POSTPROCESS_FORMAT=32f` exists to keep that difference measurable. Both formats are byte-identical run to run.
+
+Live window: same scene, 82 FPS, overlay unaffected.
+
+---
+
 ## Rating: 9/10
 
 Solid foundations with clean module separation, mature abstraction layering, and a genuinely well-engineered job system. All P0 and P1 rendering pipeline defects have been fixed in both Metal and Vulkan backends -- the engine can now render 3D content with MVP transforms, has a proper uniform buffer binding API (UBO descriptor set in Vulkan, buffer binding in Metal), a working material system that packs uniforms into per-material GPU buffers on both backends, Vulkan runtime GLSL->SPIR-V compilation via shaderc with SPIR-V passthrough support, and text rendering fixes (Y-flip correction, glyph upload flush order). The Vulkan render pass now supports optional depth attachment for pipelines that don't need depth testing. Build system hardened for MSVC with consistent /MD runtime, CMP0091 propagation, and SPIRV-Tools static linking.

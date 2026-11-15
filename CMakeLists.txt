@@ -358,6 +358,7 @@ set(SOURCES
     src/model_assimp.cpp
     src/physics.c
     src/player.c
+    src/postprocess.c
     src/selftest.c
     src/scene.c
     src/text.c

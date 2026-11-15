@@ -2711,6 +2711,18 @@ void graphics_draw_buffers(Buffer vertexBuffer,
     vkCmdDrawIndexed(commandBuffers[imageIndex], (uint32_t)indexCount, 1, (uint32_t)firstIndex, 0, 0);
 }
 
+/* The fullscreen post-process draw needs a target to sample, and offscreen
+ * targets are unimplemented here (see graphics_createtexture_target), so there
+ * is nothing to composite yet. */
+void graphics_draw_fullscreen(Texture source, Shader vertShader, Shader fragShader,
+                              Material mat)
+{
+    (void)source;
+    (void)vertShader;
+    (void)fragShader;
+    (void)mat;
+}
+
 Material graphics_creatematerial(Shader shader)
 {
     GPUMaterial *material = (GPUMaterial *)calloc(1, sizeof(GPUMaterial));
@@ -3233,6 +3245,18 @@ Texture graphics_createtexture(Texture src)
     }
 
     return graphics_createtexture_rgba(1, 1, pixel);
+}
+
+/* Offscreen colour targets are not implemented on this backend yet: the scene
+ * pass needs its own render pass and framebuffer, which is the missing piece
+ * that blocks the rest of the Vulkan pipeline work. Callers get NULL and draw
+ * straight to the swapchain instead. */
+Texture graphics_createtexture_target(int width, int height, ColorFormat format)
+{
+    (void)width;
+    (void)height;
+    (void)format;
+    return NULL;
 }
 
 Texture graphics_createtexture_rgba(int width,

@@ -250,6 +250,24 @@ void graphics_draw_buffers(Buffer vertexBuffer,
     (void)transform4x4;
 }
 
+void graphics_draw_fullscreen(Texture source, Shader vertShader, Shader fragShader,
+                              Material mat)
+{
+    (void)source;
+    (void)vertShader;
+    (void)fragShader;
+    (void)mat;
+}
+
+void graphics_draw_fullscreen(Texture source, Shader vertShader, Shader fragShader,
+                              Material mat)
+{
+    (void)source;
+    (void)vertShader;
+    (void)fragShader;
+    (void)mat;
+}
+
 Buffer graphics_createvertexbuffer(const void *data, size_t size)
 {
     GPUBuffer *buffer = (GPUBuffer *)calloc(1, sizeof(GPUBuffer));
@@ -309,6 +327,14 @@ void graphics_binduniformbuffer(Buffer buf, unsigned slot)
 {
     (void)buf;
     (void)slot;
+}
+
+Texture graphics_createtexture_target(int width, int height, ColorFormat format)
+{
+    (void)width;
+    (void)height;
+    (void)format;
+    return NULL;
 }
 
 Texture graphics_createtexture(Texture src)
