@@ -17,11 +17,11 @@
 #include <glm/mat4x4.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-/* Forward declarations */
-/* Assimp stores bones per-mesh (aiMesh::mBones), not on the scene, and the
- * same skeleton is repeated across every mesh. Bones are therefore collected
- * into a unique-name table first; aiBone::mOffsetMatrix is the inverse bind
- * matrix, while the bone's local transform comes from the node hierarchy. */
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+/* The local pose evaluator uses a flattened, unique bone table. The imported
+ * scene-node representation is retained for the scene-node update API. */
 typedef struct {
     char **names;
     glm::mat4 *inverseBind;
@@ -32,8 +32,179 @@ typedef struct {
 static void model_processanimations(const struct aiScene *scene, Model *model,
                                     const BoneTable *table);
 
+/* Scene-node animation data structures. */
+typedef struct {
+    glm::vec3 position;
+    glm::quat rotation;
+    glm::vec3 scale;
+    float time;
+} NodeKeyframe;
+
+typedef struct {
+    NodeKeyframe *keyframes;
+    uint32_t keyframeCount;
+    char *nodeName;
+} AnimationChannel;
+
+typedef struct {
+    AnimationChannel *channels;
+    uint32_t channelCount;
+    float duration;
+    float ticksPerSecond;
+    char *name;
+} AnimationClip;
+
+typedef struct {
+    char *name;
+    int parentIndex;
+    glm::mat4 localTransform;
+    int boneIndex;
+} SceneNode;
 static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene *scene);
 static MaterialData model_processmaterial(const struct aiMaterial *aiMat);
+static int model_find_bone(Model *model, const char *name);
+static int model_find_node(SceneNode *nodes, uint32_t count, const char *name);
+
+static int model_find_bone(Model *model, const char *name)
+{
+    if (!model || !name) return -1;
+    for (uint32_t i = 0; i < model->boneCount; i++) {
+        if (model->boneNames[i] && strcmp(model->boneNames[i], name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int model_find_node(SceneNode *nodes, uint32_t count, const char *name)
+{
+    if (!nodes || !name) return -1;
+    for (uint32_t i = 0; i < count; i++) {
+        if (nodes[i].name && strcmp(nodes[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static float model_find_keyframe_index(const NodeKeyframe *keyframes, uint32_t count, float time, float *fraction)
+{
+    if (count == 0) {
+        *fraction = 0.0f;
+        return 0;
+    }
+    if (count == 1 || time <= keyframes[0].time) {
+        *fraction = 0.0f;
+        return 0;
+    }
+    if (time >= keyframes[count - 1].time) {
+        *fraction = 0.0f;
+        return count - 1;
+    }
+    for (uint32_t i = 0; i < count - 1; i++) {
+        if (time >= keyframes[i].time && time < keyframes[i + 1].time) {
+            float range = keyframes[i + 1].time - keyframes[i].time;
+            *fraction = (range > 0.0f) ? (time - keyframes[i].time) / range : 0.0f;
+            return i;
+        }
+    }
+    *fraction = 0.0f;
+    return count - 1;
+}
+
+static glm::vec3 model_lerp_vec3(const glm::vec3 &a, const glm::vec3 &b, float t)
+{
+    return a + t * (b - a);
+}
+
+static void model_sample_channel(const AnimationChannel *channel, float time,
+                                  glm::vec3 &pos, glm::quat &rot, glm::vec3 &scl)
+{
+    pos = channel->keyframes[0].position;
+    rot = channel->keyframes[0].rotation;
+    scl = channel->keyframes[0].scale;
+
+    for (uint32_t i = 0; i < channel->keyframeCount - 1; i++) {
+        if (time >= channel->keyframes[i].time && time < channel->keyframes[i + 1].time) {
+            float range = channel->keyframes[i + 1].time - channel->keyframes[i].time;
+            float frac = (range > 0.0f) ? (time - channel->keyframes[i].time) / range : 0.0f;
+            pos = model_lerp_vec3(channel->keyframes[i].position, channel->keyframes[i + 1].position, frac);
+            rot = glm::slerp(channel->keyframes[i].rotation, channel->keyframes[i + 1].rotation, frac);
+            scl = model_lerp_vec3(channel->keyframes[i].scale, channel->keyframes[i + 1].scale, frac);
+            return;
+        }
+    }
+}
+
+static void model_build_node_transforms(Model *model, int nodeIndex, const glm::mat4 &parentTransform)
+{
+    SceneNode *nodes = (SceneNode *)model->sceneNodes;
+    if (!nodes || nodeIndex < 0 || (uint32_t)nodeIndex >= model->sceneNodeCount) {
+        return;
+    }
+
+    SceneNode *node = &nodes[nodeIndex];
+
+    AnimationClip *clips = (AnimationClip *)model->animationData;
+    if (clips && model->animationIndex < model->animationCount) {
+        AnimationClip *clip = &clips[model->animationIndex];
+        for (uint32_t c = 0; c < clip->channelCount; c++) {
+            if (clip->channels[c].nodeName && node->name &&
+                strcmp(clip->channels[c].nodeName, node->name) == 0) {
+                glm::vec3 pos, scl;
+                glm::quat rot;
+                model_sample_channel(&clip->channels[c], model->animationTime, pos, rot, scl);
+
+                glm::mat4 T = glm::translate(glm::mat4(1.0f), pos);
+                glm::mat4 R = glm::mat4_cast(rot);
+                glm::mat4 S = glm::scale(glm::mat4(1.0f), scl);
+                node->localTransform = T * R * S;
+                break;
+            }
+        }
+    }
+
+    glm::mat4 globalTransform = parentTransform * node->localTransform;
+
+    if (node->boneIndex >= 0 && (uint32_t)node->boneIndex < model->boneCount) {
+        model->boneTransforms[node->boneIndex] = globalTransform * model->boneOffsets[node->boneIndex];
+    }
+
+    for (uint32_t i = 0; i < model->sceneNodeCount; i++) {
+        if (nodes[i].parentIndex == (int)nodeIndex) {
+            model_build_node_transforms(model, i, globalTransform);
+        }
+    }
+}
+
+static void model_free_clips(Model *model)
+{
+    AnimationClip *clips = (AnimationClip *)model->animationData;
+    if (!clips) return;
+
+    for (uint32_t a = 0; a < model->animationCount; a++) {
+        for (uint32_t c = 0; c < clips[a].channelCount; c++) {
+            free(clips[a].channels[c].keyframes);
+            free(clips[a].channels[c].nodeName);
+        }
+        free(clips[a].channels);
+        free(clips[a].name);
+    }
+    free(clips);
+    model->animationData = NULL;
+}
+
+static void model_free_nodes(Model *model)
+{
+    SceneNode *nodes = (SceneNode *)model->sceneNodes;
+    if (!nodes) return;
+
+    for (uint32_t i = 0; i < model->sceneNodeCount; i++) {
+        free(nodes[i].name);
+    }
+    free(nodes);
+    model->sceneNodes = NULL;
+}
 
 static int bonetable_find(const BoneTable *table, const char *name)
 {
@@ -267,6 +438,7 @@ static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene
         fprintf(stderr, "Failed to allocate memory for mesh\n");
         return NULL;
     }
+    memset(mesh, 0, sizeof(Mesh));
 
     /* Copy vertices */
     mesh->vertexCount = aiMesh->mNumVertices;
@@ -319,18 +491,11 @@ static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene
             mesh->vertices[i].bitangent = glm::vec3(0.0f, 1.0f, 0.0f);
         }
 
-        /* Skin weights. Default is bone 0 at full weight, which is the
-         * identity when a model has no skeleton. */
+        /* Initialize every vertex to the identity-bone fallback. The
+         * skeleton import pass below replaces these values with the correct
+         * bone indices and normalized weights. */
         mesh->vertices[i].boneIndices = glm::ivec4(0);
         mesh->vertices[i].boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
-
-        if (aiMesh->HasBones() && aiMesh->mNumBones > 0 && aiMesh->mBones[0]->mNumWeights > 0) {
-            const struct aiBone *bone = aiMesh->mBones[0];
-            for (unsigned w = 0; w < bone->mNumWeights && w < MAX_BONE_INFLUENCES; w++) {
-                mesh->vertices[i].boneIndices[w] = (int)bone->mWeights[w].mVertexId;
-                mesh->vertices[i].boneWeights[w] = (float)bone->mWeights[w].mWeight;
-            }
-        }
     }
 
     /* Copy indices */
@@ -370,6 +535,74 @@ static Mesh *model_processmesh(const struct aiMesh *aiMesh, const struct aiScene
         mesh->material.diffuseTexture = NULL;
         mesh->material.specularTexture = NULL;
         mesh->material.normalTexture = NULL;
+    }
+
+    /* Process bone data */
+    if (aiMesh->HasBones()) {
+        mesh->boneCount = aiMesh->mNumBones;
+
+        /* Temporary per-vertex bone accumulators */
+        uint32_t *tempBoneCounts = (uint32_t *)calloc(mesh->vertexCount, sizeof(uint32_t));
+        uint32_t **tempBoneIDs = (uint32_t **)calloc(mesh->vertexCount, sizeof(uint32_t *));
+        float **tempBoneWeights = (float **)calloc(mesh->vertexCount, sizeof(float *));
+
+        if (!tempBoneCounts || !tempBoneIDs || !tempBoneWeights) {
+            free(tempBoneCounts);
+            free(tempBoneIDs);
+            free(tempBoneWeights);
+            goto bone_cleanup;
+        }
+
+        for (uint32_t i = 0; i < mesh->vertexCount; i++) {
+            tempBoneIDs[i] = (uint32_t *)malloc(MAX_BONES_PER_VERTEX * sizeof(uint32_t));
+            tempBoneWeights[i] = (float *)malloc(MAX_BONES_PER_VERTEX * sizeof(float));
+            if (!tempBoneIDs[i] || !tempBoneWeights[i]) {
+                goto bone_cleanup;
+            }
+        }
+
+        for (uint32_t b = 0; b < aiMesh->mNumBones; b++) {
+            const struct aiBone *bone = aiMesh->mBones[b];
+            for (uint32_t w = 0; w < bone->mNumWeights; w++) {
+                uint32_t vid = bone->mWeights[w].mVertexId;
+                float weight = bone->mWeights[w].mWeight;
+                if (vid < mesh->vertexCount && tempBoneCounts[vid] < MAX_BONES_PER_VERTEX) {
+                    uint32_t idx = tempBoneCounts[vid];
+                    tempBoneIDs[vid][idx] = b;
+                    tempBoneWeights[vid][idx] = weight;
+                    tempBoneCounts[vid]++;
+                }
+            }
+        }
+
+        /* Pack into vertex attributes */
+        for (uint32_t i = 0; i < mesh->vertexCount; i++) {
+            uint32_t count = tempBoneCounts[i];
+            glm::uvec4 ids(0);
+            glm::vec4 weights(0.0f);
+            for (uint32_t j = 0; j < count && j < MAX_BONES_PER_VERTEX; j++) {
+                ids[j] = tempBoneIDs[i][j];
+                weights[j] = tempBoneWeights[i][j];
+            }
+            /* Normalize weights */
+            float sum = weights.x + weights.y + weights.z + weights.w;
+            if (sum > 0.0f) {
+                weights /= sum;
+            }
+            mesh->vertices[i].boneIDs = ids;
+            mesh->vertices[i].boneWeights = weights;
+        }
+
+bone_cleanup:
+        for (uint32_t i = 0; i < mesh->vertexCount; i++) {
+            free(tempBoneIDs ? tempBoneIDs[i] : NULL);
+            free(tempBoneWeights ? tempBoneWeights[i] : NULL);
+        }
+        free(tempBoneCounts);
+        free(tempBoneIDs);
+        free(tempBoneWeights);
+    } else {
+        mesh->boneCount = 0;
     }
 
     /* Initialize buffer pointers to NULL (to be allocated later by graphics system) */
@@ -464,6 +697,7 @@ Model *model_load(const char *filepath)
         aiReleaseImport(scene);
         return NULL;
     }
+    memset(model, 0, sizeof(Model));
 
     /* Set model name */
     model->name = (char *)malloc(strlen(filepath) + 1);
@@ -708,6 +942,37 @@ uint32_t model_get_mesh_count(const Model *model)
     return model->meshCount;
 }
 
+void model_update(Model *model, float deltaTime)
+{
+    if (!model || model->animationCount == 0 || !model->boneTransforms) return;
+
+    model->animationTime += deltaTime;
+    if (model->animationDuration > 0.0f) {
+        while (model->animationTime >= model->animationDuration) {
+            model->animationTime -= model->animationDuration;
+        }
+    }
+
+    for (uint32_t i = 0; i < model->boneCount; i++) {
+        model->boneTransforms[i] = glm::mat4(1.0f);
+    }
+
+    SceneNode *nodes = (SceneNode *)model->sceneNodes;
+    if (nodes) {
+        for (uint32_t i = 0; i < model->sceneNodeCount; i++) {
+            if (nodes[i].parentIndex == -1) {
+                model_build_node_transforms(model, i, glm::mat4(1.0f));
+            }
+        }
+    }
+}
+
+const float *model_get_bone_matrices(const Model *model)
+{
+    if (!model || !model->boneTransforms) return NULL;
+    return (const float *)model->boneTransforms;
+}
+
 uint32_t model_get_bone_count(const Model *model)
 {
     if (!model) return 0;
@@ -739,16 +1004,6 @@ int model_get_animation_info(const Model *model, uint32_t index, ModelAnimationI
 int model_is_skinned(const Model *model)
 {
     return model && model->boneCount > 0;
-}
-
-/* Flatten the hierarchy: world[i] = world[parent] * offset[i] */
-static void model_accumulate(Model *model, glm::mat4 *world)
-{
-    for (uint32_t i = 0; i < model->boneCount; i++) {
-        world[i] = (model->boneParent[i] >= 0)
-                 ? world[model->boneParent[i]] * model->boneOffset[i]
-                 : model->boneOffset[i];
-    }
 }
 
 int model_pose(Model *model, const ModelAnimation *clip, float time,
@@ -838,6 +1093,19 @@ int model_pose(Model *model, const ModelAnimation *clip, float time,
     return 1;
 }
 
+void model_set_animation(Model *model, uint32_t index)
+{
+    if (!model || index >= model->animationCount) return;
+    model->animationIndex = index;
+    model->animationTime = 0.0f;
+}
+
+const char *model_get_animation_name(const Model *model, uint32_t index)
+{
+    if (!model || index >= model->animationCount) return NULL;
+    return model->animationNames ? model->animationNames[index] : NULL;
+}
+
 void model_destroy(Model *model)
 {
     if (!model) {
@@ -870,6 +1138,7 @@ void model_destroy(Model *model)
         free(model->meshes);
     }
 
+    /* Free the hierarchy-based pose representation. */
     free(model->boneOffset);
     free(model->boneInverseBind);
     free(model->boneParent);
@@ -881,6 +1150,24 @@ void model_destroy(Model *model)
         }
         free(model->animations);
     }
+
+    /* Free the scene-node representation when it was populated. */
+    free(model->boneOffsets);
+    free(model->boneTransforms);
+    if (model->boneNames) {
+        for (uint32_t i = 0; i < model->boneCount; i++) {
+            free(model->boneNames[i]);
+        }
+        free(model->boneNames);
+    }
+    if (model->animationNames) {
+        for (uint32_t i = 0; i < model->animationCount; i++) {
+            free(model->animationNames[i]);
+        }
+        free(model->animationNames);
+    }
+    model_free_clips(model);
+    model_free_nodes(model);
 
     if (model->name) {
         free(model->name);

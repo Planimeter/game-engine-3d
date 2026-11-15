@@ -9,6 +9,7 @@
 #include "font.h"
 #include "image.h"
 #include "text.h"
+#include "model.h"
 #include "math_c.h"
 #include "camera.h"
 #include "physics.h"
@@ -21,6 +22,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#define realpath(rel, abs) _fullpath(abs, rel, 4096)
+#endif
 
 static Font *g_testFont = NULL;
 static Text *g_testText = NULL;
@@ -887,6 +893,11 @@ void framework_update(uint64_t deltaTime)
         g_camera.position[0] = eye[0];
         g_camera.position[1] = eye[1];
         g_camera.position[2] = eye[2];
+    }
+
+    /* Advance the test model's animation without replacing the game update. */
+    if (g_testModel) {
+        model_update(g_testModel, (float)deltaTime / 1000.0f);
     }
 }
 

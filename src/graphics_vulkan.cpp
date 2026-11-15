@@ -175,11 +175,19 @@ typedef struct {
     VkBuffer buffer;
     VmaAllocation allocation;
     size_t size;
+    /* Persistently mapped CPU pointer for uniform buffers, or NULL. */
+    void *persistentMap;
 } GPUBuffer;
 
 /* Global uniform buffer for transform matrices (matches Metal's g_uniformBuffer) */
 #define UNIFORM_BUFFER_SIZE 4096
 static GPUBuffer *g_uniformBuffer = NULL;
+
+/* Persistent staging buffer for texture uploads — reused across frames */
+static VkBuffer g_stagingBuffer = VK_NULL_HANDLE;
+static VmaAllocation g_stagingAllocation = VK_NULL_HANDLE;
+static void *g_stagingMap = NULL;
+static size_t g_stagingSize = 0;
 
 /* 34.2. WSI Surface */
 static VkSurfaceKHR surface;
@@ -254,7 +262,7 @@ static void graphics_createinstance()
     VkExtensionProperties* availableExtensions = (VkExtensionProperties*)malloc(extensionCount * sizeof(VkExtensionProperties));
     if (!availableExtensions) {
         fprintf(stderr, "Failed to allocate memory for extension properties\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     vkEnumerateInstanceExtensionProperties(NULL, &extensionCount, availableExtensions);
     
@@ -315,7 +323,7 @@ static void graphics_createinstance()
     result = vkCreateInstance(&createInfo, NULL, &instance);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create Vulkan instance: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
     volkLoadInstance(instance);
 }
@@ -330,17 +338,17 @@ static void graphics_enumeratephysicaldevices()
     // Validate device count
     if (physicalDeviceCount == 0) {
         fprintf(stderr, "No Vulkan physical devices found\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     if (physicalDeviceCount > 64) { // Reasonable upper bound
         fprintf(stderr, "Too many physical devices: %u\n", physicalDeviceCount);
-        exit(EXIT_FAILURE);
+        return;
     }
     
     physicalDevices = (VkPhysicalDevice *)malloc(sizeof(VkPhysicalDevice) * physicalDeviceCount);
     if (!physicalDevices) {
         fprintf(stderr, "Failed to allocate memory for physical devices\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     vkEnumeratePhysicalDevices(instance, &physicalDeviceCount, physicalDevices);
 }
@@ -353,13 +361,13 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     
     if (queueFamilyCount == 0) {
         fprintf(stderr, "No queue families found\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     VkQueueFamilyProperties *queueFamilies = (VkQueueFamilyProperties*)malloc(sizeof(VkQueueFamilyProperties) * queueFamilyCount);
     if (!queueFamilies) {
         fprintf(stderr, "Failed to allocate memory for queue families\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     vkGetPhysicalDeviceQueueFamilyProperties(physDevice, &queueFamilyCount, queueFamilies);
@@ -384,7 +392,7 @@ static uint32_t graphics_findqueuefamily(VkPhysicalDevice physDevice)
     
     if (selectedFamily == UINT32_MAX) {
         fprintf(stderr, "Failed to find suitable queue family\n");
-        exit(EXIT_FAILURE);
+        return UINT32_MAX;
     }
     
     return selectedFamily;
@@ -398,13 +406,15 @@ static VkSurfaceFormatKHR graphics_choosesurfaceformat(VkPhysicalDevice physDevi
     
     if (formatCount == 0) {
         fprintf(stderr, "No surface formats available\n");
-        exit(EXIT_FAILURE);
+        VkSurfaceFormatKHR fallback = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        return fallback;
     }
     
     VkSurfaceFormatKHR *availableFormats = (VkSurfaceFormatKHR*)malloc(sizeof(VkSurfaceFormatKHR) * formatCount);
     if (!availableFormats) {
         fprintf(stderr, "Failed to allocate memory for surface formats\n");
-        exit(EXIT_FAILURE);
+        VkSurfaceFormatKHR fallback = {VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+        return fallback;
     }
     
     vkGetPhysicalDeviceSurfaceFormatsKHR(physDevice, surface, &formatCount, availableFormats);
@@ -459,7 +469,7 @@ static VkFormat graphics_finddepthformat(VkPhysicalDevice physDevice)
     }
 
     fprintf(stderr, "Failed to find supported depth format\n");
-    exit(EXIT_FAILURE);
+    return VK_FORMAT_UNDEFINED;
 }
 
 /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap5.html#devsandqueues-device-creation */
@@ -541,7 +551,7 @@ static void graphics_createdevice()
     result = vkCreateDevice(physicalDevices[0], &createInfo, NULL, &device);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create Vulkan device: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
     volkLoadDevice(device);
 }
@@ -604,7 +614,7 @@ static void graphics_createallocator()
     VkResult result = vmaCreateAllocator(&allocatorCreateInfo, &allocator);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create VMA allocator: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -624,13 +634,13 @@ static void graphics_createcommandpools()
     // Validate swapchain image count before allocation
     if (swapchainImageCount == 0 || swapchainImageCount > 16) {
         fprintf(stderr, "Invalid swapchain image count for command pools: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     commandPools = (VkCommandPool *)malloc(sizeof(VkCommandPool) * swapchainImageCount);
     if (!commandPools) {
         fprintf(stderr, "Failed to allocate memory for command pools\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap6.html#VkCommandPoolCreateInfo */
@@ -647,7 +657,7 @@ static void graphics_createcommandpools()
             }
             free(commandPools);
             commandPools = NULL;
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -662,13 +672,13 @@ static void graphics_allocatecommandbuffers()
     // Validate swapchain image count before allocation
     if (swapchainImageCount == 0 || swapchainImageCount > 16) {
         fprintf(stderr, "Invalid swapchain image count for command buffers: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     commandBuffers = (VkCommandBuffer *)malloc(sizeof(VkCommandBuffer) * swapchainImageCount);
     if (!commandBuffers) {
         fprintf(stderr, "Failed to allocate memory for command buffers\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -688,7 +698,7 @@ static void graphics_allocatecommandbuffers()
             }
             free(commandBuffers);
             commandBuffers = NULL;
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -703,7 +713,7 @@ static void graphics_createfences()
     fences = (VkFence *)malloc(sizeof(VkFence) * swapchainImageCount);
     if (!fences) {
         fprintf(stderr, "Failed to allocate memory for fences\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap7.html#VkFenceCreateInfo */
@@ -715,7 +725,7 @@ static void graphics_createfences()
         result = vkCreateFence(device, &createInfo, NULL, &fences[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create fence %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 
@@ -794,7 +804,7 @@ static void graphics_createbindlessdescriptors()
     result = vkCreateDescriptorSetLayout(device, &layoutInfo, NULL, &bindlessDescriptorSetLayout);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create bindless descriptor set layout: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-pools */
@@ -810,7 +820,7 @@ static void graphics_createbindlessdescriptors()
     result = vkCreateDescriptorPool(device, &poolInfo, NULL, &bindlessDescriptorPool);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create bindless descriptor pool: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap14.html#descriptorsets-allocation */
@@ -971,7 +981,7 @@ static void graphics_createrenderpass()
     VkResult result = vkCreateRenderPass(device, &createInfo, NULL, &renderPass);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create render pass: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -985,7 +995,7 @@ static void graphics_createframebuffers()
     framebuffers = (VkFramebuffer *)malloc(sizeof(VkFramebuffer) * swapchainImageCount);
     if (!framebuffers) {
         fprintf(stderr, "Failed to allocate memory for framebuffers\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -1002,7 +1012,7 @@ static void graphics_createframebuffers()
         result = vkCreateFramebuffer(device, &createInfo, NULL, &framebuffers[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create framebuffer %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -1293,7 +1303,7 @@ static void graphics_creategraphicspipeline()
     VkResult result = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &pipelineLayout);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create pipeline layout: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     createInfo.stageCount                       = 2;
@@ -1318,7 +1328,7 @@ static void graphics_creategraphicspipeline()
     result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &createInfo, NULL, &graphicsPipeline);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create graphics pipeline: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     graphics_destroyshader(vertShader);
@@ -1332,7 +1342,7 @@ static void graphics_createsurface()
 {
     if (!window_vulkan_createsurface(instance, &surface)) {
         fprintf(stderr, "Failed to create Vulkan surface\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -1382,7 +1392,7 @@ static void graphics_createswapchain()
     VkResult result = vkCreateSwapchainKHR(device, &createInfo, NULL, &swapchain);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create swapchain: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     if (oldSwapchain != VK_NULL_HANDLE)
@@ -1406,17 +1416,17 @@ static void graphics_getswapchainimages()
     // Validate swapchain image count
     if (swapchainImageCount == 0) {
         fprintf(stderr, "No swapchain images available\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     if (swapchainImageCount > 16) {
         fprintf(stderr, "Too many swapchain images: %u\n", swapchainImageCount);
-        exit(EXIT_FAILURE);
+        return;
     }
     
     swapchainImages = (VkImage *)malloc(sizeof(VkImage) * swapchainImageCount);
     if (!swapchainImages) {
         fprintf(stderr, "Failed to allocate memory for swapchain images\n");
-        exit(EXIT_FAILURE);
+        return;
     }
     
     vkGetSwapchainImagesKHR(device, swapchain, &swapchainImageCount, swapchainImages);
@@ -1454,7 +1464,7 @@ static void graphics_createdepthresources()
     result = vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage, &depthAllocation, NULL);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create depth image: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 
     viewInfo.image = depthImage;
@@ -1469,7 +1479,7 @@ static void graphics_createdepthresources()
     result = vkCreateImageView(device, &viewInfo, NULL, &depthImageView);
     if (result != VK_SUCCESS) {
         fprintf(stderr, "Failed to create depth image view: %d\n", result);
-        exit(EXIT_FAILURE);
+        return;
     }
 }
 
@@ -1508,7 +1518,7 @@ static void graphics_createimageviews()
     swapchainImageViews = (VkImageView *)malloc(sizeof(VkImageView) * swapchainImageCount);
     if (!swapchainImageViews) {
         fprintf(stderr, "Failed to allocate memory for swapchain image views\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     for (i = 0; i < swapchainImageCount; i++)
@@ -1518,7 +1528,7 @@ static void graphics_createimageviews()
         result = vkCreateImageView(device, &createInfo, NULL, &swapchainImageViews[i]);
         if (result != VK_SUCCESS) {
             fprintf(stderr, "Failed to create image view %zu: %d\n", i, result);
-            exit(EXIT_FAILURE);
+            return;
         }
     }
 }
@@ -1685,7 +1695,7 @@ void graphics_init()
     g_shaderc_compiler = shaderc_compiler_initialize();
     if (!g_shaderc_compiler) {
         fprintf(stderr, "Failed to initialize shaderc compiler\n");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     /* https://registry.khronos.org/vulkan/specs/1.3-extensions/html/chap9.html */
@@ -1741,6 +1751,28 @@ void graphics_init()
 Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
                              const char **defines, size_t defineCount)
 {
+    /* SPIR-V magic number: 0x07230203. If the input is already compiled SPIR-V,
+     * skip shaderc and use it directly. */
+    static const uint32_t SPIRV_MAGIC = 0x07230203;
+    int isSPIRV = (size >= 4 && size % 4 == 0 &&
+                   *(const uint32_t *)source == SPIRV_MAGIC);
+
+    VkShaderModule shaderModule;
+
+    if (isSPIRV) {
+        /* Input is already SPIR-V — use directly */
+        VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+        createInfo.codeSize = size;
+        createInfo.pCode    = (const uint32_t *)source;
+
+        VkResult vkResult = vkCreateShaderModule(device, &createInfo, NULL, &shaderModule);
+        if (vkResult != VK_SUCCESS) {
+            fprintf(stderr, "Failed to create shader module from SPIR-V: %d\n", vkResult);
+            return NULL;
+        }
+        return shaderModule;
+    }
+
     /* Map ShaderStage to shaderc_shader_kind */
     shaderc_shader_kind kind;
     switch (stage) {
@@ -1816,7 +1848,6 @@ Shader graphics_createshader(ShaderStage stage, const char *source, size_t size,
     }
 
     /* Create VkShaderModule from compiled SPIR-V */
-    VkShaderModule shaderModule;
     VkShaderModuleCreateInfo createInfo = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
     createInfo.codeSize = shaderc_result_get_length(result);
     createInfo.pCode    = (const uint32_t *)shaderc_result_get_bytes(result);
@@ -2057,6 +2088,8 @@ static VkCommandBuffer graphics_begin_one_time_commands()
     return commandBuffer;
 }
 
+static VkFence g_uploadFence = VK_NULL_HANDLE;
+
 static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
 {
     VkSubmitInfo submit = { VK_STRUCTURE_TYPE_SUBMIT_INFO };
@@ -2071,8 +2104,14 @@ static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    if (g_uploadFence == VK_NULL_HANDLE) {
+        VkFenceCreateInfo fi = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+        vkCreateFence(device, &fi, NULL, &g_uploadFence);
+    }
+
+    vkQueueSubmit(queue, 1, &submit, g_uploadFence);
+    vkWaitForFences(device, 1, &g_uploadFence, VK_TRUE, UINT64_MAX);
+    vkResetFences(device, 1, &g_uploadFence);
 
     vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
 }
@@ -3026,14 +3065,16 @@ Buffer graphics_createuniformbuffer(size_t size)
 
     buffer->size = size;
     graphics_trackbuffer(buffer);
+
+    /* Persistently map the uniform buffer — avoids map/unmap per update */
+    vmaMapMemory(allocator, buffer->allocation, &buffer->persistentMap);
+
     return buffer;
 }
 
 void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
 {
     GPUBuffer *buffer = (GPUBuffer *)buf;
-    void *mappedData;
-    VkResult result;
     size_t copySize;
 
     if (!buffer || !data || size == 0) {
@@ -3041,13 +3082,18 @@ void graphics_updatebuffer(Buffer buf, const void *data, size_t size)
     }
 
     copySize = size < buffer->size ? size : buffer->size;
-    result = vmaMapMemory(allocator, buffer->allocation, &mappedData);
-    if (result != VK_SUCCESS) {
-        return;
-    }
 
-    memcpy(mappedData, data, copySize);
-    vmaUnmapMemory(allocator, buffer->allocation);
+    if (buffer->persistentMap) {
+        memcpy(buffer->persistentMap, data, copySize);
+    } else {
+        void *mappedData;
+        VkResult result = vmaMapMemory(allocator, buffer->allocation, &mappedData);
+        if (result != VK_SUCCESS) {
+            return;
+        }
+        memcpy(mappedData, data, copySize);
+        vmaUnmapMemory(allocator, buffer->allocation);
+    }
 }
 
 void graphics_destroybuffer(Buffer buf)
@@ -3055,6 +3101,11 @@ void graphics_destroybuffer(Buffer buf)
     GPUBuffer *buffer = (GPUBuffer *)buf;
     if (!buffer) {
         return;
+    }
+
+    if (buffer->persistentMap && allocator != VK_NULL_HANDLE) {
+        vmaUnmapMemory(allocator, buffer->allocation);
+        buffer->persistentMap = NULL;
     }
 
     if (buffer->buffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
@@ -3296,15 +3347,9 @@ void graphics_updatetexture(Texture tex,
                             const unsigned char *pixels)
 {
     GPUTexture *texture = (GPUTexture *)tex;
-    VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
-    VmaAllocationCreateInfo allocInfo = { 0 };
-    VmaAllocation stagingAllocation = VK_NULL_HANDLE;
-    VkBuffer stagingBuffer = VK_NULL_HANDLE;
     VkCommandBuffer commandBuffer;
     VkBufferImageCopy region = { 0 };
-    VkResult result;
     size_t pixelSize;
-    void *mappedData = NULL;
 
     if (!texture || !pixels || width <= 0 || height <= 0) {
         return;
@@ -3314,29 +3359,37 @@ void graphics_updatetexture(Texture tex,
     }
 
     pixelSize = (size_t)width * (size_t)height * 4;
-    bufferInfo.size = pixelSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
-    allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+    /* Grow persistent staging buffer if needed */
+    if (pixelSize > g_stagingSize) {
+        VkBufferCreateInfo bufferInfo = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+        VmaAllocationCreateInfo allocInfo = { 0 };
 
-    result = vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, NULL);
-    if (result != VK_SUCCESS) {
-        return;
+        if (g_stagingBuffer != VK_NULL_HANDLE) {
+            vmaUnmapMemory(allocator, g_stagingAllocation);
+            vmaDestroyBuffer(allocator, g_stagingBuffer, g_stagingAllocation);
+        }
+
+        g_stagingSize = pixelSize < 256 * 1024 ? 256 * 1024 : pixelSize;
+        bufferInfo.size = g_stagingSize;
+        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        allocInfo.usage = VMA_MEMORY_USAGE_AUTO;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT;
+
+        if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo,
+                            &g_stagingBuffer, &g_stagingAllocation, NULL) != VK_SUCCESS) {
+            g_stagingSize = 0;
+            return;
+        }
+        vmaMapMemory(allocator, g_stagingAllocation, &g_stagingMap);
     }
 
-    if (vmaMapMemory(allocator, stagingAllocation, &mappedData) != VK_SUCCESS) {
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-        return;
-    }
-
-    memcpy(mappedData, pixels, pixelSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
+    memcpy(g_stagingMap, pixels, pixelSize);
 
     commandBuffer = graphics_begin_one_time_commands();
     if (commandBuffer == VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
         return;
     }
 
@@ -3354,7 +3407,7 @@ void graphics_updatetexture(Texture tex,
     region.imageExtent.height = (uint32_t)height;
     region.imageExtent.depth = 1;
 
-    vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
+    vkCmdCopyBufferToImage(commandBuffer, g_stagingBuffer, texture->image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     graphics_transition_image(commandBuffer, texture->image,
@@ -3362,8 +3415,6 @@ void graphics_updatetexture(Texture tex,
                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     graphics_end_one_time_commands(commandBuffer);
-
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 }
 
 void graphics_destroytexture(Texture tex)
@@ -3933,8 +3984,23 @@ void graphics_shutdown(void)
         graphics_freeallpipelines();
         graphics_freealltextures();
 
+        if (g_stagingBuffer != VK_NULL_HANDLE && allocator != VK_NULL_HANDLE) {
+            vmaUnmapMemory(allocator, g_stagingAllocation);
+            vmaDestroyBuffer(allocator, g_stagingBuffer, g_stagingAllocation);
+            g_stagingBuffer = VK_NULL_HANDLE;
+            g_stagingAllocation = VK_NULL_HANDLE;
+            g_stagingMap = NULL;
+            g_stagingSize = 0;
+        }
+
         graphics_destroysemaphores();
         graphics_destroyfences();
+
+        if (g_uploadFence != VK_NULL_HANDLE) {
+            vkDestroyFence(device, g_uploadFence, NULL);
+            g_uploadFence = VK_NULL_HANDLE;
+        }
+
         graphics_freecommandbuffers();
         graphics_destroycommandpools();
 
@@ -4017,6 +4083,53 @@ static void graphics_get_vertex_input_state(VertexFormat format,
             attrDescs[6].location = 6;
             attrDescs[6].format = VK_FORMAT_R32G32B32A32_SINT;
             attrDescs[6].offset = offsetof(Vertex, boneIndices);
+            break;
+
+        case VERTEX_FORMAT_SKINNED:
+            bindingDesc->stride = sizeof(Vertex);
+            *attrCount = 7;
+
+            // Position
+            attrDescs[0].binding = 0;
+            attrDescs[0].location = 0;
+            attrDescs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[0].offset = offsetof(Vertex, position);
+
+            // Normal
+            attrDescs[1].binding = 0;
+            attrDescs[1].location = 1;
+            attrDescs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[1].offset = offsetof(Vertex, normal);
+
+            // Tangent
+            attrDescs[2].binding = 0;
+            attrDescs[2].location = 2;
+            attrDescs[2].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[2].offset = offsetof(Vertex, tangent);
+
+            // Bitangent
+            attrDescs[3].binding = 0;
+            attrDescs[3].location = 3;
+            attrDescs[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+            attrDescs[3].offset = offsetof(Vertex, bitangent);
+
+            // TexCoords
+            attrDescs[4].binding = 0;
+            attrDescs[4].location = 4;
+            attrDescs[4].format = VK_FORMAT_R32G32_SFLOAT;
+            attrDescs[4].offset = offsetof(Vertex, texCoords);
+
+            // BoneIDs
+            attrDescs[5].binding = 0;
+            attrDescs[5].location = 5;
+            attrDescs[5].format = VK_FORMAT_R32G32B32A32_UINT;
+            attrDescs[5].offset = offsetof(Vertex, boneIDs);
+
+            // BoneWeights
+            attrDescs[6].binding = 0;
+            attrDescs[6].location = 6;
+            attrDescs[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+            attrDescs[6].offset = offsetof(Vertex, boneWeights);
             break;
 
         case VERTEX_FORMAT_POS_UV:

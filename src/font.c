@@ -22,6 +22,7 @@ extern JobSystem *g_jobSystem;
 #define FONT_GLYPH_PADDING 1
 #define INITIAL_BATCH_CAPACITY 64
 #define MAX_LINES_PER_TEXT 256
+#define GLYPH_HASH_SIZE 512
 
 static unsigned g_atlas_evictions;
 
@@ -102,6 +103,9 @@ struct Font {
     Glyph *glyphs;
     size_t glyph_count;
     size_t glyph_capacity;
+
+    /* Open-addressed hash table storing glyph array indices plus one. Zero is empty. */
+    size_t glyph_hash[GLYPH_HASH_SIZE];
     Buffer vertex_buffer;
     Buffer index_buffer;
     size_t vertex_capacity;
@@ -189,8 +193,50 @@ static int font_load_text_shaders()
 #endif
 }
 
+static inline uint32_t glyph_hash(uint32_t id)
+{
+    return (id * 2654435761u) % GLYPH_HASH_SIZE;
+}
+
+static void font_hash_insert(Font *font, size_t glyph_index)
+{
+    uint32_t h = glyph_hash(font->glyphs[glyph_index].glyph_id);
+
+    for (size_t probe = 0; probe < GLYPH_HASH_SIZE; probe++) {
+        size_t slot = (h + probe) % GLYPH_HASH_SIZE;
+        if (font->glyph_hash[slot] == 0) {
+            font->glyph_hash[slot] = glyph_index + 1;
+            return;
+        }
+    }
+    /* The table can saturate; font_find_glyph retains a linear fallback. */
+}
+
+static void font_rebuild_glyph_hash(Font *font)
+{
+    memset(font->glyph_hash, 0, sizeof(font->glyph_hash));
+    for (size_t i = 0; i < font->glyph_count; i++) {
+        font_hash_insert(font, i);
+    }
+}
+
 static Glyph *font_find_glyph(Font *font, uint32_t glyph_id)
 {
+    uint32_t h = glyph_hash(glyph_id);
+
+    for (size_t probe = 0; probe < GLYPH_HASH_SIZE; probe++) {
+        size_t slot = (h + probe) % GLYPH_HASH_SIZE;
+        size_t entry = font->glyph_hash[slot];
+        if (entry == 0) {
+            break;
+        }
+        if (entry <= font->glyph_count &&
+            font->glyphs[entry - 1].glyph_id == glyph_id) {
+            return &font->glyphs[entry - 1];
+        }
+    }
+
+    /* Also covers a saturated table without retaining pointers into realloc storage. */
     for (size_t i = 0; i < font->glyph_count; i++) {
         if (font->glyphs[i].glyph_id == glyph_id) {
             return &font->glyphs[i];
@@ -213,6 +259,7 @@ static Glyph *font_add_glyph(Font *font, uint32_t glyph_id)
 
     memset(&font->glyphs[font->glyph_count], 0, sizeof(Glyph));
     font->glyphs[font->glyph_count].glyph_id = glyph_id;
+    font_hash_insert(font, font->glyph_count);
     return &font->glyphs[font->glyph_count++];
 }
 
@@ -295,6 +342,7 @@ static void font_evict_atlas(Font *font, int atlas_index)
         font->glyphs[write++] = font->glyphs[i];
     }
     font->glyph_count = write;
+    font_rebuild_glyph_hash(font);
 
     if (atlas->pixels) {
         memset(atlas->pixels, 0, (size_t)atlas->width * atlas->height * 4);
@@ -386,6 +434,7 @@ static Glyph *font_load_glyph(Font *font, uint32_t glyph_id)
 
         if (!rgba) {
             font->glyph_count--;
+            font_rebuild_glyph_hash(font);
             return NULL;
         }
 
@@ -434,7 +483,7 @@ static Glyph *font_get_glyph(Font *font, uint32_t glyph_id)
 static void font_pixel_to_ndc(float px, float py, int w, int h, float *out_x, float *out_y)
 {
     *out_x = (px / (float)w) * 2.0f - 1.0f;
-    *out_y = 1.0f - (py / (float)h) * 2.0f;
+    *out_y = (py / (float)h) * 2.0f - 1.0f;
 }
 
 static void font_build_vertices(Font *font,
