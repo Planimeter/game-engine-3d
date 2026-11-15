@@ -3359,6 +3359,23 @@ Texture graphics_createtexture_rgba(int width,
      * same thing Metal's generateMipmapsForTexture does. */
     for (uint32_t level = 1; level < mipLevels; level++) {
         VkImageBlit blit = { 0 };
+        uint32_t srcW = (uint32_t)width;
+        uint32_t srcH = (uint32_t)height;
+        uint32_t dstW = (uint32_t)width;
+        uint32_t dstH = (uint32_t)height;
+
+        /* Halve per level with a floor of 1 rather than shifting the base
+         * extent: a texture whose sides differ by more than 2^level (a font
+         * atlas) would otherwise ask for a zero-sized destination, which is
+         * invalid and trips VUID-vkCmdBlitImage-dstOffsets-12518. */
+        for (uint32_t l = 1; l < level; l++) {
+            srcW = srcW > 1 ? srcW >> 1 : 1;
+            srcH = srcH > 1 ? srcH >> 1 : 1;
+        }
+        for (uint32_t l = 0; l < level; l++) {
+            dstW = dstW > 1 ? dstW >> 1 : 1;
+            dstH = dstH > 1 ? dstH >> 1 : 1;
+        }
 
         graphics_transition_mips(commandBuffer, texture->image, level - 1, 1,
                                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -3372,15 +3389,15 @@ Texture graphics_createtexture_rgba(int width,
         blit.srcSubresource.mipLevel = level - 1;
         blit.srcSubresource.baseArrayLayer = 0;
         blit.srcSubresource.layerCount = 1;
-        blit.srcOffsets[1].x = (int32_t)((uint32_t)width >> (level - 1));
-        blit.srcOffsets[1].y = (int32_t)((uint32_t)height >> (level - 1));
+        blit.srcOffsets[1].x = (int32_t)srcW;
+        blit.srcOffsets[1].y = (int32_t)srcH;
         blit.srcOffsets[1].z = 1;
         blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blit.dstSubresource.mipLevel = level;
         blit.dstSubresource.baseArrayLayer = 0;
         blit.dstSubresource.layerCount = 1;
-        blit.dstOffsets[1].x = (int32_t)((uint32_t)width >> level);
-        blit.dstOffsets[1].y = (int32_t)((uint32_t)height >> level);
+        blit.dstOffsets[1].x = (int32_t)dstW;
+        blit.dstOffsets[1].y = (int32_t)dstH;
         blit.dstOffsets[1].z = 1;
 
         vkCmdBlitImage(commandBuffer,
