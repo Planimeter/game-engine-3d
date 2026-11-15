@@ -443,6 +443,17 @@ Verification, `GAME_CAPTURE` at 1280×960:
 
 Repeat runs at either setting are byte-identical. The live window runs the effect at 98 FPS with the caption sharp, since the overlay is composited after the effect.
 
+### The failing "walks at walk speed" check is a measurement bug (2026-11-15)
+
+Neither a stale threshold nor wrong movement. `walkSpeed` is 9.0 (`player.c:55`) and the check wants 7–11 u/s (`selftest.c:198`), which is the right band. The character really does walk at 9: instrumented at the end of the phase, horizontal `|v|` reads **9.00** against `walkSpeed` 9.00. What is wrong is how the check measures:
+
+- **The character is integrated twice per self-test frame.** `framework_update()` calls `player_update()` with the real (zero) input, then `selftest_update()` calls it again with the test's input. Measured distance over the 90-frame phase was 15.013 units in 1.0000 s = 15.01 u/s, not 9.
+- **The divisor is one frame's `dt`, not the phase's elapsed time.** `speed = dist / (SELFTEST_FRAMES * dt)` uses the `dt` of the last frame only. In the probe that was 0.008 s against a real 0.0111 s per frame, so 0.72 s stood in for 1.00 s and 15.01 u/s was reported as **20.85**.
+
+Both errors inflate the reading, and the second scales with frame rate, which is why Metal and Vulkan report different numbers (22.31 vs 19.68 in the merge notes) and why the failure looks like sprint speed against a walk threshold. Sprint and the other phases share the same distortion, so their thresholds (0.05-unit float, >12 for sprint) still pass.
+
+Not fixed here: doing it properly means either not double-integrating during the self test or reporting against summed elapsed time, which is a change to the harness rather than a threshold. The value is recorded so the next person does not re-diagnose it.
+
 ---
 
 ## Rating: 9/10
