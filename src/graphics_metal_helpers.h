@@ -78,6 +78,9 @@ void   metal_blit_copy_texture_to_buffer(void *enc, void *tex, void *buf,
                                          unsigned long width,
                                          unsigned long height,
                                          unsigned long slice);
+/* Fill the lower mip levels from level 0 with a GPU blit. Textures created
+ * with mipmaps keep their whole chain valid after any level-0 upload. */
+void   metal_texture_generate_mipmaps(void *tex);
 
 #ifdef __cplusplus
 }

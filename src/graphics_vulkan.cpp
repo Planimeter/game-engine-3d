@@ -147,6 +147,8 @@ static VkDescriptorSetLayout bindlessDescriptorSetLayout;
 /* One set per swapchain image, for the same reason as uboDescriptorSets. */
 static VkDescriptorSet bindlessDescriptorSets[MAX_FRAMES_IN_FLIGHT];
 static int g_bindlessUpdateAfterBind;
+/* Whether the device reports samplerAnisotropy, so textures can ask for it. */
+static int g_samplerAnisotropy;
 
 static void graphics_flushdescriptorwrites(void);
 /* UBO descriptor set (set 1) — bindless uniform buffers for transform + material data */
@@ -516,8 +518,15 @@ static void graphics_createdevice()
     supportedFeatures.pNext = &supported12;
     vkGetPhysicalDeviceFeatures2(physicalDevices[0], &supportedFeatures);
 
-    VkPhysicalDeviceVulkan12Features vulkan12Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-    vulkan12Features.descriptorIndexing = supported12.descriptorIndexing;
+    /* Anisotropic filtering: the ground plane is sampled at grazing angles
+     * and trilinear alone smears it into the distance. Queried like the rest,
+     * since an unsupported feature makes vkCreateDevice invalid. */
+    VkPhysicalDeviceFeatures coreFeatures = supportedFeatures.features;
+    coreFeatures.samplerAnisotropy = supportedFeatures.features.samplerAnisotropy;
+    g_samplerAnisotropy = supportedFeatures.features.samplerAnisotropy == VK_TRUE;
+    createInfo.pEnabledFeatures = &coreFeatures;
+
+    VkPhysicalDeviceVulkan12Features vulkan12Features = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };    vulkan12Features.descriptorIndexing = supported12.descriptorIndexing;
     vulkan12Features.shaderSampledImageArrayNonUniformIndexing = supported12.shaderSampledImageArrayNonUniformIndexing;
     vulkan12Features.descriptorBindingPartiallyBound = supported12.descriptorBindingPartiallyBound;
     vulkan12Features.descriptorBindingVariableDescriptorCount = supported12.descriptorBindingVariableDescriptorCount;
@@ -2019,6 +2028,7 @@ typedef struct {
     VmaAllocation allocation;
     int width;
     int height;
+    uint32_t mipLevels;
 } GPUTexture;
 
 typedef struct {
@@ -2116,12 +2126,42 @@ static void graphics_end_one_time_commands(VkCommandBuffer commandBuffer)
     vkFreeCommandBuffers(device, pool, 1, &commandBuffer);
 }
 
+/* Barrier for a single mip range with explicit access masks, used while
+ * building a mip chain (the levels transition independently). */
+static void graphics_transition_mips(VkCommandBuffer commandBuffer,
+                                     VkImage image,
+                                     uint32_t baseLevel,
+                                     uint32_t levelCount,
+                                     VkImageLayout oldLayout,
+                                     VkImageLayout newLayout,
+                                     VkAccessFlags srcAccess,
+                                     VkAccessFlags dstAccess,
+                                     VkPipelineStageFlags srcStage,
+                                     VkPipelineStageFlags dstStage)
+{
+    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = baseLevel;
+    barrier.subresourceRange.levelCount = levelCount;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = srcAccess;
+    barrier.dstAccessMask = dstAccess;
+
+    vkCmdPipelineBarrier(commandBuffer, srcStage, dstStage, 0, 0, NULL, 0, NULL, 1, &barrier);
+}
+
 static void graphics_transition_image(VkCommandBuffer commandBuffer,
                                       VkImage image,
                                       VkImageLayout oldLayout,
                                       VkImageLayout newLayout)
-{
-    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+{    VkImageMemoryBarrier barrier = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
     VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
@@ -3225,6 +3265,19 @@ Texture graphics_createtexture_rgba(int width,
     texture->width = width;
     texture->height = height;
 
+    /* Full mip chain. The ground is minified hard at the horizon, so a single
+     * level aliases into shimmer; the chain is generated below with
+     * vkCmdBlitImage. */
+    uint32_t mipLevels = 1;
+    {
+        uint32_t extent = (uint32_t)(width > height ? width : height);
+        while (extent > 1) {
+            extent >>= 1;
+            mipLevels++;
+        }
+    }
+    texture->mipLevels = mipLevels;
+
     pixelSize = (size_t)width * (size_t)height * 4;
     bufferInfo.size = pixelSize;
     bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
@@ -3256,12 +3309,13 @@ Texture graphics_createtexture_rgba(int width,
     imageInfo.extent.width = (uint32_t)width;
     imageInfo.extent.height = (uint32_t)height;
     imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = mipLevels;
     imageInfo.arrayLayers = 1;
     imageInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                      VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -3283,9 +3337,12 @@ Texture graphics_createtexture_rgba(int width,
         return NULL;
     }
 
-    graphics_transition_image(commandBuffer, texture->image,
-                              VK_IMAGE_LAYOUT_UNDEFINED,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    graphics_transition_mips(commandBuffer, texture->image, 0, mipLevels,
+                             VK_IMAGE_LAYOUT_UNDEFINED,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                             VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT);
 
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;
@@ -3298,9 +3355,57 @@ Texture graphics_createtexture_rgba(int width,
     vkCmdCopyBufferToImage(commandBuffer, stagingBuffer, texture->image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    graphics_transition_image(commandBuffer, texture->image,
-                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                              VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    /* Downsample level 0 into each following level with a linear blit, the
+     * same thing Metal's generateMipmapsForTexture does. */
+    for (uint32_t level = 1; level < mipLevels; level++) {
+        VkImageBlit blit = { 0 };
+
+        graphics_transition_mips(commandBuffer, texture->image, level - 1, 1,
+                                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_ACCESS_TRANSFER_WRITE_BIT,
+                                 VK_ACCESS_TRANSFER_READ_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = level - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.srcOffsets[1].x = (int32_t)((uint32_t)width >> (level - 1));
+        blit.srcOffsets[1].y = (int32_t)((uint32_t)height >> (level - 1));
+        blit.srcOffsets[1].z = 1;
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = level;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[1].x = (int32_t)((uint32_t)width >> level);
+        blit.dstOffsets[1].y = (int32_t)((uint32_t)height >> level);
+        blit.dstOffsets[1].z = 1;
+
+        vkCmdBlitImage(commandBuffer,
+                       texture->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       texture->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        graphics_transition_mips(commandBuffer, texture->image, level - 1, 1,
+                                 VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                                 VK_ACCESS_TRANSFER_READ_BIT,
+                                 VK_ACCESS_SHADER_READ_BIT,
+                                 VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                 VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+    }
+
+    /* The top level was never used as a blit source, so hand it to shaders
+     * here; levels below it were transitioned inside the loop. */
+    graphics_transition_mips(commandBuffer, texture->image, mipLevels - 1, 1,
+                             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                             VK_ACCESS_TRANSFER_WRITE_BIT,
+                             VK_ACCESS_SHADER_READ_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
 
     graphics_end_one_time_commands(commandBuffer);
 
@@ -3311,7 +3416,7 @@ Texture graphics_createtexture_rgba(int width,
     viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
@@ -3324,10 +3429,16 @@ Texture graphics_createtexture_rgba(int width,
 
     samplerInfo.magFilter = VK_FILTER_LINEAR;
     samplerInfo.minFilter = VK_FILTER_LINEAR;
+    /* Trilinear minification plus anisotropy: the ground is sampled at grazing
+     * angles across 512 units, where bilinear with one level aliases. */
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.minLod = 0.0f;
+    samplerInfo.maxLod = (float)mipLevels;
+    samplerInfo.maxAnisotropy = g_samplerAnisotropy ? 16.0f : 1.0f;
+    samplerInfo.anisotropyEnable = g_samplerAnisotropy ? VK_TRUE : VK_FALSE;
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.maxAnisotropy = 1.0f;
 
     result = vkCreateSampler(device, &samplerInfo, NULL, &texture->sampler);
     if (result != VK_SUCCESS) {

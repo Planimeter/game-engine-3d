@@ -56,9 +56,24 @@ void   metal_texture_update_region(void *tex,
     [cb release];
 }
 
-void  *metal_buffer_get_contents(void *buf) {
-    return [(id<MTLBuffer>)buf contents];
+void   metal_texture_generate_mipmaps(void *tex) {
+    id<MTLTexture> texture = (id<MTLTexture>)tex;
+    if (!texture || texture.mipmapLevelCount < 2) {
+        return;
+    }
+
+    id<MTLDevice> dev = texture.device;
+    id<MTLCommandBuffer> cb = [[dev newCommandQueue] commandBuffer];
+    id<MTLBlitCommandEncoder> blit = [cb blitCommandEncoder];
+    [blit generateMipmapsForTexture:texture];
+    [blit endEncoding];
+    [cb commit];
+    [cb waitUntilCompleted];
+    [cb release];
 }
+
+void  *metal_buffer_get_contents(void *buf) {
+    return [(id<MTLBuffer>)buf contents];}
 
 void   metal_buffer_update(void *buf, const void *data, size_t size) {
     memcpy([(id<MTLBuffer>)buf contents], data, size);

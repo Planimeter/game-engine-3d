@@ -46,6 +46,7 @@ struct MetalTexture {
     id<MTLTexture> texture;
     int width;
     int height;
+    int mipmapped;
 };
 
 // Global state
@@ -596,10 +597,14 @@ void graphics_binduniformbuffer(Buffer buf, unsigned slot) {
 Texture graphics_createtexture(Texture src) { return src; }
 
 Texture graphics_createtexture_rgba(int width, int height, const unsigned char *pixels) {
+    /* Mipmapped: the ground plane is minified hard at the horizon, and a
+     * single level turns that into shimmer instead of ground. One level is
+     * all a 1x1 placeholder needs, so tiny textures stay cheap. */
+    int mipmapped = (width > 1 || height > 1);
     MTLTextureDescriptor *desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm
                                                                                      width:width
                                                                                     height:height
-                                                                                    mipmapped:NO];
+                                                                                    mipmapped:(mipmapped ? YES : NO)];
     desc.usage = MTLTextureUsageShaderRead;
     desc.storageMode = MTLStorageModePrivate;  /* Blit encoder handles upload, no CPU access needed */
 
@@ -613,10 +618,17 @@ Texture graphics_createtexture_rgba(int width, int height, const unsigned char *
                                     pixels, (unsigned long)(width * 4));
     }
 
+    /* Level 0 is the only level filled above; derive the rest once here so
+     * sampling minified never reads uninitialised mips. */
+    if (mipmapped) {
+        metal_texture_generate_mipmaps(tex);
+    }
+
     MetalTexture *mt = (MetalTexture *)calloc(1, sizeof(MetalTexture));
     mt->texture = tex;
     mt->width = width;
     mt->height = height;
+    mt->mipmapped = mipmapped;
 
     if (g_textureCount >= g_textureCapacity) {
         g_textureCapacity = g_textureCapacity ? g_textureCapacity * 2 : 16;
@@ -636,6 +648,12 @@ void graphics_updatetexture(Texture tex, int x, int y, int width, int height, co
     metal_texture_update_region(t, (unsigned long)x, (unsigned long)y,
                                 (unsigned long)width, (unsigned long)height,
                                 pixels, (unsigned long)bpr);
+
+    /* A partial upload only touches level 0, so the chain above it is stale
+     * until it is regenerated. */
+    if (mt->mipmapped) {
+        metal_texture_generate_mipmaps(t);
+    }
 }
 
 void graphics_destroytexture(Texture tex) {
@@ -971,6 +989,13 @@ void graphics_init() {
     MTLSamplerDescriptor *sampDesc = [[MTLSamplerDescriptor alloc] init];
     sampDesc.minFilter = MTLSamplerMinMagFilterLinear;
     sampDesc.magFilter = MTLSamplerMinMagFilterLinear;
+    /* Trilinear: without a mip filter the minified ground samples level 0 and
+     * aliases, which is what the horizon used to look like. Anisotropy keeps
+     * the ground from smearing into the distance at grazing angles. */
+    sampDesc.mipFilter = MTLSamplerMipFilterLinear;
+    sampDesc.lodMinClamp = 0.0f;
+    sampDesc.lodMaxClamp = 16.0f;
+    sampDesc.maxAnisotropy = 16;
     sampDesc.sAddressMode = MTLSamplerAddressModeRepeat;
     sampDesc.tAddressMode = MTLSamplerAddressModeRepeat;
     g_defaultSampler = [g_device newSamplerStateWithDescriptor:sampDesc];

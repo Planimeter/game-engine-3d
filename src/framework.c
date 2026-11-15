@@ -689,9 +689,11 @@ void framework_load(int argc, char *argv[])
                 }
             }
 
-            /* A fixed time of day, so the sky and sun direction do not depend
-             * on how long the process has been up. */
-            g_timeOfDay = 0.30f;
+            /* Mid-morning daylight, not sunset. Body cameras shoot in
+             * daylight, and a low sun puts everything in the highlight roll-off
+             * where white balance and bloom cannot be judged. elevation is
+             * sin((t - 0.25) * 2pi), so 0.42 is ~61 degrees up. */
+            g_timeOfDay = 0.42f;
             framework_compute_sun(g_sunDirection);
             framework_update_sky_gradient();
             g_skyGradientJustCreated = 0;

@@ -174,13 +174,14 @@ void *tilemap_build_mesh(const TileMapConfig *config)
             float *v = &verts[((size_t)j * vertsPerSide + i) * TILEMAP_VERTEX_FLOATS];
             v[0] = x;  v[1] = h;  v[2] = z;              /* position */
             v[3] = 0.0f; v[4] = 1.0f; v[5] = 0.0f;      /* normal, +Y */
-            /* UVs in world units, not 0..1 across the map. A single 0..1 span
-             * would stretch one texel over 512 units and read as a flat wash,
-             * which is exactly what a green plane looks like. Samplers are set
-             * to repeat, so world-unit UVs tile the ground texture at a fixed
-             * physical size instead. */
-            v[6] = x;
-            v[7] = z;
+            /* UVs in world units, divided by the desired texture repeat size.
+             * A repeat every 8 units puts ~32 texels of the 256px ground
+             * texture on each world unit: fine detail underfoot, and a mip
+             * chain that can resolve it at the horizon. At one repeat per
+             * world unit the plane carried 512 repeats and aliased into
+             * per-pixel noise beyond a few metres. */
+            v[6] = x * 0.125f;
+            v[7] = z * 0.125f;
             v[8] = 1.0f; v[9] = 0.0f; v[10] = 0.0f;      /* tangent +X */
             v[11] = 0.0f; v[12] = 0.0f; v[13] = 1.0f;    /* bitangent +Z */
             v[14] = 1.0f; v[15] = 0.0f; v[16] = 0.0f; v[17] = 0.0f;
