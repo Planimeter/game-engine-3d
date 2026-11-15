@@ -482,8 +482,13 @@ static Glyph *font_get_glyph(Font *font, uint32_t glyph_id)
 
 static void font_pixel_to_ndc(float px, float py, int w, int h, float *out_x, float *out_y)
 {
+    /* Pixel origin is top-left and y grows downward, so NDC y has to be
+     * measured from the bottom. Both backends' text shaders expect this
+     * GL-style y-up clip space: Vulkan's vertex shader negates y on the way
+     * out, and Metal's takes it as is. Emitting the pixel y unchanged put
+     * the text along the bottom edge, with each glyph mirrored. */
     *out_x = (px / (float)w) * 2.0f - 1.0f;
-    *out_y = (py / (float)h) * 2.0f - 1.0f;
+    *out_y = 1.0f - (py / (float)h) * 2.0f;
 }
 
 static void font_build_vertices(Font *font,

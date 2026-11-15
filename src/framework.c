@@ -1173,19 +1173,20 @@ void framework_draw(void)
                       0.0f, 0.0f, 0.0f, 0.0f);
         }
 
-        /* Self test report, replacing the controls while it runs. The checks
-         * are the reason to look at the screen during a run, so they take the
-         * space rather than being appended under the help text. */
-        if (g_selftestActive) {
-            float ty = 30.0f;
-            for (int i = 0; i < HELP_LINE_COUNT; i++) {
-                text_set(g_helpText[i], i < HELP_LINE_COUNT - 1
-                         ? selftest_line(&g_selftest, i)
-                         : selftest_status(&g_selftest));
-                text_draw(g_helpText[i], 8.0f, ty, 0.0f, 1.0f, 1.0f,
-                          0.0f, 0.0f, 0.0f, 0.0f);
-                ty += 18.0f;
-            }
+    }
+
+    /* Self test report, replacing the controls while it runs. The checks are
+     * the reason to look at the screen during a run, so they take the space
+     * rather than being appended under the help text. */
+    if (g_selftestActive) {
+        float ty = 30.0f;
+        for (int i = 0; i < HELP_LINE_COUNT; i++) {
+            text_set(g_helpText[i], i < HELP_LINE_COUNT - 1
+                     ? selftest_line(&g_selftest, i)
+                     : selftest_status(&g_selftest));
+            text_draw(g_helpText[i], 8.0f, ty, 0.0f, 1.0f, 1.0f,
+                      0.0f, 0.0f, 0.0f, 0.0f);
+            ty += 18.0f;
         }
     }
     font_end_batch(g_testFont);
